@@ -1,0 +1,1692 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>L&C 应用商店</title>
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --primary-light: #eff6ff;
+      --secondary: #64748b;
+      --success: #10b981;
+      --danger: #ef4444;
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --border: #e2e8f0;
+      --text: #1e293b;
+      --text-muted: #64748b;
+      --shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.04);
+      --shadow-md: 0 4px 6px -1px rgba(0,0,0,.10), 0 2px 4px -1px rgba(0,0,0,.06);
+      --shadow-lg: 0 10px 15px -3px rgba(0,0,0,.10), 0 4px 6px -2px rgba(0,0,0,.05);
+      --radius: 12px;
+      --radius-sm: 8px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ===== 顶部导航 ===== */
+    .header {
+      background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 50%, #3b82f6 100%);
+      padding: 0 24px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 2px 20px rgba(37,99,235,.4);
+    }
+    .header-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      height: 64px;
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: #fff;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 18px;
+      white-space: nowrap;
+    }
+    .logo svg { width: 28px; height: 28px; }
+    .header-title {
+      color: rgba(255,255,255,.85);
+      font-size: 13px;
+      margin-left: 2px;
+    }
+
+    /* ===== 主体布局 ===== */
+    .layout {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px 24px 48px;
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      gap: 24px;
+      align-items: start;
+    }
+
+    /* ===== 侧边栏 ===== */
+    .sidebar {
+      background: var(--card-bg);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      position: sticky;
+      top: 80px;
+    }
+    .sidebar-header {
+      padding: 14px 16px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      background: #f8fafc;
+    }
+    .sidebar-menu { padding: 8px; }
+    .menu-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: all .15s;
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 500;
+      user-select: none;
+    }
+    .menu-item:hover { background: var(--primary-light); color: var(--primary); }
+    .menu-item.active {
+      background: var(--primary);
+      color: #fff;
+      box-shadow: 0 2px 8px rgba(37,99,235,.35);
+    }
+    .menu-item .menu-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-size: 16px;
+    }
+    .menu-item.active .menu-icon { background: rgba(255,255,255,.2); }
+    .menu-item:not(.active) .menu-icon { background: #f1f5f9; }
+    .menu-item:not(.active):hover .menu-icon { background: var(--primary-light); }
+    .menu-badge {
+      margin-left: auto;
+      background: rgba(37,99,235,.12);
+      color: var(--primary);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 7px;
+      border-radius: 20px;
+      min-width: 22px;
+      text-align: center;
+    }
+    .menu-item.active .menu-badge { background: rgba(255,255,255,.25); color: #fff; }
+
+    /* ===== 内容区 ===== */
+    .content { min-width: 0; }
+    .content-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .content-title {
+      font-size: 20px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .content-title span { font-size: 22px; }
+    .content-meta {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+    .refresh-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 14px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      cursor: pointer;
+      transition: all .15s;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+    .refresh-btn:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-light); }
+    .refresh-btn.loading svg { animation: spin .8s linear infinite; }
+
+    /* ===== 视图切换按钮 ===== */
+    .view-toggle {
+      display: flex;
+      gap: 2px;
+      background: #f1f5f9;
+      border-radius: var(--radius-sm);
+      padding: 3px;
+      border: 1px solid var(--border);
+    }
+    .view-btn {
+      width: 30px;
+      height: 28px;
+      border: none;
+      background: none;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-muted);
+      transition: all .15s;
+    }
+    .view-btn:hover { color: var(--primary); background: #fff; }
+    .view-btn.active { background: #fff; color: var(--primary); box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+    .toolbar-right { display: flex; align-items: center; gap: 8px; }
+
+    /* ===== 文件网格（卡片模式）===== */
+    .file-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 16px;
+    }
+    /* 列表模式 */
+    .file-grid.list-view {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    /* 分组标题在列表模式下占全宽 */
+    .file-grid.list-view .folder-section-title {
+      grid-column: unset;
+      margin-top: 8px;
+    }
+
+    /* ===== 卡片模式 ===== */
+    .file-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      cursor: pointer;
+      transition: all .18s;
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      position: relative;
+      overflow: hidden;
+    }
+    .file-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--primary), #60a5fa);
+      opacity: 0;
+      transition: opacity .18s;
+    }
+    .file-card:hover {
+      border-color: #93c5fd;
+      box-shadow: var(--shadow-lg);
+      transform: translateY(-2px);
+    }
+    .file-card:hover::before { opacity: 1; }
+    .file-card-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .file-icon-wrap {
+      width: 48px;
+      height: 48px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-size: 24px;
+      background: linear-gradient(135deg, #eff6ff, #dbeafe);
+    }
+    .file-icon-wrap.folder {
+      background: linear-gradient(135deg, #fef9c3, #fde68a);
+    }
+    /* 卡片模式文件名：最多3行，超出省略 */
+    .file-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      line-height: 1.5;
+      word-break: break-all;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      flex: 1;
+    }
+    .file-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .file-size {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-weight: 500;
+      color: var(--primary);
+      background: var(--primary-light);
+      padding: 3px 8px;
+      border-radius: 20px;
+      white-space: nowrap;
+    }
+    .file-date { font-size: 11px; color: var(--text-muted); }
+    .folder-badge {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 20px;
+      background: #fef9c3;
+      color: #92400e;
+      font-weight: 600;
+    }
+
+    /* ===== 列表模式行 ===== */
+    .list-view .file-card {
+      flex-direction: row;
+      align-items: center;
+      padding: 10px 14px;
+      gap: 0;
+      border-radius: var(--radius-sm);
+    }
+    .list-view .file-card::before { display: none; }
+    .list-view .file-card:hover { transform: none; background: #f8fafc; }
+    .list-view .file-card-header {
+      flex: 1;
+      min-width: 0;
+      align-items: center;
+      gap: 10px;
+    }
+    .list-view .file-icon-wrap {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+    /* 列表模式文件名：完整显示，允许换行 */
+    .list-view .file-name {
+      display: block;
+      -webkit-line-clamp: unset;
+      overflow: visible;
+      white-space: normal;
+      word-break: break-all;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .list-view .file-meta {
+      flex-shrink: 0;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+      margin-left: 16px;
+      min-width: 90px;
+    }
+    .list-view .file-date { font-size: 11px; }
+    /* 列表模式骨架屏 */
+    .list-view .skeleton-card {
+      flex-direction: row;
+      align-items: center;
+      padding: 10px 14px;
+      border-radius: var(--radius-sm);
+    }
+    .list-view .sk-bottom { display: none; }
+    .list-view .sk-row { flex: 1; }
+
+    /* ===== 骨架屏 ===== */
+    .skeleton {
+      background: linear-gradient(90deg, #f0f4f8 25%, #e8edf2 37%, #f0f4f8 63%);
+      background-size: 400% 100%;
+      animation: shimmer 1.4s ease infinite;
+      border-radius: 6px;
+    }
+    @keyframes shimmer {
+      0% { background-position: 100% 50%; }
+      100% { background-position: 0 50%; }
+    }
+    .skeleton-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      box-shadow: var(--shadow);
+    }
+    .sk-row { display: flex; gap: 12px; align-items: center; }
+    .sk-icon { width: 48px; height: 48px; border-radius: 10px; flex-shrink: 0; }
+    .sk-lines { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+    .sk-line { height: 12px; }
+    .sk-line.w80 { width: 80%; }
+    .sk-line.w50 { width: 50%; }
+    .sk-bottom { display: flex; justify-content: space-between; align-items: center; }
+    .sk-pill { height: 22px; width: 60px; border-radius: 20px; }
+
+    /* ===== 空状态 ===== */
+    .empty-state {
+      grid-column: 1 / -1;
+      text-align: center;
+      padding: 64px 24px;
+      color: var(--text-muted);
+    }
+    .empty-state .empty-icon { font-size: 56px; margin-bottom: 16px; }
+    .empty-state h3 { font-size: 16px; font-weight: 600; margin-bottom: 6px; color: var(--text); }
+    .empty-state p { font-size: 14px; }
+
+    /* ===== 错误提示 ===== */
+    .error-banner {
+      grid-column: 1 / -1;
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      color: #991b1b;
+      padding: 14px 18px;
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* ===== 详情模态框 ===== */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15,23,42,.6);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .15s;
+    }
+    .modal-overlay.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .modal {
+      background: var(--card-bg);
+      border-radius: 16px;
+      box-shadow: 0 25px 50px rgba(0,0,0,.25);
+      width: 100%;
+      max-width: 560px;
+      max-height: 90vh;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+      transform: scale(.96) translateY(8px);
+      transition: transform .15s cubic-bezier(.2, 0, 0, 1);
+    }
+    .modal-overlay.open .modal { transform: scale(1) translateY(0); }
+    .modal-header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 20px 20px 0;
+    }
+    .modal-file-icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      flex-shrink: 0;
+      background: linear-gradient(135deg, #eff6ff, #dbeafe);
+    }
+    .modal-title { font-size: 16px; font-weight: 700; word-break: break-all; line-height: 1.4; }
+    .modal-subtitle { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
+    .modal-close {
+      margin-left: auto;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-muted);
+      transition: all .15s;
+      flex-shrink: 0;
+      align-self: flex-start;
+    }
+    .modal-close:hover { background: #f1f5f9; color: var(--text); }
+    .modal-body { padding: 20px; }
+    .info-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .info-item {
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 12px 14px;
+    }
+    .info-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--text-muted);
+      margin-bottom: 5px;
+    }
+    .info-value { font-size: 14px; font-weight: 600; color: var(--text); word-break: break-all; }
+    .info-item.full { grid-column: 1 / -1; }
+    .download-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 100%;
+      padding: 13px;
+      background: linear-gradient(135deg, var(--primary), #3b82f6);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius-sm);
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .15s;
+      box-shadow: 0 4px 12px rgba(37,99,235,.35);
+      text-decoration: none;
+    }
+    .download-btn:hover {
+      background: linear-gradient(135deg, var(--primary-hover), #2563eb);
+      box-shadow: 0 6px 16px rgba(37,99,235,.45);
+      transform: translateY(-1px);
+    }
+    .download-btn:active { transform: translateY(0); }
+    .loading-spinner {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 48px;
+      gap: 14px;
+    }
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid #e2e8f0;
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-text { font-size: 14px; color: var(--text-muted); }
+    .copy-url-wrap {
+      margin-top: 10px;
+      display: flex;
+      gap: 8px;
+    }
+    .copy-url-input {
+      flex: 1;
+      padding: 9px 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      color: var(--text-muted);
+      background: #f8fafc;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      outline: none;
+    }
+    .copy-btn {
+      padding: 9px 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--card-bg);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .15s;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+    .copy-btn:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-light); }
+    .copy-btn.copied { border-color: var(--success); color: var(--success); background: #f0fdf4; }
+
+    /* ===== 面包屑导航 ===== */
+    .breadcrumb {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 4px;
+      font-size: 13px;
+      margin-top: 4px;
+    }
+    .breadcrumb-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      color: var(--text-muted);
+    }
+    .breadcrumb-item a {
+      color: var(--primary);
+      cursor: pointer;
+      text-decoration: none;
+      font-weight: 500;
+      padding: 2px 4px;
+      border-radius: 4px;
+      transition: background .12s;
+    }
+    .breadcrumb-item a:hover { background: var(--primary-light); }
+    .breadcrumb-item.current { color: var(--text); font-weight: 600; }
+    .breadcrumb-sep { color: #cbd5e1; font-size: 12px; }
+    .back-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--card-bg);
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all .15s;
+      margin-right: 6px;
+    }
+    .back-btn:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-light); }
+
+    /* ===== 折叠面板（子文件夹） ===== */
+    .folder-section { margin-top: 16px; }
+    .folder-section-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: .07em;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .folder-section-title::before {
+      content: '';
+      display: block;
+      width: 3px;
+      height: 14px;
+      background: var(--primary);
+      border-radius: 2px;
+    }
+
+    /* ===== 分页 ===== */
+    .pagination {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      margin-top: 24px;
+      flex-wrap: wrap;
+    }
+    .page-btn {
+      min-width: 36px;
+      height: 36px;
+      padding: 0 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--card-bg);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all .15s;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .page-btn:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-light); }
+    .page-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); box-shadow: 0 2px 6px rgba(37,99,235,.3); }
+    .page-btn:disabled { opacity: .4; cursor: not-allowed; }
+    .page-info { font-size: 13px; color: var(--text-muted); padding: 0 8px; }
+
+    /* ===== 预览区域 ===== */
+    .preview-wrap {
+      margin-top: 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+    }
+    .preview-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 14px;
+      background: #f8fafc;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+    .preview-toolbar span { display: flex; align-items: center; gap: 5px; }
+    .preview-close-btn {
+      width: 22px; height: 22px;
+      border: none; background: none;
+      cursor: pointer; color: var(--text-muted);
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 4px; transition: background .12s;
+    }
+    .preview-close-btn:hover { background: #e2e8f0; color: var(--text); }
+    .preview-body {
+      max-height: 420px;
+      overflow-y: auto;
+      background: #fff;
+    }
+    /* TXT 预览 */
+    .preview-txt {
+      padding: 16px;
+      font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.7;
+      color: var(--text);
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    /* Markdown 预览 */
+    .preview-md {
+      padding: 16px 20px;
+      font-size: 14px;
+      line-height: 1.8;
+      color: var(--text);
+    }
+    .preview-md h1,.preview-md h2,.preview-md h3 { font-weight: 700; margin: 1em 0 .4em; color: var(--text); }
+    .preview-md h1 { font-size: 20px; border-bottom: 2px solid var(--border); padding-bottom: 6px; }
+    .preview-md h2 { font-size: 17px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+    .preview-md h3 { font-size: 15px; }
+    .preview-md p { margin: .6em 0; }
+    .preview-md a { color: var(--primary); text-decoration: none; }
+    .preview-md a:hover { text-decoration: underline; }
+    .preview-md code {
+      background: #f1f5f9; padding: 2px 6px; border-radius: 4px;
+      font-family: 'SF Mono', Consolas, monospace; font-size: 12px;
+    }
+    .preview-md pre {
+      background: #1e293b; color: #e2e8f0; padding: 14px 16px;
+      border-radius: 8px; overflow-x: auto; margin: .8em 0;
+    }
+    .preview-md pre code { background: none; padding: 0; color: inherit; font-size: 13px; }
+    .preview-md blockquote {
+      border-left: 3px solid var(--primary); margin: .8em 0;
+      padding: 6px 12px; background: var(--primary-light); color: var(--text-muted);
+      border-radius: 0 6px 6px 0;
+    }
+    .preview-md ul,.preview-md ol { padding-left: 20px; margin: .6em 0; }
+    .preview-md li { margin: .3em 0; }
+    .preview-md table { border-collapse: collapse; width: 100%; margin: .8em 0; font-size: 13px; }
+    .preview-md th,.preview-md td { border: 1px solid var(--border); padding: 7px 12px; }
+    .preview-md th { background: #f8fafc; font-weight: 600; }
+    .preview-md img { max-width: 100%; border-radius: 6px; }
+    /* MP4 预览 */
+    .preview-video {
+      width: 100%;
+      max-height: 380px;
+      display: block;
+      background: #000;
+    }
+    /* 图片预览 */
+    .preview-img-wrap {
+      padding: 12px;
+      text-align: center;
+      background: #f8fafc;
+    }
+    .preview-img {
+      max-width: 100%;
+      max-height: 380px;
+      border-radius: 8px;
+      object-fit: contain;
+      box-shadow: var(--shadow-md);
+      cursor: zoom-in;
+      transition: opacity .15s;
+    }
+    .preview-img:hover { opacity: .88; }
+    /* ===== Lightbox 放大层 ===== */
+    .lightbox {
+      position: fixed;
+      inset: 0;
+      z-index: 2000;
+      background: rgba(0,0,0,.92);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .2s;
+      cursor: zoom-out;
+    }
+    .lightbox.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .lightbox img {
+      max-width: 100%;
+      max-height: 100%;
+      border-radius: 10px;
+      object-fit: contain;
+      box-shadow: 0 8px 40px rgba(0,0,0,.6);
+      transform: scale(.95);
+      transition: transform .2s cubic-bezier(.2,0,0,1);
+      cursor: default;
+      user-select: none;
+    }
+    .lightbox.open img { transform: scale(1); }
+    .lightbox-close {
+      position: absolute;
+      top: 16px;
+      right: 20px;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: rgba(255,255,255,.15);
+      border: none;
+      color: #fff;
+      font-size: 20px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background .15s;
+      z-index: 1;
+    }
+    .lightbox-close:hover { background: rgba(255,255,255,.3); }
+    .lightbox-caption {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: rgba(255,255,255,.7);
+      font-size: 12px;
+      white-space: nowrap;
+      max-width: 90%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      pointer-events: none;
+    }
+    /* 预览按钮 */
+    .preview-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 100%;
+      padding: 11px;
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .15s;
+      color: var(--text-muted);
+      margin-top: 10px;
+    }
+    .preview-btn:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-light); }
+    .preview-loading {
+      display: flex; align-items: center; justify-content: center;
+      gap: 10px; padding: 32px; color: var(--text-muted); font-size: 13px;
+    }
+
+    /* ===== 响应式 ===== */
+    @media (max-width: 768px) {
+      .layout { grid-template-columns: 1fr; padding: 16px; }
+      .sidebar { position: static; }
+      .sidebar-menu { display: flex; gap: 6px; padding: 10px; overflow-x: auto; }
+      .menu-item { flex-direction: column; gap: 4px; padding: 10px; min-width: 90px; text-align: center; font-size: 12px; }
+      .menu-item .menu-icon { width: 36px; height: 36px; }
+      .menu-badge { margin: 0; }
+      .file-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+      .info-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+  <!-- Marked.js for Markdown rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+</head>
+<body>
+
+<!-- 顶部导航 -->
+<header class="header">
+  <div class="header-inner">
+    <a class="logo" href="#">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
+      </svg>
+      LC 应用商店
+    </a>
+    <span class="header-title">· 车载 APK 资源库</span>
+  </div>
+</header>
+
+<!-- 主体 -->
+<div class="layout">
+  <!-- 侧边栏 -->
+  <aside class="sidebar">
+    <div class="sidebar-header">资源分类</div>
+    <nav class="sidebar-menu" id="sidebarMenu">
+      <div class="menu-item active" data-path="/CarMax/地图导航" onclick="switchCategory(this)">
+        <div class="menu-icon">🗺️</div>
+        <span>地图导航</span>
+        <span class="menu-badge" id="badge-0">-</span>
+      </div>
+      <div class="menu-item" data-path="/CarMax/实用工具" onclick="switchCategory(this)">
+        <div class="menu-icon">🔧</div>
+        <span>实用工具</span>
+        <span class="menu-badge" id="badge-1">-</span>
+      </div>
+    </nav>
+  </aside>
+
+  <!-- 内容区 -->
+  <main class="content">
+    <div class="content-header">
+      <div>
+        <div class="content-title" id="contentTitle">
+          <span>🗺️</span><span>地图导航</span>
+        </div>
+        <div id="breadcrumbWrap" style="margin-top:6px;display:flex;align-items:center;flex-wrap:wrap;gap:4px;"></div>
+        <div class="content-meta" id="contentMeta">加载中...</div>
+      </div>
+      <div class="toolbar-right">
+        <!-- 视图切换 -->
+        <div class="view-toggle">
+          <button class="view-btn active" id="btnGrid" title="卡片视图" onclick="setView('grid')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+          </button>
+          <button class="view-btn" id="btnList" title="列表视图" onclick="setView('list')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+          </button>
+        </div>
+        <!-- 刷新 -->
+        <button class="refresh-btn" id="refreshBtn" onclick="refreshList()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+          </svg>
+          刷新
+        </button>
+      </div>
+    </div>
+
+    <!-- 文件列表 -->
+    <div class="file-grid" id="fileGrid"></div>
+
+    <!-- 分页 -->
+    <div class="pagination" id="pagination"></div>
+  </main>
+</div>
+
+<!-- 详情模态框 -->
+<div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">
+  <div class="modal" id="modal">
+    <div id="modalContent"></div>
+  </div>
+</div>
+
+<script>
+  // ===== API 通道 =====
+  // 主通道：Cloudflare Worker 反代 AList（稳定、带 CORS）；公共 CORS 中转仅作兜底
+  const WORKER_BASE = 'https://maoyan-monitor.728729140.workers.dev';
+  const API_BASE = WORKER_BASE + '/store/api';
+  const PER_PAGE = 20;
+
+  // ===== API 备用通道（公共 CORS 中转 + 上游 GET 接口）=====
+  // 上游 AList 接口仅有 http（https 证书无效且响应不带 CORS 头），
+  // Worker 反代不可用时，自动降级为「公共 CORS 中转 + 上游 GET 接口」，
+  // 多个中转按序探测、失败自动切换，可用中转缓存在 localStorage。
+  const UPSTREAM_API = 'http://appstore.cnmlynk.org/api';
+  const CORS_PROXIES = [
+    u => 'https://proxy.cors.sh/' + u,
+    u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
+    u => 'https://cors.eu.org/' + u,
+    u => 'https://api.codetabs.com/v1/proxy/?quest=' + encodeURIComponent(u),
+    u => 'https://api.cors.lol/?url=' + encodeURIComponent(u),
+  ];
+  const PROXY_TIMEOUT = 9000; // 单个中转的超时时间（毫秒）
+
+  let apiChannel = 'auto'; // 'origin'：Worker 反代 | 'proxy'：CORS 中转
+  let preferredProxy = -1; // 最近一次成功的中转下标
+  try { preferredProxy = parseInt(localStorage.getItem('lc_api_proxy') || '-1', 10); } catch (e) {}
+
+  function fetchWithTimeout(url, options, timeout) {
+    if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
+      return fetch(url, Object.assign({}, options, { signal: AbortSignal.timeout(timeout) }));
+    }
+    return fetch(url, options);
+  }
+
+  // 同源反代通道（POST，与上游原生接口一致）
+  async function requestViaOrigin(pathname, params) {
+    const res = await fetchWithTimeout(`${API_BASE}${pathname}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    }, 8000);
+    if (!res.ok) {
+      const err = new Error(`HTTP ${res.status}`);
+      err.status = res.status;
+      throw err;
+    }
+    return res.json();
+  }
+
+  // CORS 中转通道：上游支持 GET 查询参数方式，与 POST 接口等价
+  async function requestViaProxy(pathname, params) {
+    const target = `${UPSTREAM_API}${pathname}?${new URLSearchParams(params).toString()}`;
+    const order = [];
+    if (preferredProxy >= 0 && preferredProxy < CORS_PROXIES.length) order.push(preferredProxy);
+    for (let i = 0; i < CORS_PROXIES.length; i++) if (i !== preferredProxy) order.push(i);
+
+    let lastErr = null;
+    for (const idx of order) {
+      try {
+        const res = await fetchWithTimeout(CORS_PROXIES[idx](target), {}, PROXY_TIMEOUT);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        preferredProxy = idx;
+        try { localStorage.setItem('lc_api_proxy', String(idx)); } catch (e) {}
+        return json;
+      } catch (err) {
+        lastErr = err; // 该中转不可用，切换下一个
+      }
+    }
+    throw new Error('API 中转通道暂不可用，请稍后点击刷新重试');
+  }
+
+  // 统一入口：先试同源反代，不可用自动降级为 CORS 中转
+  async function requestApi(pathname, params) {
+    if (apiChannel !== 'proxy') {
+      try {
+        const json = await requestViaOrigin(pathname, params);
+        apiChannel = 'origin';
+        return json;
+      } catch (err) {
+        // 405/404：当前托管没有 /api 服务端（纯静态托管）→ 永久降级为中转模式
+        if (err.status === 405 || err.status === 404) apiChannel = 'proxy';
+        // 其它错误（网络抖动等）仅本次降级重试，不锁死通道
+      }
+    }
+    return requestViaProxy(pathname, params);
+  }
+
+  // https 页面下的 http 直链会被浏览器按混合内容拦截，
+  // 升级为 Worker 文件代理（仅允许上游 AList 域名），失败时页面自身有报错提示
+  function safeUrl(url) {
+    if (url && location.protocol === 'https:' && /^http:\/\//i.test(url)) {
+      return WORKER_BASE + '/store/file?url=' + encodeURIComponent(url);
+    }
+    return url;
+  }
+
+  const CATEGORIES = [
+    { path: '/CarMax/地图导航', icon: '🗺️', name: '地图导航' },
+    { path: '/CarMax/实用工具', icon: '🔧', name: '实用工具' },
+  ];
+
+  let state = {
+    currentPath: CATEGORIES[0].path,
+    currentPage: 1,
+    total: 0,
+    loading: false,
+    badgeCache: {},
+    history: [],   // 路径历史栈，用于返回上级
+    viewMode: localStorage.getItem('viewMode') || 'list', // 'grid' | 'list'
+  };
+
+  // ===== 切换视图 =====
+  function setView(mode) {
+    if (state.viewMode === mode) return;
+    state.viewMode = mode;
+    localStorage.setItem('viewMode', mode);
+    document.getElementById('btnGrid').classList.toggle('active', mode === 'grid');
+    document.getElementById('btnList').classList.toggle('active', mode === 'list');
+    // 重新渲染当前列表（nameHtml 依赖 viewMode）
+    const grid = document.getElementById('fileGrid');
+    if (mode === 'list') {
+      grid.classList.add('list-view');
+    } else {
+      grid.classList.remove('list-view');
+    }
+    // 刷新卡片 HTML（只重绘，不重新请求）
+    if (state._lastItems) {
+      grid.innerHTML = renderFiles(state._lastItems);
+      if (mode === 'list') grid.classList.add('list-view');
+    }
+  }
+
+  // ===== 工具函数 =====
+  function formatSize(bytes) {
+    if (!bytes || bytes === 0) return '文件夹';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let i = 0, v = bytes;
+    while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+    return v.toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
+  }
+
+  function formatDate(iso) {
+    if (!iso) return '-';
+    const d = new Date(iso);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+
+  function getFileIcon(name, isDir) {
+    if (isDir) return '📁';
+    const ext = (name.split('.').pop() || '').toLowerCase();
+    const map = { apk: '📦', zip: '🗜️', rar: '🗜️', '7z': '🗜️', pdf: '📄', txt: '📝', jpg: '🖼️', jpeg: '🖼️', png: '🖼️', mp4: '🎬', mp3: '🎵' };
+    return map[ext] || '📄';
+  }
+
+  function getCategory(path) {
+    // 精确匹配或前缀匹配（子目录归属于对应分类）
+    return CATEGORIES.find(c => c.path === path)
+      || CATEGORIES.find(c => path.startsWith(c.path + '/'))
+      || CATEGORIES[0];
+  }
+
+  // 渲染面包屑：从根分类到当前路径
+  function renderBreadcrumb(path) {
+    const cat = getCategory(path);
+    const rootPath = cat.path;
+    // 计算当前路径相对于根路径的额外层级
+    const extra = path.slice(rootPath.length).split('/').filter(Boolean);
+
+    let html = '';
+
+    // 是否有上级可以返回
+    if (path !== rootPath) {
+      html += `<button class="back-btn" onclick="goBack()">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        返回上级
+      </button>`;
+    }
+
+    html += `<div class="breadcrumb">`;
+    // 根节点
+    html += `<div class="breadcrumb-item">`;
+    if (path === rootPath) {
+      html += `<span class="current">${cat.icon} ${cat.name}</span>`;
+    } else {
+      html += `<a onclick="navigateTo('${rootPath}')">${cat.icon} ${cat.name}</a>`;
+    }
+    html += `</div>`;
+
+    // 中间层级
+    extra.forEach((seg, idx) => {
+      const segPath = rootPath + '/' + extra.slice(0, idx + 1).join('/');
+      const isLast = idx === extra.length - 1;
+      html += `<span class="breadcrumb-sep">›</span>`;
+      html += `<div class="breadcrumb-item ${isLast ? 'current' : ''}">`;
+      if (isLast) {
+        html += `<span>📁 ${seg}</span>`;
+      } else {
+        html += `<a onclick="navigateTo('${segPath}')">📁 ${seg}</a>`;
+      }
+      html += `</div>`;
+    });
+
+    html += `</div>`;
+    return html;
+  }
+
+  // ===== API 请求（多通道自动降级）=====
+  async function fetchList(path, page = 1) {
+    const json = await requestApi('/fs/list', { path, password: '', page, per_page: PER_PAGE, refresh: false });
+    if (json.code !== 200) throw new Error(json.message || '请求失败');
+    return json.data;
+  }
+
+  async function fetchFileDetail(path) {
+    const json = await requestApi('/fs/get', { path });
+    if (json.code !== 200) throw new Error(json.message || '请求失败');
+    return json.data;
+  }
+
+  // ===== 渲染骨架屏 =====
+  function renderSkeletons(count = 8) {
+    return Array.from({ length: count }, () => `
+      <div class="skeleton-card">
+        <div class="sk-row">
+          <div class="skeleton sk-icon"></div>
+          <div class="sk-lines">
+            <div class="skeleton sk-line w80"></div>
+            <div class="skeleton sk-line w50"></div>
+          </div>
+        </div>
+        <div class="sk-bottom">
+          <div class="skeleton sk-line" style="width:40%"></div>
+          <div class="skeleton sk-pill"></div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  // ===== 渲染文件列表 =====
+  function renderFiles(items) {
+    if (!items || items.length === 0) {
+      return `<div class="empty-state">
+        <div class="empty-icon">📭</div>
+        <h3>暂无文件</h3>
+        <p>当前目录下没有找到任何文件</p>
+      </div>`;
+    }
+
+    const folders = items.filter(i => i.is_dir);
+    const files = items.filter(i => !i.is_dir);
+
+    let html = '';
+
+    if (folders.length > 0) {
+      html += `<div class="folder-section-title" style="grid-column:1/-1">📁 文件夹（${folders.length}）</div>`;
+      html += folders.map(item => renderCard(item)).join('');
+    }
+
+    if (files.length > 0 && folders.length > 0) {
+      html += `<div class="folder-section-title" style="grid-column:1/-1">📦 文件（${files.length}）</div>`;
+    }
+
+    html += files.map(item => renderCard(item)).join('');
+    return html;
+  }
+
+  function renderCard(item) {
+    const icon = getFileIcon(item.name, item.is_dir);
+    const size = formatSize(item.size);
+    const date = formatDate(item.modified);
+    const filePath = `${state.currentPath}/${item.name.replace(/'/g, "\\'")}` ;
+    // 列表模式下直接展示完整文件名，卡片模式用 title 做 tooltip
+    const nameHtml = state.viewMode === 'list'
+      ? `<div class="file-name">${item.name}</div>`
+      : `<div class="file-name" title="${item.name.replace(/"/g, '&quot;')}">${item.name}</div>`;
+
+    return `
+      <div class="file-card" onclick="openDetail('${filePath}', ${item.is_dir})">
+        <div class="file-card-header">
+          <div class="file-icon-wrap ${item.is_dir ? 'folder' : ''}">${icon}</div>
+          ${nameHtml}
+        </div>
+        <div class="file-meta">
+          <span class="file-date">${date}</span>
+          ${item.is_dir
+            ? `<span class="folder-badge">文件夹</span>`
+            : `<span class="file-size">💾 ${size}</span>`
+          }
+        </div>
+      </div>
+    `;
+  }
+
+  // ===== 渲染分页 =====
+  function renderPagination(total, page) {
+    const totalPages = Math.ceil(total / PER_PAGE);
+    if (totalPages <= 1) return '';
+
+    let html = `<button class="page-btn" ${page <= 1 ? 'disabled' : ''} onclick="goPage(${page - 1})">‹ 上一页</button>`;
+
+    const delta = 2;
+    let pages = new Set([1, totalPages]);
+    for (let i = Math.max(2, page - delta); i <= Math.min(totalPages - 1, page + delta); i++) pages.add(i);
+    pages = [...pages].sort((a, b) => a - b);
+
+    let prev = null;
+    for (const p of pages) {
+      if (prev && p - prev > 1) html += `<span class="page-info">···</span>`;
+      html += `<button class="page-btn ${p === page ? 'active' : ''}" onclick="goPage(${p})">${p}</button>`;
+      prev = p;
+    }
+
+    html += `<button class="page-btn" ${page >= totalPages ? 'disabled' : ''} onclick="goPage(${page + 1})">下一页 ›</button>`;
+    html += `<span class="page-info">${total} 个文件，第 ${page}/${totalPages} 页</span>`;
+    return html;
+  }
+
+  // ===== 加载文件列表 =====
+  async function loadList(path = state.currentPath, page = state.currentPage) {
+    if (state.loading) return;
+    state.loading = true;
+    state.currentPath = path;
+    state.currentPage = page;
+
+    const grid = document.getElementById('fileGrid');
+    const pagination = document.getElementById('pagination');
+    const meta = document.getElementById('contentMeta');
+    const refreshBtn = document.getElementById('refreshBtn');
+
+      // 保持当前视图模式
+      if (state.viewMode === 'list') {
+        grid.classList.add('list-view');
+      } else {
+        grid.classList.remove('list-view');
+      }
+      grid.innerHTML = renderSkeletons();
+      pagination.innerHTML = '';
+      meta.textContent = '加载中...';
+      refreshBtn.classList.add('loading');
+
+    // 更新标题 + 面包屑
+    const cat = getCategory(path);
+    const lastName = path === cat.path ? cat.name : path.split('/').pop();
+    document.getElementById('contentTitle').innerHTML = `<span>${cat.icon}</span><span>${lastName}</span>`;
+    document.getElementById('breadcrumbWrap').innerHTML = renderBreadcrumb(path);
+
+    try {
+      const data = await fetchList(path, page);
+      state.total = data.total || (data.content ? data.content.length : 0);
+      const items = data.content || [];
+      state._lastItems = items; // 缓存供视图切换重绘用
+
+      grid.innerHTML = renderFiles(items);
+      // 渲染后保持视图
+      if (state.viewMode === 'list') grid.classList.add('list-view');
+      pagination.innerHTML = renderPagination(state.total, page);
+      meta.textContent = `共 ${state.total} 个文件`;
+
+      // 缓存 badge
+      state.badgeCache[path] = state.total;
+      updateBadges();
+    } catch (err) {
+      grid.innerHTML = `<div class="error-banner">
+        ⚠️ 加载失败：${err.message}，请检查网络或稍后重试
+      </div>`;
+      meta.textContent = '加载失败';
+    } finally {
+      state.loading = false;
+      refreshBtn.classList.remove('loading');
+    }
+  }
+
+  function updateBadges() {
+    CATEGORIES.forEach((cat, i) => {
+      const el = document.getElementById(`badge-${i}`);
+      if (el && state.badgeCache[cat.path] !== undefined) {
+        el.textContent = state.badgeCache[cat.path];
+      }
+    });
+  }
+
+  // ===== 切换分类 =====
+  function switchCategory(el) {
+    document.querySelectorAll('.menu-item').forEach(m => m.classList.remove('active'));
+    el.classList.add('active');
+    const path = el.dataset.path;
+    state.currentPage = 1;
+    loadList(path, 1);
+  }
+
+  function goPage(page) {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    loadList(state.currentPath, page);
+  }
+
+  function refreshList() {
+    loadList(state.currentPath, state.currentPage);
+  }
+
+  // ===== 进入指定路径（用于面包屑点击） =====
+  function navigateTo(path) {
+    state.history = state.history.filter(p => !p.startsWith(path)); // 清除该路径之后的历史
+    state.currentPage = 1;
+    loadList(path, 1);
+  }
+
+  // ===== 返回上级目录 =====
+  function goBack() {
+    const prev = state.history.pop();
+    if (prev) {
+      state.currentPage = 1;
+      loadList(prev, 1);
+    }
+  }
+
+  // ===== 构建弹窗 HTML（同步，立即渲染）=====
+  function buildModalShell(name, extUpper, provider) {
+    const icon = getFileIcon(name, false);
+    return `
+      <div class="modal-header">
+        <div class="modal-file-icon">${icon}</div>
+        <div style="flex:1;min-width:0">
+          <div class="modal-title">${name}</div>
+          <div class="modal-subtitle">${extUpper} 文件 · ${provider || '网盘'}</div>
+        </div>
+        <button class="modal-close" onclick="closeModal()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div id="modalDetailArea">
+          <div class="loading-spinner" style="padding:32px"><div class="spinner"></div><div class="loading-text">加载中...</div></div>
+        </div>
+      </div>`;
+  }
+
+  // ===== 打开详情 / 进入文件夹 =====
+  async function openDetail(filePath, isDir) {
+    if (isDir) {
+      // 进入子目录
+      state.history.push(state.currentPath);
+      state.currentPage = 1;
+      loadList(filePath, 1);
+      return;
+    }
+
+    const overlay = document.getElementById('modalOverlay');
+    const content = document.getElementById('modalContent');
+    const name = filePath.split('/').pop();
+    const extUpper = (name.split('.').pop() || '').toUpperCase();
+    const extLower = extUpper.toLowerCase();
+
+    // 1. 立即打开弹窗（先渲染 shell，无卡顿感）
+    content.innerHTML = buildModalShell(name, extUpper, '');
+    overlay.classList.add('open');
+
+    // 2. 图片：获取 raw_url（已是 https 直链）直接展示
+    if (IMAGE_EXTS.has(extLower)) {
+      try {
+        const data = await fetchFileDetail(filePath);
+        const rawUrl = data.raw_url || '';
+        document.getElementById('modalDetailArea').innerHTML = rawUrl ? `
+          <div style="text-align:center;padding:12px">
+            <img src="${safeUrl(rawUrl)}" alt="${name}" loading="lazy"
+              data-lb-src="${safeUrl(rawUrl)}" data-lb-alt="${name}"
+              style="max-width:100%;max-height:480px;border-radius:10px;object-fit:contain;box-shadow:var(--shadow-md);cursor:zoom-in"
+              onerror="this.parentElement.innerHTML='<div style=color:var(--text-muted);padding:20px;font-size:13px>⚠️ 图片加载失败</div>'" />
+          </div>
+          <div class="copy-url-wrap" style="margin-top:10px">
+            <input class="copy-url-input" type="text" value="${rawUrl}" readonly />
+            <button class="copy-btn" onclick="navigator.clipboard.writeText(this.previousElementSibling.value);this.textContent='✓ 已复制';setTimeout(()=>this.textContent='复制链接',2000)">复制链接</button>
+          </div>` :
+          `<div style="text-align:center;padding:20px;color:var(--text-muted);font-size:14px">⚠️ 暂时无法获取图片链接</div>`;
+      } catch (e) {
+        document.getElementById('modalDetailArea').innerHTML =
+          `<div style="text-align:center;padding:20px;color:var(--text-muted);font-size:14px">⚠️ 加载失败：${e.message}</div>`;
+      }
+      return;
+    }
+
+    try {
+      const data = await fetchFileDetail(filePath);
+      const ext = (data.name.split('.').pop() || '').toUpperCase();
+
+      // 更新标题栏（补充 provider）
+      const subtitle = content.querySelector('.modal-subtitle');
+      if (subtitle) subtitle.textContent = `${ext} 文件 · ${data.provider || '网盘'}`;
+
+      // 只更新详情区，弹窗 header 保持不动（无抖动）
+      document.getElementById('modalDetailArea').innerHTML = `
+        <div class="info-grid">
+          <div class="info-item">
+            <div class="info-label">文件大小</div>
+            <div class="info-value">${formatSize(data.size)}</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">文件类型</div>
+            <div class="info-value">${ext || '未知'}</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">修改时间</div>
+            <div class="info-value">${formatDate(data.modified)}</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">创建时间</div>
+            <div class="info-value">${formatDate(data.created)}</div>
+          </div>
+          ${data.provider ? `
+          <div class="info-item">
+            <div class="info-label">存储来源</div>
+            <div class="info-value">${data.provider}</div>
+          </div>
+          ` : ''}
+          ${data.hash_info ? `
+          <div class="info-item full">
+            <div class="info-label">哈希信息</div>
+            <div class="info-value" style="font-size:12px;font-family:monospace">${JSON.stringify(data.hash_info)}</div>
+          </div>
+          ` : ''}
+        </div>
+
+        ${data.raw_url ? `
+          <a class="download-btn" href="${data.raw_url}" target="_blank" download>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            立即下载 (${formatSize(data.size)})
+          </a>
+          <div class="copy-url-wrap">
+            <input class="copy-url-input" id="urlInput" type="text" value="${data.raw_url}" readonly />
+            <button class="copy-btn" id="copyBtn" onclick="copyUrl()">复制链接</button>
+          </div>
+          ${renderPreviewBtn(data.name, data.raw_url)}
+          <div id="previewContainer"></div>
+        ` : `
+          <div style="text-align:center;padding:20px;color:var(--text-muted);font-size:14px;">
+            ⚠️ 暂时无法获取下载链接，请稍后再试
+          </div>
+        `}
+      `;
+    } catch (err) {
+      const area = document.getElementById('modalDetailArea');
+      if (area) area.innerHTML = `
+        <div style="text-align:center;padding:32px;color:var(--text-muted)">
+          <div style="font-size:40px;margin-bottom:12px">⚠️</div>
+          <div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:6px">获取详情失败</div>
+          <div style="font-size:13px">${err.message}</div>
+        </div>`;
+    }
+  }
+
+  // ===== 预览功能 =====
+  const PREVIEWABLE = {
+    txt: 'txt', log: 'txt', csv: 'txt', json: 'txt', xml: 'txt', html: 'txt', js: 'txt', css: 'txt', sh: 'txt',
+    md: 'md', markdown: 'md',
+    mp4: 'video', webm: 'video', ogg: 'video', mov: 'video',
+    jpg: 'image', jpeg: 'image', png: 'image', gif: 'image', webp: 'image', bmp: 'image', svg: 'image',
+  };
+  const IMAGE_EXTS = new Set(['jpg','jpeg','png','gif','webp','bmp','svg']);
+
+  function getPreviewType(name) {
+    const ext = (name.split('.').pop() || '').toLowerCase();
+    return PREVIEWABLE[ext] || null;
+  }
+
+  function renderPreviewBtn(name, url) {
+    const type = getPreviewType(name);
+    if (!type) return '';
+    const labels = { txt: '👁️ 在线预览文本', md: '📄 在线预览 Markdown', video: '▶️ 在线播放视频', image: '🖼️ 查看图片' };
+    return `<button class="preview-btn" onclick="loadPreview('${type}', '${url.replace(/'/g, "\\'")}')">` +
+      `${labels[type]}</button>`;
+  }
+
+  async function loadPreview(type, url) {
+    const container = document.getElementById('previewContainer');
+    if (!container) return;
+
+    // 如果已展开则收起
+    if (container._open) {
+      container.innerHTML = '';
+      container._open = false;
+      return;
+    }
+    container._open = true;
+
+    const CLOSE_BTN = `<button class="preview-close-btn" onclick="document.getElementById('previewContainer').innerHTML='';document.getElementById('previewContainer')._open=false;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>`;
+
+    if (type === 'image') {
+      container.innerHTML = `
+        <div class="preview-wrap">
+          <div class="preview-toolbar"><span>🖼️ 图片预览</span>${CLOSE_BTN}</div>
+          <div class="preview-body preview-img-wrap">
+            <img class="preview-img" src="${safeUrl(url)}" alt="预览" loading="lazy" data-lb-src="${safeUrl(url)}" data-lb-alt="图片预览" />
+          </div>
+        </div>`;
+      return;
+    }
+
+    if (type === 'video') {
+      container.innerHTML = `
+        <div class="preview-wrap">
+          <div class="preview-toolbar"><span>▶️ 视频播放</span>${CLOSE_BTN}</div>
+          <div class="preview-body" style="padding:0">
+            <video class="preview-video" controls autoplay>
+              <source src="${safeUrl(url)}">
+              <p style="padding:16px;color:var(--text-muted)">浏览器不支持视频播放，请下载后观看。</p>
+            </video>
+          </div>
+        </div>`;
+      return;
+    }
+
+    // txt / md 需要先 fetch 内容
+    container.innerHTML = `
+      <div class="preview-wrap">
+        <div class="preview-loading"><div class="spinner" style="width:20px;height:20px;border-width:2px"></div>加载中...</div>
+      </div>`;
+
+    try {
+      const resp = await fetch(safeUrl(url));
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const text = await resp.text();
+
+      let bodyHtml = '';
+      let toolbarLabel = '';
+      if (type === 'md') {
+        toolbarLabel = '📄 Markdown 预览';
+        const html = typeof marked !== 'undefined'
+          ? marked.parse(text)
+          : text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+        bodyHtml = `<div class="preview-md">${html}</div>`;
+      } else {
+        toolbarLabel = '👁️ 文本预览';
+        const escaped = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        bodyHtml = `<div class="preview-txt">${escaped}</div>`;
+      }
+
+      container.innerHTML = `
+        <div class="preview-wrap">
+          <div class="preview-toolbar"><span>${toolbarLabel}</span>${CLOSE_BTN}</div>
+          <div class="preview-body">${bodyHtml}</div>
+        </div>`;
+    } catch (err) {
+      container.innerHTML = `
+        <div class="preview-wrap">
+          <div class="preview-body" style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">⚠️ 预览失败：${err.message}</div>
+        </div>`;
+    }
+  }
+
+  function closeModal(event) {
+    if (event && event.target !== document.getElementById('modalOverlay')) return;
+    document.getElementById('modalOverlay').classList.remove('open');
+  }
+
+  function copyUrl() {
+    const input = document.getElementById('urlInput');
+    const btn = document.getElementById('copyBtn');
+    if (!input) return;
+    input.select();
+    try {
+      navigator.clipboard.writeText(input.value).catch(() => document.execCommand('copy'));
+    } catch (e) {
+      document.execCommand('copy');
+    }
+    btn.textContent = '✓ 已复制';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = '复制链接'; btn.classList.remove('copied'); }, 2000);
+  }
+
+  // ===== Lightbox 放大 =====
+  function openLightbox(src, alt) {
+    const lb = document.getElementById('lightbox');
+    const img = document.getElementById('lightboxImg');
+    const cap = document.getElementById('lightboxCaption');
+    img.src = src;
+    img.alt = alt || '';
+    cap.textContent = alt || '';
+    lb.classList.add('open');
+  }
+  function closeLightbox(event) {
+    if (event && event.target === document.getElementById('lightboxImg')) return;
+    document.getElementById('lightbox').classList.remove('open');
+  }
+  // 事件委托：有 data-lb-src 属性的图片点击就放大
+  document.addEventListener('click', e => {
+    const img = e.target.closest('img[data-lb-src]');
+    if (img) openLightbox(img.dataset.lbSrc, img.dataset.lbAlt);
+  });
+
+  // ===== ESC 关闭弹窗 / Lightbox =====
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      document.getElementById('lightbox').classList.remove('open');
+      document.getElementById('modalOverlay').classList.remove('open');
+    }
+  });
+
+  // ===== 预加载其他分类的数量 =====
+  async function preloadBadges() {
+    for (let i = 1; i < CATEGORIES.length; i++) {
+      try {
+        const data = await fetchList(CATEGORIES[i].path, 1);
+        state.badgeCache[CATEGORIES[i].path] = data.total || (data.content ? data.content.length : 0);
+        updateBadges();
+      } catch (e) { /* 静默失败 */ }
+    }
+  }
+
+  // ===== 初始化 =====
+  // 恢复视图模式按钮状态（默认列表）
+  document.getElementById('btnGrid').classList.toggle('active', state.viewMode === 'grid');
+  document.getElementById('btnList').classList.toggle('active', state.viewMode === 'list');
+  loadList(CATEGORIES[0].path, 1).then(() => preloadBadges());
+</script>
+<!-- Lightbox 全屏放大层 -->
+<div class="lightbox" id="lightbox" onclick="closeLightbox(event)">
+  <button class="lightbox-close" onclick="closeLightbox()" title="关闭">×</button>
+  <img id="lightboxImg" src="" alt="" onclick="event.stopPropagation()" />
+  <div class="lightbox-caption" id="lightboxCaption"></div>
+</div>
+
+</body>
+</html>
