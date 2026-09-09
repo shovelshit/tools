@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>猫眼影院场次监控 - 云端版</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="title-block">
+        <h1>猫眼影院场次监控</h1>
+        <span class="subtitle">Cloudflare Workers 每 10 分钟自动检查，新增场次 Bark 推送到 iPhone</span>
+      </div>
+      <div id="status-line" class="status-line muted">状态：未连接</div>
+    </header>
+
+    <main class="main-grid">
+      <!-- 左列: 云端连接 + 影院设置 + 监控设置与控制 + 使用说明 -->
+      <div class="col col-settings">
+        <section class="card">
+          <h2>云端连接</h2>
+          <div class="form-grid">
+            <label for="worker-url">Worker 地址</label>
+            <input id="worker-url" type="text" placeholder="https://maoyan-monitor.xxx.workers.dev" />
+            <label for="token-input" class="token-ui">访问令牌</label>
+            <input id="token-input" class="token-ui" type="text" placeholder="部署时设置的 ACCESS_TOKEN" />
+          </div>
+          <div class="muted tip-line token-ui">多人使用：每人填自己的令牌即可，配置互相独立、推送各到各的手机</div>
+          <div class="row">
+            <button id="btn-gen-token" class="btn small ghost token-ui">🎲 随机生成令牌</button>
+            <button id="btn-copy-token" class="btn small ghost token-ui hidden">复制令牌</button>
+            <button id="btn-connect" class="btn primary">连接</button>
+          </div>
+          <div id="token-sync-tip" class="token-tip token-ui hidden"></div>
+          <div class="muted tip-line token-ui">日常使用无需关心令牌：配置一次自动保存；只有换令牌时才需同步到 Worker</div>
+        </section>
+
+        <section class="card">
+          <h2>影院设置</h2>
+          <div class="row">
+            <input id="cinema-input" type="text" placeholder="粘贴影院链接或输入影院 ID" />
+            <button id="btn-load-cinema" class="btn primary">加载</button>
+          </div>
+          <div id="cinema-name" class="cinema-name hidden"></div>
+        </section>
+
+        <section class="card">
+          <h2>监控设置与控制</h2>
+          <div class="form-grid">
+            <label for="interval-input">检查间隔（分钟）</label>
+            <input id="interval-input" type="number" min="10" max="720" step="10" value="10" />
+            <label for="bark-input">Bark Key 或 URL</label>
+            <input id="bark-input" type="text" placeholder="xxxxx 或 https://api.day.app/xxxxx" />
+          </div>
+          <div class="row">
+            <button id="btn-save" class="btn success">保存配置</button>
+            <button id="btn-check" class="btn">立即检查</button>
+            <button id="btn-test-bark" class="btn ghost">测试 Bark</button>
+            <button id="btn-toggle-monitor" class="btn danger">停止监控</button>
+          </div>
+          <div class="muted tip-line">Workers 每 10 分钟唤醒一次，间隔设为 30/60 分钟时会跳过过近的触发；最小生效间隔为 10 分钟。停止监控不会丢失配置，可随时恢复</div>
+        </section>
+
+        <section class="card grow muted-card">
+          <h2>使用说明</h2>
+          <ol class="help-list">
+            <li>填 Worker 地址和令牌，点「连接」</li>
+            <li>粘贴影院链接，点「加载」</li>
+            <li>勾选电影、设间隔和 Bark</li>
+            <li>点「保存配置」即完成，只需设置一次</li>
+          </ol>
+        </section>
+      </div>
+
+      <!-- 中列: 电影列表 -->
+      <div class="col col-movies">
+        <section class="card grow">
+          <div class="row space-between">
+            <h2>选择要监控的电影</h2>
+            <button id="btn-toggle-all" class="btn small ghost">全选</button>
+          </div>
+          <div id="movie-count" class="muted">连接后自动加载影片</div>
+          <div id="movie-list" class="movie-list">
+            <div class="muted empty-tip">连接云端后显示该影院在映影片</div>
+          </div>
+        </section>
+      </div>
+
+      <!-- 右列: 变化记录 -->
+      <div class="col col-log">
+        <section class="card grow">
+          <div class="row space-between">
+            <h2>变化记录</h2>
+            <button id="btn-refresh" class="btn small ghost">刷新</button>
+          </div>
+          <div id="log-panel" class="log-panel" aria-live="polite"></div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
