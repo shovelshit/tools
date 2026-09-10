@@ -20,6 +20,11 @@ routes = [
 [triggers]
 crons = ["*/10 * * * *"]
 
+# ============ 环境变量 ============
+# CF_ACCOUNT_ID: 供运行时查询本 Worker 的真实 cron 调度(配合 CF_API_TOKEN secret)
+[vars]
+CF_ACCOUNT_ID = "4872db2724154d6cbee0709216b70a01"
+
 # ============ KV 绑定(令牌/用户数据/影院缓存) ============
 [[kv_namespaces]]
 binding = "MAOYAN_KV"
