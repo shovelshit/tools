@@ -11,6 +11,7 @@ const els = {
   token: $("token-input"),
   btnConnect: $("btn-connect"),
   loginError: $("login-error"),
+  loginHint: $("login-hint"),
   // 顶栏
   statusLine: $("status-line"),
   btnLogout: $("btn-logout"),
@@ -98,6 +99,13 @@ function showLoginError(msg) {
   els.loginError.classList.remove("hidden");
 }
 
+// 登录页中性提示(存储/环境类问题), 不用报错红色
+function showLoginHint(msg) {
+  if (!els.loginHint) return;
+  els.loginHint.textContent = "💡 " + msg;
+  els.loginHint.classList.remove("hidden");
+}
+
 function enterMainPage() {
   els.loginOverlay.classList.add("hidden");
   els.mainPage.classList.remove("hidden");
@@ -108,6 +116,7 @@ async function connect() {
   localStorage.setItem("workerUrl", els.workerUrl.value.trim());
   await secureSet("token", els.token.value.trim());
   els.loginError.classList.add("hidden");
+  if (els.loginHint) els.loginHint.classList.add("hidden");
   try {
     await withButtonLoading(els.btnConnect, "连接中...", async () => {
       showBlockOverlay("正在连接云端...");
@@ -668,8 +677,31 @@ setInterval(() => { if (connected) refreshChanges(); }, 60000);
 
 // ---------------- 初始化 ----------------
 (async function init() {
+  // 排查"刷新后回到登录页": 本机存储 / WebCrypto / 安全上下文 是否可用
+  function probeEnv() {
+    let storageOk = true;
+    try {
+      localStorage.setItem("_probe", "1");
+      localStorage.removeItem("_probe");
+    } catch (e) {
+      storageOk = false;
+    }
+    return {
+      storageOk,
+      cryptoOk: Boolean(window.crypto && window.crypto.subtle),
+      secureContext: Boolean(window.isSecureContext),
+    };
+  }
+
+  const env = probeEnv();
+  let savedToken = "";
+  try {
+    savedToken = (await secureGet("token")) || "";
+  } catch (e) {
+    savedToken = "";
+  }
   els.workerUrl.value = localStorage.getItem("workerUrl") ?? DEFAULT_WORKER;
-  els.token.value = (await secureGet("token")) || "";
+  els.token.value = savedToken;
   // 支持 URL 参数直达: ?worker=https://xxx.workers.dev&token=xxx
   const qs = new URLSearchParams(location.search);
   if (qs.get("worker")) els.workerUrl.value = qs.get("worker");
@@ -677,10 +709,24 @@ setInterval(() => { if (connected) refreshChanges(); }, 60000);
   const explicit = qs.has("worker"); // 带参数打开视为明确意图, 免令牌模式也能自动连
   // 免令牌模式没有令牌可存, 上次连接成功后留有标记, 刷新后同样自动重连
   const openMode = localStorage.getItem("authMode") === "open";
-  // 有保存的凭据时自动连接, 失败则停留在登录层展示错误
-  if (els.workerUrl.value.trim() !== "" || SAME_ORIGIN) {
-    if (els.token.value.trim() || explicit || openMode) {
-      await connect();
-    }
+  const canAutoConnect = Boolean(els.token.value.trim() || explicit || openMode);
+  console.warn("[maoyan init]", {
+    ...env,
+    hasSavedToken: Boolean(savedToken),
+    openMode,
+    canAutoConnect,
+    host: location.hostname,
+  });
+  if (canAutoConnect && (els.workerUrl.value.trim() !== "" || SAME_ORIGIN)) {
+    await connect();
+    return;
+  }
+  // 没能自动连接: 给出可读的原因, 便于判断是存储被清还是环境不支持
+  if (!env.storageOk) {
+    showLoginHint("本机浏览器存储不可用（隐私模式 / 存储被限制），令牌无法保存，每次刷新都要重新填写");
+  } else if (!env.cryptoOk) {
+    showLoginHint(`当前环境不支持 WebCrypto（需 HTTPS，当前 ${location.protocol}），已保存的令牌无法解密读取`);
+  } else if (!savedToken && !openMode) {
+    showLoginHint("本机没有找到保存的令牌，可能被浏览器清理，请重新填写");
   }
 })();

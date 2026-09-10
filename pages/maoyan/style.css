@@ -60,6 +60,18 @@
   text-align: left;
 }
 
+.login-hint {
+  font-size: 11px;
+  color: #8a6d3b;
+  background: #fff8e6;
+  border: 1px solid #f0dcb0;
+  border-radius: 8px;
+  padding: 7px 10px;
+  margin-bottom: 10px;
+  text-align: left;
+  line-height: 1.6;
+}
+
 .login-foot { margin-top: 14px; font-size: 11px; line-height: 1.8; }
 .login-foot a { color: var(--primary); text-decoration: none; }
 .login-foot a:hover { text-decoration: underline; }
