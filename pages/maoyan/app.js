@@ -832,14 +832,26 @@ function syncCronInfo(data) {
   } catch (e) {
     savedToken = "";
   }
-  // 登录页常驻一行环境状态: 排查手机端刷新后需要重新登录的问题
-  if (els.loginDebug) {
-    const yn = (b) => (b ? "可用" : "不可用");
-    els.loginDebug.textContent =
-      `本机存储 ${yn(env.storageOk)} · WebCrypto ${yn(env.cryptoOk)} · ` +
-      `安全上下文 ${env.secureContext ? "是" : "否"} · 已存令牌 ${savedToken ? "有" : "无"} · ` +
-      `模式 ${openMode ? "免令牌" : "令牌"} · ${location.hostname}`;
+  // 令牌指纹: 与 worker 端 KV 键名 u:<指纹>:config 中的段一致, 便于核对是哪份配置
+  function tokenFingerprint(t) {
+    let h = 2166136261;
+    for (let i = 0; i < t.length; i++) {
+      h ^= t.charCodeAt(i);
+      h = (h + (h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24)) >>> 0;
+    }
+    return h.toString(16).padStart(8, "0");
   }
+
+  // 令牌指纹: 与 worker 端 KV 键名 u:<指纹>:config 中的段一致, 便于核对是哪份配置
+  function tokenFingerprint(t) {
+    let h = 2166136261;
+    for (let i = 0; i < t.length; i++) {
+      h ^= t.charCodeAt(i);
+      h = (h + (h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24)) >>> 0;
+    }
+    return h.toString(16).padStart(8, "0");
+  }
+
   els.workerUrl.value = localStorage.getItem("workerUrl") ?? DEFAULT_WORKER;
   els.token.value = savedToken;
   // 支持 URL 参数直达: ?worker=https://xxx.workers.dev&token=xxx
@@ -847,6 +859,15 @@ function syncCronInfo(data) {
   if (qs.get("worker")) els.workerUrl.value = qs.get("worker");
   if (qs.get("token")) els.token.value = qs.get("token");
   const explicit = qs.has("worker"); // 带参数打开视为明确意图, 免令牌模式也能自动连
+  const fp = tokenFingerprint(els.token.value.trim() || "anonymous");
+  // 登录页常驻一行环境状态: 排查手机端刷新后需要重新登录的问题
+  if (els.loginDebug) {
+    const yn = (b) => (b ? "可用" : "不可用");
+    els.loginDebug.textContent =
+      `本机存储 ${yn(env.storageOk)} · WebCrypto ${yn(env.cryptoOk)} · ` +
+      `安全上下文 ${env.secureContext ? "是" : "否"} · 已存令牌 ${savedToken ? "有" : "无"} · ` +
+      `模式 ${openMode ? "免令牌" : "令牌"} · 令牌指纹 ${fp} · ${location.hostname}`;
+  }
   const canAutoConnect = Boolean(els.token.value.trim() || explicit || openMode);
   console.warn("[maoyan init]", {
     ...env,
