@@ -3,7 +3,7 @@
 import { CORS, json } from "./common/http.js";
 import { NOTIFY_CHANNELS, pushBark } from "./common/notify.js";
 import { userKey, getUserConfig } from "./maoyan/user.js";
-import { CITY_LIST, fetchCinemaDetail, searchCinemasByKw, runCheck, pushNotify, currentChannel, cronBatchMinutes, checkAuthFull, syncCronTokens, handleAdminTokens, runScheduledChecks } from "./maoyan/index.js";
+import { CITY_LIST, fetchCinemaDetail, searchCinemasByKw, runCheck, pushNotify, currentChannel, cronBatchMinutes, describeCron, CRON_EXPRESSION, checkAuthFull, syncCronTokens, handleAdminTokens, runScheduledChecks } from "./maoyan/index.js";
 import { handleStoreApi, handleStoreFile } from "./store/proxy.js";
 
 export default {
@@ -70,7 +70,16 @@ export default {
       }
       if (url.pathname === "/api/config" && request.method === "GET") {
         const cfg = await getUserConfig(env, token);
-        return json({ ok: true, config: { enabled: cfg.enabled !== false, ...cfg, cronMinutes: cronBatchMinutes() } });
+        return json({
+          ok: true,
+          config: {
+            enabled: cfg.enabled !== false,
+            ...cfg,
+            cronMinutes: cronBatchMinutes(),
+            cronExpr: CRON_EXPRESSION,
+            cronText: describeCron(),
+          },
+        });
       }
       if (url.pathname === "/api/config" && request.method === "POST") {
         const body = await request.json();
@@ -115,7 +124,14 @@ export default {
           enabled: cfg.enabled !== false
         };
         const changes = await env.MAOYAN_KV.get(userKey(token, "changes"), "json") || [];
-        return json({ ok: true, authMode: "token", status, changes, cronMinutes: cronBatchMinutes() });
+        return json({
+          ok: true,
+          authMode: "token",
+          status,
+          changes,
+          cronMinutes: cronBatchMinutes(),
+          cronText: describeCron(),
+        });
       }
       return json({ error: "Unknown API" }, 404);
     } catch (e) {

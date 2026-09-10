@@ -167,11 +167,8 @@ async function restoreConfig() {
   monitorEnabled = config.enabled !== false;
   updateMonitorBtn();
   if (config.cinemaId) els.cinemaInput.value = config.cinemaId;
-  // 批次分钟数以服务端 cron 为准
-  if (config.cronMinutes && config.cronMinutes !== cronMinutes) {
-    cronMinutes = config.cronMinutes;
-  }
-  updateBatchTip();
+  // 批次信息以服务端 cron 为准
+  syncCronInfo(config);
   applyPushConfig(config);
   const prevSelected = new Set((config.selectedMovieIds || []).map(String));
   if (config.cinemaId) await loadCinema(config.cinemaId, prevSelected);
@@ -649,7 +646,9 @@ els.btnTestPush.addEventListener("click", async () => {
 async function refreshChanges(showLoading = false) {
   try {
     if (showLoading) setPanelLoading(els.logPanel, "正在加载变化记录...");
-    const { status, changes } = await api("/api/status");
+    const data = await api("/api/status");
+    const { status, changes } = data;
+    syncCronInfo(data); // 批次描述保持与服务端一致
     const stopped = status.enabled === false;
     setStatus(`已连接，上次检查 ${status.lastCheck ? new Date(status.lastCheck).toLocaleString("zh-CN", { hour12: false }) : "从未"}${stopped ? "（监控已停止）" : ""}`);
     if (stopped !== !monitorEnabled) {
@@ -681,12 +680,20 @@ setInterval(() => { if (connected) refreshChanges(); }, 60000);
 
 // ---------------- 初始化 ----------------
 let cronMinutes = 10; // 云端 cron 批次(分钟), 连接后以服务端下发为准
+let cronText = "每 10 分钟一批"; // cron 的人话描述(简单表达式)或原始表达式(复杂)
 
 // 批次提示: 检查频率完全跟随 worker 的 cron, 界面不再提供间隔设置
 function updateBatchTip() {
   if (!els.batchTip) return;
   els.batchTip.textContent =
-    `云端按定时批次自动检查，当前每 ${cronMinutes} 分钟一批（以服务端为准）。停止监控不会丢失配置，可随时恢复`;
+    `云端按定时批次自动检查（${cronText}）。停止监控不会丢失配置，可随时恢复`;
+}
+
+// 从接口响应同步批次信息
+function syncCronInfo(data) {
+  if (data.cronMinutes && data.cronMinutes !== cronMinutes) cronMinutes = data.cronMinutes;
+  if (data.cronText) cronText = data.cronText;
+  updateBatchTip();
 }
 
 (async function init() {
