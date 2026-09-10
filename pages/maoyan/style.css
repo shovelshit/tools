@@ -183,6 +183,20 @@ input[type="text"], input[type="number"] {
 }
 
 input[type="number"] { flex: 0 0 100px; }
+
+/* 下拉选择(检查间隔等) */
+select {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  outline: none;
+  background: #fff;
+  color: var(--text);
+  width: 100%;
+  transition: border-color 0.15s;
+}
+select:focus { border-color: var(--primary); }
 input[type="password"] {
   border: 1px solid var(--border);
   border-radius: 8px;

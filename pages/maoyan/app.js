@@ -167,7 +167,7 @@ async function restoreConfig() {
   monitorEnabled = config.enabled !== false;
   updateMonitorBtn();
   if (config.cinemaId) els.cinemaInput.value = config.cinemaId;
-  if (config.intervalMinutes) els.intervalInput.value = config.intervalMinutes;
+  if (config.intervalMinutes) els.intervalInput.value = String(quantizeInterval(config.intervalMinutes));
   applyPushConfig(config);
   const prevSelected = new Set((config.selectedMovieIds || []).map(String));
   if (config.cinemaId) await loadCinema(config.cinemaId, prevSelected);
@@ -591,8 +591,8 @@ els.btnSave.addEventListener("click", async () => {
     try {
       const selectedMovieIds = getSelectedIds();
       // cron 每 10 分钟一批, 间隔按 10 分钟对齐(10-720)
-      const intervalMinutes = Math.min(720, Math.max(10, Math.round((parseInt(els.intervalInput.value, 10) || 10) / 10) * 10));
-      els.intervalInput.value = intervalMinutes;
+      const intervalMinutes = quantizeInterval(els.intervalInput.value);
+      els.intervalInput.value = String(intervalMinutes);
       const body = pushConfigBody({
         cinemaId: els.cinemaInput.value.trim(),
         selectedMovieIds,
@@ -680,7 +680,25 @@ els.btnRefresh.addEventListener("click", () =>
 setInterval(() => { if (connected) refreshChanges(); }, 60000);
 
 // ---------------- 初始化 ----------------
+// 检查间隔下拉: 10-720 按 10 步进, 与 cron 批次对齐, 从源头避免手输非法值
+function fillIntervalOptions() {
+  const sel = els.intervalInput;
+  sel.innerHTML = "";
+  for (let m = 10; m <= 720; m += 10) {
+    const opt = document.createElement("option");
+    opt.value = String(m);
+    opt.textContent = m >= 60 ? `${m} 分钟（${m / 60} 小时）` : `${m} 分钟`;
+    sel.appendChild(opt);
+  }
+}
+
+// 量化到 10 的倍数(10-720), 兼容旧配置里的非对齐值
+function quantizeInterval(v) {
+  return Math.min(720, Math.max(10, Math.round((parseInt(v, 10) || 10) / 10) * 10));
+}
+
 (async function init() {
+  fillIntervalOptions();
   // 排查"刷新后回到登录页": 本机存储 / WebCrypto / 安全上下文 是否可用
   function probeEnv() {
     let storageOk = true;
