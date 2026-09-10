@@ -237,7 +237,7 @@ async function copyText(text) {
 (async function init() {
   // 支持 URL 参数直达: ?worker=https://xxx.workers.dev&adminToken=xxx
   const qs = new URLSearchParams(location.search);
-  els.workerUrl.value = qs.get("worker") || localStorage.getItem("adminWorkerUrl") ?? DEFAULT_WORKER;
+  els.workerUrl.value = qs.get("worker") || (localStorage.getItem("adminWorkerUrl") ?? DEFAULT_WORKER);
   els.adminToken.value = qs.get("adminToken") || localStorage.getItem("adminToken") || "";
   if (els.adminToken.value.trim()) {
     await login();
