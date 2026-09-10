@@ -33,6 +33,7 @@ const els = {
   serverChanInput: $("serverchan-input"),
   pushBarkRow: $("push-bark-row"),
   pushServerChanRow: $("push-serverchan-row"),
+  pushChannelRow: $("push-channel-row"),
   // 电影列表
   movieList: $("movie-list"),
   movieCount: $("movie-count"),
@@ -115,6 +116,9 @@ async function connect() {
         connected = true;
         const openMode = st.authMode === "open";
         document.body.classList.toggle("open-mode", openMode);
+        // 免令牌模式下没有令牌可存, 记一个标记供刷新后自动重连
+        if (openMode) localStorage.setItem("authMode", "open");
+        else localStorage.removeItem("authMode");
         setStatus(`已连接，上次检查 ${st.status.lastCheck || "从未"}${openMode ? "（免令牌模式）" : ""}`);
         enterMainPage();
         log("ok", "云端连接成功");
@@ -177,8 +181,8 @@ function setChannel(ch) {
 
 function renderChannel() {
   const ch = getChannel();
-  els.pushBarkRow.classList.toggle("hidden", ch !== "bark");
-  els.pushServerChanRow.classList.toggle("hidden", ch !== "serverchan");
+  if (els.pushBarkRow) els.pushBarkRow.classList.toggle("hidden", ch !== "bark");
+  if (els.pushServerChanRow) els.pushServerChanRow.classList.toggle("hidden", ch !== "serverchan");
 }
 
 // 当前渠道对应的输入框与配置字段名
@@ -208,9 +212,20 @@ function pushConfigBody(extra = {}) {
   return body;
 }
 
-document.querySelectorAll('input[name="push-channel"]').forEach((radio) => {
-  radio.addEventListener("change", renderChannel);
+// change 事件兜底: 部分移动浏览器点击 label 内的 radio 不派发 change
+document.addEventListener("change", (e) => {
+  if (e.target && e.target.name === "push-channel") renderChannel();
 });
+if (els.pushChannelRow) {
+  els.pushChannelRow.addEventListener("click", (e) => {
+    const radio = e.target.closest('input[name="push-channel"]');
+    const label = e.target.closest("label");
+    const target = radio || (label && label.querySelector('input[name="push-channel"]'));
+    if (!target) return;
+    target.checked = true;
+    renderChannel();
+  });
+}
 
 // ---------------- 监控启停 ----------------
 function updateMonitorBtn() {
@@ -660,9 +675,11 @@ setInterval(() => { if (connected) refreshChanges(); }, 60000);
   if (qs.get("worker")) els.workerUrl.value = qs.get("worker");
   if (qs.get("token")) els.token.value = qs.get("token");
   const explicit = qs.has("worker"); // 带参数打开视为明确意图, 免令牌模式也能自动连
+  // 免令牌模式没有令牌可存, 上次连接成功后留有标记, 刷新后同样自动重连
+  const openMode = localStorage.getItem("authMode") === "open";
   // 有保存的凭据时自动连接, 失败则停留在登录层展示错误
   if (els.workerUrl.value.trim() !== "" || SAME_ORIGIN) {
-    if (els.token.value.trim() || explicit) {
+    if (els.token.value.trim() || explicit || openMode) {
       await connect();
     }
   }

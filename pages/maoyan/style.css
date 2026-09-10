@@ -620,4 +620,13 @@ input[type="password"]:focus { border-color: var(--primary); }
   .card.grow { min-height: 200px; }
   .movie-list { max-height: 320px; }
   .log-panel { height: 260px; flex: none; }
+  .col-settings { overflow-y: visible; }
+  /* iOS Safari 聚焦字号小于 16px 的输入框时会自动放大页面, 这里统一提到 16px */
+  input[type="text"],
+  input[type="number"],
+  input[type="password"],
+  select,
+  textarea { font-size: 16px; }
+  /* 渠道选项换行, 避免窄屏挤出卡片 */
+  .channel-row { flex-wrap: wrap; gap: 8px 16px; }
 }
