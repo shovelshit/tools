@@ -26,7 +26,6 @@ const els = {
   btnLoadCinema: $("btn-load-cinema"),
   cinemaName: $("cinema-name"),
   // 监控设置
-  btnSave: $("btn-save"),
   btnCheck: $("btn-check"),
   btnTestPush: $("btn-test-push"),
   btnToggleMonitor: $("btn-toggle-monitor"),
@@ -109,7 +108,14 @@ function nextBatchText() {
   if (!cronMinuteStep || cronMinutes >= 60) return "";
   const now = new Date();
   const add = cronMinutes - (now.getMinutes() % cronMinutes);
-  return `下批 ${fmtClock(new Date(now.getTime() + add * 60000))}`;
+  const t = new Date(now.getTime() + add * 60000);
+  return `下批 ${t.toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit" })}`;
+}
+
+// 组合状态文案: 非空片段用 " · " 连接, 避免词语粘连
+function statusText(main, extra = []) {
+  const parts = extra.filter(Boolean);
+  return parts.length ? `${main} · ${parts.join(" · ")}` : main;
 }
 
 // ---------------- 登录 / 连接 ----------------
@@ -148,7 +154,7 @@ async function connect() {
         if (openMode) localStorage.setItem("authMode", "open");
         else localStorage.removeItem("authMode");
         const lastTxt = st.status.lastCheck ? fmtClock(new Date(st.status.lastCheck).getTime()) : "从未";
-        setStatus(`监控中 · 上次检查 ${lastTxt}${nextBatchText()}${openMode ? " · 免令牌模式" : ""}`, "running");
+        setStatus(statusText("监控中", [`上次检查 ${lastTxt}`, nextBatchText(), openMode && "免令牌模式"]), "running");
         enterMainPage();
         log("ok", "云端连接成功");
         await Promise.all([loadCities(), restoreConfig()]);
@@ -238,13 +244,45 @@ function pushConfigBody(extra = {}) {
   const key = currentKeyInput().value.trim();
   const body = { notifyChannel: getChannel(), ...extra };
   if (key) body[currentKeyField()] = key;
-  else if (pushSaved) log("info", "推送配置留空，保留云端已有配置");
   return body;
+}
+
+// ---------------- 自动保存 ----------------
+// 改动即保存, 不再需要"保存配置"按钮; 签名去重避免重复写 KV
+let lastSavedSig = "";
+let movieSaveTimer = null;
+
+async function autoSaveConfig(extra = {}, { msg = "配置已自动保存", silent = false } = {}) {
+  const body = pushConfigBody(extra);
+  const sig = JSON.stringify(body);
+  if (sig === lastSavedSig) return;
+  lastSavedSig = sig;
+  try {
+    await api("/api/config", { method: "POST", body: sig });
+    if (!silent) log("ok", msg);
+  } catch (e) {
+    lastSavedSig = ""; // 失败允许重试
+    showToast("自动保存失败：" + e.message, "error");
+  }
+}
+
+// 影片勾选变化较密集, 防抖后合并保存
+function scheduleMovieSave() {
+  clearTimeout(movieSaveTimer);
+  movieSaveTimer = setTimeout(() => {
+    autoSaveConfig(
+      { selectedMovieIds: getSelectedIds(), cinemaId: els.cinemaInput.value.trim() },
+      { msg: "影片勾选已自动保存", silent: true }
+    );
+  }, 800);
 }
 
 // change 事件兜底: 部分移动浏览器点击 label 内的 radio 不派发 change
 document.addEventListener("change", (e) => {
-  if (e.target && e.target.name === "push-channel") renderChannel();
+  if (e.target && e.target.name === "push-channel") {
+    renderChannel();
+    autoSaveConfig({}, { msg: `推送渠道已切换为 ${CHANNEL_LABELS[getChannel()]}` });
+  }
 });
 if (els.pushChannelRow) {
   els.pushChannelRow.addEventListener("click", (e) => {
@@ -254,8 +292,12 @@ if (els.pushChannelRow) {
     if (!target) return;
     target.checked = true;
     renderChannel();
+    autoSaveConfig({}, { msg: `推送渠道已切换为 ${CHANNEL_LABELS[getChannel()]}` });
   });
 }
+// 推送 Key 输入后失焦即保存
+els.barkInput.addEventListener("change", () => autoSaveConfig({}, { msg: "推送配置已保存" }));
+els.serverChanInput.addEventListener("change", () => autoSaveConfig({}, { msg: "推送配置已保存" }));
 
 // ---------------- 监控启停 ----------------
 function updateMonitorBtn() {
@@ -273,7 +315,7 @@ els.btnToggleMonitor.addEventListener("click", async () => {
       await api("/api/config", { method: "POST", body: JSON.stringify({ enabled: target }) });
       monitorEnabled = target;
       log(target ? "ok" : "info", target ? "监控已恢复，云端将继续按间隔检查" : "监控已停止，云端不再自动检查（配置已保留）");
-      setStatus(monitorEnabled ? `监控中${nextBatchText()}` : "已停止", monitorEnabled ? "running" : "stopped");
+      setStatus(statusText(monitorEnabled ? "监控中" : "已停止", [monitorEnabled && nextBatchText()]), monitorEnabled ? "running" : "stopped");
     } catch (e) {
       showToast("操作失败：" + e.message, "error");
     }
@@ -504,6 +546,10 @@ async function loadCinema(cinemaId, prevSelected) {
       cinemaMovies = res.movies.map((m) => ({ ...m, checked: sel.has(String(m.id)) }));
       renderMovies();
       log("ok", `加载影院成功: ${res.cinemaName}，在映影片 ${res.movies.length} 部`);
+      autoSaveConfig(
+        { cinemaId: String(res.cinemaId), selectedMovieIds: getSelectedIds() },
+        { msg: `影院已保存到云端：${res.cinemaName}` }
+      );
     } catch (e) {
       showToast("加载失败：" + e.message, "error");
       log("error", "加载影院失败: " + e.message);
@@ -528,7 +574,7 @@ function renderMovies() {
     const cb = document.createElement("input");
     cb.type = "checkbox";
     cb.checked = m.checked;
-    cb.addEventListener("change", () => { m.checked = cb.checked; syncCount(); });
+    cb.addEventListener("change", () => { m.checked = cb.checked; syncCount(); scheduleMovieSave(); });
     const name = document.createElement("span");
     name.className = "movie-name";
     name.textContent = m.nm;
@@ -599,34 +645,10 @@ els.btnToggleAll.addEventListener("click", () => {
   const all = getSelectedIds().length !== cinemaMovies.length;
   cinemaMovies.forEach((m) => (m.checked = all));
   renderMovies();
+  scheduleMovieSave();
 });
 
-// ---------------- 保存 / 检查 / 测试 ----------------
-els.btnSave.addEventListener("click", async () => {
-  if (!connected) return showToast("请先连接云端", "warn");
-  if (!cinemaMovies.length) return showToast("请先加载影院", "warn");
-  const selectedMovieIds = getSelectedIds();
-  if (!selectedMovieIds.length) return showToast("请至少勾选一部电影", "warn");
-  await withButtonLoading(els.btnSave, "保存中...", async () => {
-    try {
-      const selectedMovieIds = getSelectedIds();
-      const body = pushConfigBody({
-        cinemaId: els.cinemaInput.value.trim(),
-        selectedMovieIds,
-        enabled: true, // 保存完整配置视为恢复监控
-      });
-      await api("/api/config", { method: "POST", body: JSON.stringify(body) });
-      monitorEnabled = true;
-      log("ok", `配置已保存到云端（监控 ${selectedMovieIds.length} 部电影，每 ${cronMinutes} 分钟一批检查，推送 ${CHANNEL_LABELS[getChannel()]}）`);
-      showToast(`配置已保存！云端将按批次自动检查并推送到 ${CHANNEL_LABELS[getChannel()]}。`, "success");
-    } catch (e) {
-      showToast("保存失败：" + e.message, "error");
-    } finally {
-      updateMonitorBtn();
-    }
-  });
-});
-
+// ---------------- 检查 / 测试 ----------------
 els.btnCheck.addEventListener("click", async () => {
   if (!connected) return showToast("请先连接云端", "warn");
   await withButtonLoading(els.btnCheck, "检查中...", async () => {
@@ -671,7 +693,7 @@ async function refreshChanges(showLoading = false) {
     const stopped = status.enabled === false;
     const lastTxt = status.lastCheck ? fmtClock(new Date(status.lastCheck).getTime()) : "从未";
     setStatus(
-      stopped ? `已停止 · 上次检查 ${lastTxt}` : `监控中 · 上次检查 ${lastTxt}${nextBatchText()}`,
+      statusText(stopped ? "已停止" : "监控中", [`上次检查 ${lastTxt}`, !stopped && nextBatchText()]),
       stopped ? "stopped" : "running"
     );
     if (stopped !== !monitorEnabled) {

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>猫眼影院场次监控 - 云端版</title>
-  <link rel="stylesheet" href="style.css?v=20260911e" />
+  <link rel="stylesheet" href="style.css?v=20260911f" />
 </head>
 <body>
   <!-- 登录层: 首次进入 / 切换连接时显示 -->
@@ -100,11 +100,10 @@
             </div>
           </div>
           <div class="row">
-            <button id="btn-save" class="btn success">保存配置</button>
             <span class="spacer"></span>
             <button id="btn-toggle-monitor" class="btn small ghost danger">停止监控</button>
           </div>
-          <div class="muted tip-line" id="batch-tip">云端按定时批次自动检查（当前每 10 分钟一批，以服务端为准）。停止监控不会丢失配置，可随时恢复</div>
+          <div class="muted tip-line" id="batch-tip">云端按定时批次自动检查（当前每 10 分钟一批，以服务端为准）。改动会自动保存，无需手动操作</div>
         </section>
 
         <section class="card grow muted-card">
@@ -148,8 +147,8 @@
     </main>
   </div>
 
-  <script src="secure-store.js?v=20260911e"></script>
-  <script src="ui.js?v=20260911e"></script>
-  <script src="app.js?v=20260911e"></script>
+  <script src="secure-store.js?v=20260911f"></script>
+  <script src="ui.js?v=20260911f"></script>
+  <script src="app.js?v=20260911f"></script>
 </body>
 </html>
