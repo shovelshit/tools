@@ -204,8 +204,9 @@ function filterCities(kw) {
   const starts = [];
   const contains = [];
   for (const c of allCities) {
-    if (c.name.startsWith(k) || c.pinyin.startsWith(k)) starts.push(c);
-    else if (c.name.includes(k) || c.pinyin.includes(k)) contains.push(c);
+    const py = c.pinyin || "";
+    if (c.name.startsWith(k) || (py && py.startsWith(k))) starts.push(c);
+    else if (c.name.includes(k) || (py && py.includes(k))) contains.push(c);
   }
   return [...starts, ...contains].slice(0, 30);
 }
