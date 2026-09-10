@@ -10,8 +10,8 @@ routes = [
   { pattern = "www.ltools.asia/api/*", zone_name = "ltools.asia" },
   { pattern = "ltools.asia/store/api/*", zone_name = "ltools.asia" },
   { pattern = "www.ltools.asia/store/api/*", zone_name = "ltools.asia" },
-  { pattern = "ltools.asia/store/file", zone_name = "ltools.asia" },
-  { pattern = "www.ltools.asia/store/file", zone_name = "ltools.asia" }
+  { pattern = "ltools.asia/store/file*", zone_name = "ltools.asia" },
+  { pattern = "www.ltools.asia/store/file*", zone_name = "ltools.asia" }
 ]
 
 # ============ 定时触发 ============
