@@ -2,7 +2,7 @@
 // 令牌唯一来源: KV meta:tokens: [{token, remark, createdAt, lastUsedAt}]
 // KV 为空时监控页拒绝所有人访问; admin 页凭 ADMIN_TOKEN(secret) 管理
 
-import { cleanupUserData } from "../common/user.js";
+import { cleanupUserData } from "./user.js";
 import { json } from "../common/http.js";
 import { runCheck } from "./check.js";
 

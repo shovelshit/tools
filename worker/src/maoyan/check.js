@@ -1,8 +1,8 @@
 // ---------------- 监控核心: 场次快照对比 + 变化记录 ----------------
 
-import { userKey, getUserConfig } from "../common/user.js";
+import { userKey, getUserConfig } from "./user.js";
 import { fetchCinemaDetail } from "./api.js";
-import { pushNotify } from "./push.js";
+import { pushNotify } from "./notify.js";
 
 function fmtShow(s) {
   const parts = [`${s.dt || ""} ${s.tm || ""}`, s.lang || "", s.tp || "", s.th || ""];

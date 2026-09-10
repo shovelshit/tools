@@ -1,6 +1,6 @@
-// ---------------- 用户数据(KV 键名隔离) ----------------
+// ---------------- 猫眼用户数据(KV 键名隔离) ----------------
 // 每个令牌独立数据空间: u:<fnv1a(token)>:<name>
-// name: config(影院/Bark 配置) / snapshot(场次快照) / changes(变化记录) / status(检查状态)
+// name: config(影院/推送配置) / snapshot(场次快照) / changes(变化记录) / status(检查状态)
 
 function fnv1a(str) {
   let h = 2166136261;

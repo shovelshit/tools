@@ -1,8 +1,9 @@
 // ---------------- Worker 入口: 路由分发 ----------------
 
 import { CORS, json } from "./common/http.js";
-import { userKey, getUserConfig } from "./common/user.js";
-import { CITY_LIST, fetchCinemaDetail, searchCinemasByKw, runCheck, pushBark, pushNotify, PUSH_CHANNELS, currentChannel, channelLabel, checkAuthFull, syncCronTokens, handleAdminTokens, runScheduledChecks } from "./maoyan/index.js";
+import { NOTIFY_CHANNELS, pushBark } from "./common/notify.js";
+import { userKey, getUserConfig } from "./maoyan/user.js";
+import { CITY_LIST, fetchCinemaDetail, searchCinemasByKw, runCheck, pushNotify, currentChannel, checkAuthFull, syncCronTokens, handleAdminTokens, runScheduledChecks } from "./maoyan/index.js";
 import { handleStoreApi, handleStoreFile } from "./store/proxy.js";
 
 export default {
@@ -83,7 +84,7 @@ export default {
         if (body.serverChanKey !== void 0) cfg.serverChanKey = String(body.serverChanKey).trim();
         if (body.notifyChannel !== void 0) {
           const ch = String(body.notifyChannel).trim();
-          cfg.notifyChannel = PUSH_CHANNELS[ch] ? ch : "bark";
+          cfg.notifyChannel = NOTIFY_CHANNELS[ch] ? ch : "bark";
         }
         if (body.enabled === void 0 && body.cinemaId !== void 0) cfg.enabled = true;
         await env.MAOYAN_KV.put(key, JSON.stringify(cfg));
