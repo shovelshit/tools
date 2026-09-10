@@ -3,6 +3,7 @@
 import { userKey, getUserConfig } from "./user.js";
 import { fetchCinemaDetail } from "./api.js";
 import { pushNotify } from "./notify.js";
+import { cronBatchMinutes } from "./cron.js";
 
 function fmtShow(s) {
   const parts = [`${s.dt || ""} ${s.tm || ""}`, s.lang || "", s.tp || "", s.th || ""];
@@ -20,10 +21,10 @@ export async function runCheck(env, manual, token) {
   const stKey = userKey(token, "status");
   const st = await env.MAOYAN_KV.get(stKey, "json") || {};
   const now = Date.now();
-  // 间隔按 cron 批次对齐: 云端每 10 分钟唤醒一批, 间隔量化为 10 的倍数(10-720)
-  const intervalMinutes = Math.min(720, Math.max(10, Math.round((Number(cfg.intervalMinutes) || 10) / 10) * 10));
-  const intervalMs = intervalMinutes * 60 * 1e3;
-  if (!manual && st.lastCheckTs && now - st.lastCheckTs < intervalMs * 0.9) {
+  // 检查频率完全跟随 cron 批次: 每批检查一次, 半个批次的容差吸收触发时间抖动
+  const batchMinutes = cronBatchMinutes();
+  const batchMs = batchMinutes * 60 * 1e3;
+  if (!manual && st.lastCheckTs && now - st.lastCheckTs < batchMs / 2) {
     return { ok: true, skipped: true };
   }
   const data = await fetchCinemaDetail(cfg.cinemaId);

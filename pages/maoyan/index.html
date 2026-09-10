@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>猫眼影院场次监控 - 云端版</title>
-  <link rel="stylesheet" href="style.css?v=20260911b" />
+  <link rel="stylesheet" href="style.css?v=20260911c" />
 </head>
 <body>
   <!-- 登录层: 首次进入 / 切换连接时显示 -->
@@ -76,8 +76,6 @@
         <section class="card">
           <h2>监控设置与控制</h2>
           <div class="form-grid">
-            <label for="interval-input">检查间隔（分钟）</label>
-            <select id="interval-input"></select>
             <div id="push-channel-row" class="channel-row span-all">
               <span class="channel-label">推送渠道</span>
               <div class="channel-opts">
@@ -106,7 +104,7 @@
             <button id="btn-test-push" class="btn ghost">测试推送</button>
             <button id="btn-toggle-monitor" class="btn danger">停止监控</button>
           </div>
-          <div class="muted tip-line">云端每 10 分钟唤醒一批执行检查，间隔自动按 10 分钟对齐（如填 15 按 20 生效），范围 10-720 分钟。停止监控不会丢失配置，可随时恢复</div>
+          <div class="muted tip-line" id="batch-tip">云端按定时批次自动检查（当前每 10 分钟一批，以服务端为准）。停止监控不会丢失配置，可随时恢复</div>
         </section>
 
         <section class="card grow muted-card">
@@ -147,8 +145,8 @@
     </main>
   </div>
 
-  <script src="secure-store.js?v=20260911b"></script>
-  <script src="ui.js?v=20260911b"></script>
-  <script src="app.js?v=20260911b"></script>
+  <script src="secure-store.js?v=20260911c"></script>
+  <script src="ui.js?v=20260911c"></script>
+  <script src="app.js?v=20260911c"></script>
 </body>
 </html>

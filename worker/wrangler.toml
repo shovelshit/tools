@@ -15,6 +15,8 @@ routes = [
 ]
 
 # ============ 定时触发 ============
+# 注意: 修改 crons 时需同步修改 src/maoyan/cron.js 里的 CRON_EXPRESSION
+# (监控页的批次提示与检查频率都依赖它)
 [triggers]
 crons = ["*/10 * * * *"]
 

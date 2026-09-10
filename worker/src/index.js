@@ -3,7 +3,7 @@
 import { CORS, json } from "./common/http.js";
 import { NOTIFY_CHANNELS, pushBark } from "./common/notify.js";
 import { userKey, getUserConfig } from "./maoyan/user.js";
-import { CITY_LIST, fetchCinemaDetail, searchCinemasByKw, runCheck, pushNotify, currentChannel, checkAuthFull, syncCronTokens, handleAdminTokens, runScheduledChecks } from "./maoyan/index.js";
+import { CITY_LIST, fetchCinemaDetail, searchCinemasByKw, runCheck, pushNotify, currentChannel, cronBatchMinutes, checkAuthFull, syncCronTokens, handleAdminTokens, runScheduledChecks } from "./maoyan/index.js";
 import { handleStoreApi, handleStoreFile } from "./store/proxy.js";
 
 export default {
@@ -70,7 +70,7 @@ export default {
       }
       if (url.pathname === "/api/config" && request.method === "GET") {
         const cfg = await getUserConfig(env, token);
-        return json({ ok: true, config: { enabled: cfg.enabled !== false, ...cfg } });
+        return json({ ok: true, config: { enabled: cfg.enabled !== false, ...cfg, cronMinutes: cronBatchMinutes() } });
       }
       if (url.pathname === "/api/config" && request.method === "POST") {
         const body = await request.json();
@@ -79,11 +79,7 @@ export default {
         if (body.enabled !== void 0) cfg.enabled = Boolean(body.enabled);
         if (body.cinemaId !== void 0) cfg.cinemaId = String(body.cinemaId).trim();
         if (body.selectedMovieIds !== void 0) cfg.selectedMovieIds = (body.selectedMovieIds || []).map(String);
-        if (body.intervalMinutes !== void 0) {
-          const n = parseInt(body.intervalMinutes, 10) || 10;
-          // cron 每 10 分钟一批, 间隔按 10 分钟对齐(10-720)
-          cfg.intervalMinutes = Math.min(720, Math.max(10, Math.round(n / 10) * 10));
-        }
+        // 注: 检查频率已完全跟随 cron 批次, 旧前端的 intervalMinutes 字段不再生效
         if (body.barkKey !== void 0) cfg.barkKey = String(body.barkKey).trim();
         if (body.serverChanKey !== void 0) cfg.serverChanKey = String(body.serverChanKey).trim();
         if (body.notifyChannel !== void 0) {
@@ -119,7 +115,7 @@ export default {
           enabled: cfg.enabled !== false
         };
         const changes = await env.MAOYAN_KV.get(userKey(token, "changes"), "json") || [];
-        return json({ ok: true, authMode: "token", status, changes });
+        return json({ ok: true, authMode: "token", status, changes, cronMinutes: cronBatchMinutes() });
       }
       return json({ error: "Unknown API" }, 404);
     } catch (e) {

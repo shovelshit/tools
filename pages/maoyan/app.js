@@ -30,7 +30,7 @@ const els = {
   btnCheck: $("btn-check"),
   btnTestPush: $("btn-test-push"),
   btnToggleMonitor: $("btn-toggle-monitor"),
-  intervalInput: $("interval-input"),
+  batchTip: $("batch-tip"),
   barkInput: $("bark-input"),
   serverChanInput: $("serverchan-input"),
   pushBarkRow: $("push-bark-row"),
@@ -167,7 +167,11 @@ async function restoreConfig() {
   monitorEnabled = config.enabled !== false;
   updateMonitorBtn();
   if (config.cinemaId) els.cinemaInput.value = config.cinemaId;
-  if (config.intervalMinutes) els.intervalInput.value = String(quantizeInterval(config.intervalMinutes));
+  // 批次分钟数以服务端 cron 为准
+  if (config.cronMinutes && config.cronMinutes !== cronMinutes) {
+    cronMinutes = config.cronMinutes;
+  }
+  updateBatchTip();
   applyPushConfig(config);
   const prevSelected = new Set((config.selectedMovieIds || []).map(String));
   if (config.cinemaId) await loadCinema(config.cinemaId, prevSelected);
@@ -590,19 +594,15 @@ els.btnSave.addEventListener("click", async () => {
   await withButtonLoading(els.btnSave, "保存中...", async () => {
     try {
       const selectedMovieIds = getSelectedIds();
-      // cron 每 10 分钟一批, 间隔按 10 分钟对齐(10-720)
-      const intervalMinutes = quantizeInterval(els.intervalInput.value);
-      els.intervalInput.value = String(intervalMinutes);
       const body = pushConfigBody({
         cinemaId: els.cinemaInput.value.trim(),
         selectedMovieIds,
-        intervalMinutes,
         enabled: true, // 保存完整配置视为恢复监控
       });
       await api("/api/config", { method: "POST", body: JSON.stringify(body) });
       monitorEnabled = true;
-      log("ok", `配置已保存到云端（监控 ${selectedMovieIds.length} 部电影，间隔 ${els.intervalInput.value} 分钟，推送 ${CHANNEL_LABELS[getChannel()]}）`);
-      showToast(`配置已保存！云端将按间隔自动检查并推送到 ${CHANNEL_LABELS[getChannel()]}。`, "success");
+      log("ok", `配置已保存到云端（监控 ${selectedMovieIds.length} 部电影，每 ${cronMinutes} 分钟一批检查，推送 ${CHANNEL_LABELS[getChannel()]}）`);
+      showToast(`配置已保存！云端将按批次自动检查并推送到 ${CHANNEL_LABELS[getChannel()]}。`, "success");
     } catch (e) {
       showToast("保存失败：" + e.message, "error");
     } finally {
@@ -680,25 +680,17 @@ els.btnRefresh.addEventListener("click", () =>
 setInterval(() => { if (connected) refreshChanges(); }, 60000);
 
 // ---------------- 初始化 ----------------
-// 检查间隔下拉: 10-720 按 10 步进, 与 cron 批次对齐, 从源头避免手输非法值
-function fillIntervalOptions() {
-  const sel = els.intervalInput;
-  sel.innerHTML = "";
-  for (let m = 10; m <= 720; m += 10) {
-    const opt = document.createElement("option");
-    opt.value = String(m);
-    opt.textContent = m >= 60 ? `${m} 分钟（${m / 60} 小时）` : `${m} 分钟`;
-    sel.appendChild(opt);
-  }
-}
+let cronMinutes = 10; // 云端 cron 批次(分钟), 连接后以服务端下发为准
 
-// 量化到 10 的倍数(10-720), 兼容旧配置里的非对齐值
-function quantizeInterval(v) {
-  return Math.min(720, Math.max(10, Math.round((parseInt(v, 10) || 10) / 10) * 10));
+// 批次提示: 检查频率完全跟随 worker 的 cron, 界面不再提供间隔设置
+function updateBatchTip() {
+  if (!els.batchTip) return;
+  els.batchTip.textContent =
+    `云端按定时批次自动检查，当前每 ${cronMinutes} 分钟一批（以服务端为准）。停止监控不会丢失配置，可随时恢复`;
 }
 
 (async function init() {
-  fillIntervalOptions();
+  updateBatchTip();
   // 排查"刷新后回到登录页": 本机存储 / WebCrypto / 安全上下文 是否可用
   function probeEnv() {
     let storageOk = true;
