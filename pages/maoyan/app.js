@@ -12,6 +12,7 @@ const els = {
   btnConnect: $("btn-connect"),
   loginError: $("login-error"),
   loginHint: $("login-hint"),
+  loginDebug: $("login-debug"),
   // 顶栏
   statusLine: $("status-line"),
   btnLogout: $("btn-logout"),
@@ -694,11 +695,20 @@ setInterval(() => { if (connected) refreshChanges(); }, 60000);
   }
 
   const env = probeEnv();
+  const openMode = localStorage.getItem("authMode") === "open";
   let savedToken = "";
   try {
     savedToken = (await secureGet("token")) || "";
   } catch (e) {
     savedToken = "";
+  }
+  // 登录页常驻一行环境状态: 排查手机端刷新后需要重新登录的问题
+  if (els.loginDebug) {
+    const yn = (b) => (b ? "可用" : "不可用");
+    els.loginDebug.textContent =
+      `本机存储 ${yn(env.storageOk)} · WebCrypto ${yn(env.cryptoOk)} · ` +
+      `安全上下文 ${env.secureContext ? "是" : "否"} · 已存令牌 ${savedToken ? "有" : "无"} · ` +
+      `模式 ${openMode ? "免令牌" : "令牌"} · ${location.hostname}`;
   }
   els.workerUrl.value = localStorage.getItem("workerUrl") ?? DEFAULT_WORKER;
   els.token.value = savedToken;
@@ -707,8 +717,6 @@ setInterval(() => { if (connected) refreshChanges(); }, 60000);
   if (qs.get("worker")) els.workerUrl.value = qs.get("worker");
   if (qs.get("token")) els.token.value = qs.get("token");
   const explicit = qs.has("worker"); // 带参数打开视为明确意图, 免令牌模式也能自动连
-  // 免令牌模式没有令牌可存, 上次连接成功后留有标记, 刷新后同样自动重连
-  const openMode = localStorage.getItem("authMode") === "open";
   const canAutoConnect = Boolean(els.token.value.trim() || explicit || openMode);
   console.warn("[maoyan init]", {
     ...env,
