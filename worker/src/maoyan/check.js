@@ -2,7 +2,7 @@
 
 import { userKey, getUserConfig } from "../common/user.js";
 import { fetchCinemaDetail } from "./api.js";
-import { pushBark } from "./push.js";
+import { pushNotify } from "./push.js";
 
 function fmtShow(s) {
   const parts = [`${s.dt || ""} ${s.tm || ""}`, s.lang || "", s.tp || "", s.th || ""];
@@ -46,10 +46,10 @@ export async function runCheck(env, manual, token) {
       const content = `【${cinemaName}】\n${lines.join("\n")}`;
       changes.unshift({ time: new Date().toISOString(), type: "new", text: `新增 ${added.length} 场《${movie.nm}》: ${lines[0]}` });
       try {
-        await pushBark(cfg.barkKey, title, content);
-        changes.unshift({ time: new Date().toISOString(), type: "ok", text: `已推送 Bark(${movie.nm}, ${added.length} 场)` });
+        const label = await pushNotify(cfg, title, content);
+        changes.unshift({ time: new Date().toISOString(), type: "ok", text: `已推送 ${label}(${movie.nm}, ${added.length} 场)` });
       } catch (e) {
-        changes.unshift({ time: new Date().toISOString(), type: "error", text: "Bark 推送失败: " + e.message });
+        changes.unshift({ time: new Date().toISOString(), type: "error", text: "推送失败: " + e.message });
       }
     }
     snapshot[idStr] = shows.map((s) => s.seqNo);

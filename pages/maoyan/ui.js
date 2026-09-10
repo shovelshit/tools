@@ -1,5 +1,5 @@
-// 轻量提示组件: 顶部 toast + 模态对话框(替代原生 alert / confirm)
-// 依赖 style.css 中的 .toast-wrap / .dlg-overlay 样式
+// 轻量 UI 组件: 顶部 toast + 模态对话框(替代原生 alert / confirm) + 各类 loading
+// 依赖 style.css 中的 .toast-wrap / .dlg-overlay / .top-progress / .block-overlay / .panel-loading 样式
 (function () {
   let activeDialog = null;
 
@@ -113,4 +113,70 @@
       activeDialog = null;
     }
   }
+
+  // ---------------- Loading ----------------
+
+  // 按钮 loading: 禁用按钮并插入转圈图标 + 文案, 结束后恢复
+  // withButtonLoading(btn, "保存中...", () => api(...))
+  window.withButtonLoading = async function (btn, loadingText, task) {
+    if (!btn) return task();
+    const original = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `<span class="spinner"></span><span></span>`;
+    btn.lastChild.textContent = loadingText;
+    try {
+      return await task();
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = original;
+    }
+  };
+
+  // 顶部细进度条: 按请求计数显示/隐藏
+  let pendingRequests = 0;
+  let progressEl = null;
+  function ensureProgress() {
+    if (!progressEl) {
+      progressEl = document.createElement("div");
+      progressEl.className = "top-progress";
+      document.body.appendChild(progressEl);
+    }
+    return progressEl;
+  }
+  window.startTopProgress = function () {
+    pendingRequests++;
+    ensureProgress().classList.add("active");
+  };
+  window.stopTopProgress = function () {
+    pendingRequests = Math.max(0, pendingRequests - 1);
+    if (!pendingRequests && progressEl) progressEl.classList.remove("active");
+  };
+
+  // 全屏阻塞遮罩: 用于登录连接等必须等待的操作
+  let blockEl = null;
+  window.showBlockOverlay = function (text = "加载中...") {
+    hideBlockOverlay();
+    blockEl = document.createElement("div");
+    blockEl.className = "block-overlay";
+    blockEl.innerHTML = `<div class="block-box"><span class="spinner big"></span><div class="block-text"></div></div>`;
+    blockEl.querySelector(".block-text").textContent = text;
+    document.body.appendChild(blockEl);
+  };
+  window.hideBlockOverlay = function () {
+    if (blockEl) {
+      blockEl.remove();
+      blockEl = null;
+    }
+  };
+
+  // 列表面板内联占位: 影片列表 / 变化记录加载中
+  window.setPanelLoading = function (el, text = "加载中...") {
+    if (!el) return;
+    el.innerHTML = "";
+    const box = document.createElement("div");
+    box.className = "panel-loading";
+    box.innerHTML = `<span class="spinner"></span><span></span>`;
+    box.lastChild.textContent = text;
+    el.appendChild(box);
+  };
 })();

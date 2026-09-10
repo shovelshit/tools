@@ -76,13 +76,32 @@
           <div class="form-grid">
             <label for="interval-input">检查间隔（分钟）</label>
             <input id="interval-input" type="number" min="10" max="720" step="10" value="10" />
-            <label for="bark-input">Bark Key 或 URL</label>
-            <input id="bark-input" type="text" placeholder="xxxxx 或 https://api.day.app/xxxxx" />
+            <div class="channel-row span-all">
+              <span class="channel-label">推送渠道</span>
+              <div class="channel-opts">
+                <label><input type="radio" name="push-channel" value="bark" checked /> Bark（iPhone）</label>
+                <label><input type="radio" name="push-channel" value="serverchan" /> Server酱（微信）</label>
+              </div>
+            </div>
+            <div id="push-bark-row" class="row-span-all">
+              <label for="bark-input">Bark Key 或 URL</label>
+              <input id="bark-input" type="text" placeholder="xxxxx 或 https://api.day.app/xxxxx" />
+              <div class="push-hint muted">
+                没有 Bark？<a href="https://apps.apple.com/cn/app/id1403753865" target="_blank" rel="noopener">App Store 下载 Bark</a>，打开后在 App 内复制 Key
+              </div>
+            </div>
+            <div id="push-serverchan-row" class="row-span-all hidden">
+              <label for="serverchan-input">Server酱 SendKey</label>
+              <input id="serverchan-input" type="text" placeholder="SCT 开头的 SendKey" autocomplete="off" />
+              <div class="push-hint muted">
+                微信扫码登录 <a href="https://sct.ftqq.com/sendkey" target="_blank" rel="noopener">获取 SendKey</a>（免费版每天 5 条）
+              </div>
+            </div>
           </div>
           <div class="row">
             <button id="btn-save" class="btn success">保存配置</button>
             <button id="btn-check" class="btn">立即检查</button>
-            <button id="btn-test-bark" class="btn ghost">测试 Bark</button>
+            <button id="btn-test-push" class="btn ghost">测试推送</button>
             <button id="btn-toggle-monitor" class="btn danger">停止监控</button>
           </div>
           <div class="muted tip-line">云端每 10 分钟唤醒一次，间隔设为 30/60 分钟时会跳过过近的触发；最小生效间隔为 10 分钟。停止监控不会丢失配置，可随时恢复</div>
@@ -93,7 +112,7 @@
           <ol class="help-list">
             <li>在登录页填访问令牌，点「进入监控」（同域打开无需填地址）</li>
             <li>选择城市，模糊搜索影院并加载（也可手动输入影院 ID）</li>
-            <li>勾选电影、设间隔和 Bark</li>
+            <li>勾选电影、设间隔，选择推送渠道（Bark 或 Server酱）并填好 Key</li>
             <li>点「保存配置」即完成，只需设置一次</li>
           </ol>
         </section>

@@ -26,10 +26,13 @@ const els = {
   // 监控设置
   btnSave: $("btn-save"),
   btnCheck: $("btn-check"),
-  btnTestBark: $("btn-test-bark"),
+  btnTestPush: $("btn-test-push"),
   btnToggleMonitor: $("btn-toggle-monitor"),
   intervalInput: $("interval-input"),
   barkInput: $("bark-input"),
+  serverChanInput: $("serverchan-input"),
+  pushBarkRow: $("push-bark-row"),
+  pushServerChanRow: $("push-serverchan-row"),
   // 电影列表
   movieList: $("movie-list"),
   movieCount: $("movie-count"),
@@ -42,7 +45,7 @@ const els = {
 let cinemaMovies = []; // [{id, nm, showCount, checked}]
 let connected = false;
 let monitorEnabled = true;
-let barkSaved = false; // 云端已存有 Bark Key(免令牌模式下接口不回显, 保存时避免误覆盖)
+let pushSaved = false; // 云端已存有当前渠道的推送配置(接口不回显时, 保存时避免误覆盖)
 
 // 城市 / 影院搜索
 let allCities = [];        // [{id, name, pinyin}]
@@ -65,10 +68,15 @@ function apiPath(path, params = "") {
 async function api(path, options = {}) {
   const headers = { "X-Token": els.token.value.trim() };
   if (options.body) headers["Content-Type"] = "application/json";
-  const res = await fetch(apiPath(path), { ...options, headers });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || "HTTP " + res.status);
-  return data;
+  startTopProgress();
+  try {
+    const res = await fetch(apiPath(path), { ...options, headers });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "HTTP " + res.status);
+    return data;
+  } finally {
+    stopTopProgress();
+  }
 }
 
 function log(type, text) {
@@ -98,19 +106,24 @@ async function connect() {
   if (!els.workerUrl.value.trim() && !SAME_ORIGIN) return showLoginError("请填写服务地址");
   localStorage.setItem("workerUrl", els.workerUrl.value.trim());
   await secureSet("token", els.token.value.trim());
-  els.btnConnect.disabled = true;
-  els.btnConnect.textContent = "连接中...";
   els.loginError.classList.add("hidden");
   try {
-    const st = await api("/api/status");
-    connected = true;
-    const openMode = st.authMode === "open";
-    document.body.classList.toggle("open-mode", openMode);
-    setStatus(`已连接，上次检查 ${st.status.lastCheck || "从未"}${openMode ? "（免令牌模式）" : ""}`);
-    enterMainPage();
-    log("ok", "云端连接成功");
-    await Promise.all([loadCities(), restoreConfig()]);
-    refreshChanges();
+    await withButtonLoading(els.btnConnect, "连接中...", async () => {
+      showBlockOverlay("正在连接云端...");
+      try {
+        const st = await api("/api/status");
+        connected = true;
+        const openMode = st.authMode === "open";
+        document.body.classList.toggle("open-mode", openMode);
+        setStatus(`已连接，上次检查 ${st.status.lastCheck || "从未"}${openMode ? "（免令牌模式）" : ""}`);
+        enterMainPage();
+        log("ok", "云端连接成功");
+        await Promise.all([loadCities(), restoreConfig()]);
+        refreshChanges();
+      } finally {
+        hideBlockOverlay();
+      }
+    });
   } catch (e) {
     connected = false;
     setStatus("连接失败");
@@ -118,9 +131,6 @@ async function connect() {
     let msg = e.message;
     if (msg.includes("访问令牌错误")) msg = "访问令牌无效，请检查令牌是否输入正确";
     showLoginError("连接失败：" + msg);
-  } finally {
-    els.btnConnect.disabled = false;
-    els.btnConnect.textContent = "进入监控";
   }
 }
 
@@ -144,11 +154,63 @@ async function restoreConfig() {
   updateMonitorBtn();
   if (config.cinemaId) els.cinemaInput.value = config.cinemaId;
   if (config.intervalMinutes) els.intervalInput.value = config.intervalMinutes;
-  if (config.barkKey) { els.barkInput.value = config.barkKey; barkSaved = true; }
-  else { barkSaved = Boolean(config.hasBark); if (barkSaved) log("info", "Bark 已配置（为防泄露不回显，保存配置不会覆盖它）"); }
+  applyPushConfig(config);
   const prevSelected = new Set((config.selectedMovieIds || []).map(String));
   if (config.cinemaId) await loadCinema(config.cinemaId, prevSelected);
 }
+
+// ---------------- 推送渠道 ----------------
+const CHANNEL_LABELS = { bark: "Bark", serverchan: "Server酱" };
+
+function getChannel() {
+  const checked = document.querySelector('input[name="push-channel"]:checked');
+  return checked ? checked.value : "bark";
+}
+
+function setChannel(ch) {
+  const radio =
+    document.querySelector(`input[name="push-channel"][value="${ch}"]`) ||
+    document.querySelector('input[name="push-channel"][value="bark"]');
+  radio.checked = true;
+  renderChannel();
+}
+
+function renderChannel() {
+  const ch = getChannel();
+  els.pushBarkRow.classList.toggle("hidden", ch !== "bark");
+  els.pushServerChanRow.classList.toggle("hidden", ch !== "serverchan");
+}
+
+// 当前渠道对应的输入框与配置字段名
+function currentKeyInput() {
+  return getChannel() === "serverchan" ? els.serverChanInput : els.barkInput;
+}
+function currentKeyField() {
+  return getChannel() === "serverchan" ? "serverChanKey" : "barkKey";
+}
+
+function applyPushConfig(config) {
+  setChannel(config.notifyChannel || "bark");
+  if (config.barkKey) els.barkInput.value = config.barkKey;
+  if (config.serverChanKey) els.serverChanInput.value = config.serverChanKey;
+  pushSaved = Boolean(config.barkKey || config.serverChanKey || config.hasBark);
+  if (pushSaved && !currentKeyInput().value.trim()) {
+    log("info", `${CHANNEL_LABELS[getChannel()]} 已配置（为防泄露不回显，留空保存不会覆盖）`);
+  }
+}
+
+// 保存当前渠道的推送配置(留空则不提交, 保留云端已存值)
+function pushConfigBody(extra = {}) {
+  const key = currentKeyInput().value.trim();
+  const body = { notifyChannel: getChannel(), ...extra };
+  if (key) body[currentKeyField()] = key;
+  else if (pushSaved) log("info", "推送配置留空，保留云端已有配置");
+  return body;
+}
+
+document.querySelectorAll('input[name="push-channel"]').forEach((radio) => {
+  radio.addEventListener("change", renderChannel);
+});
 
 // ---------------- 监控启停 ----------------
 function updateMonitorBtn() {
@@ -160,19 +222,18 @@ function updateMonitorBtn() {
 
 els.btnToggleMonitor.addEventListener("click", async () => {
   if (!connected) return showToast("请先连接云端", "warn");
-  els.btnToggleMonitor.disabled = true;
-  try {
-    const target = !monitorEnabled;
-    await api("/api/config", { method: "POST", body: JSON.stringify({ enabled: target }) });
-    monitorEnabled = target;
-    updateMonitorBtn();
-    log(target ? "ok" : "info", target ? "监控已恢复，云端将继续按间隔检查" : "监控已停止，云端不再自动检查（配置已保留）");
-    setStatus(`已连接${monitorEnabled ? "" : "（监控已停止）"}`);
-  } catch (e) {
-    showToast("操作失败：" + e.message, "error");
-  } finally {
-    updateMonitorBtn();
-  }
+  await withButtonLoading(els.btnToggleMonitor, "处理中...", async () => {
+    try {
+      const target = !monitorEnabled;
+      await api("/api/config", { method: "POST", body: JSON.stringify({ enabled: target }) });
+      monitorEnabled = target;
+      log(target ? "ok" : "info", target ? "监控已恢复，云端将继续按间隔检查" : "监控已停止，云端不再自动检查（配置已保留）");
+      setStatus(`已连接${monitorEnabled ? "" : "（监控已停止）"}`);
+    } catch (e) {
+      showToast("操作失败：" + e.message, "error");
+    }
+  });
+  updateMonitorBtn(); // 按钮文案还原后再按最新状态刷新
 });
 
 // ---------------- 城市选择 ----------------
@@ -345,7 +406,9 @@ els.cinemaSearch.addEventListener("keydown", (e) => {
     scheduleCinemaSearch(true);
   }
 });
-els.btnSearchCinema.addEventListener("click", () => scheduleCinemaSearch(true));
+els.btnSearchCinema.addEventListener("click", () =>
+  withButtonLoading(els.btnSearchCinema, "搜索中...", () => scheduleCinemaSearch(true))
+);
 
 // 点击下拉外部时收起
 document.addEventListener("click", (e) => {
@@ -386,23 +449,22 @@ els.cinemaInput.addEventListener("keydown", (e) => {
 });
 
 async function loadCinema(cinemaId, prevSelected) {
-  els.btnLoadCinema.disabled = true;
-  els.btnLoadCinema.textContent = "加载中...";
-  try {
-    const res = await api("/api/shows?cinemaId=" + encodeURIComponent(cinemaId));
-    els.cinemaName.textContent = `🎬 ${res.cinemaName}（ID: ${res.cinemaId}）`;
-    els.cinemaName.classList.remove("hidden");
-    const sel = prevSelected || new Set(getSelectedIds());
-    cinemaMovies = res.movies.map((m) => ({ ...m, checked: sel.has(String(m.id)) }));
-    renderMovies();
-    log("ok", `加载影院成功: ${res.cinemaName}，在映影片 ${res.movies.length} 部`);
-  } catch (e) {
-    showToast("加载失败：" + e.message, "error");
-    log("error", "加载影院失败: " + e.message);
-  } finally {
-    els.btnLoadCinema.disabled = false;
-    els.btnLoadCinema.textContent = "加载";
-  }
+  setPanelLoading(els.movieList, "正在加载影院影片...");
+  await withButtonLoading(els.btnLoadCinema, "加载中...", async () => {
+    try {
+      const res = await api("/api/shows?cinemaId=" + encodeURIComponent(cinemaId));
+      els.cinemaName.textContent = `🎬 ${res.cinemaName}（ID: ${res.cinemaId}）`;
+      els.cinemaName.classList.remove("hidden");
+      const sel = prevSelected || new Set(getSelectedIds());
+      cinemaMovies = res.movies.map((m) => ({ ...m, checked: sel.has(String(m.id)) }));
+      renderMovies();
+      log("ok", `加载影院成功: ${res.cinemaName}，在映影片 ${res.movies.length} 部`);
+    } catch (e) {
+      showToast("加载失败：" + e.message, "error");
+      log("error", "加载影院失败: " + e.message);
+      els.movieList.innerHTML = '<div class="muted empty-tip">加载失败，请重试</div>';
+    }
+  });
 }
 
 // ---------------- 影片列表 ----------------
@@ -500,61 +562,65 @@ els.btnSave.addEventListener("click", async () => {
   if (!cinemaMovies.length) return showToast("请先加载影院", "warn");
   const selectedMovieIds = getSelectedIds();
   if (!selectedMovieIds.length) return showToast("请至少勾选一部电影", "warn");
-  try {
-    const body = {
-      cinemaId: els.cinemaInput.value.trim(),
-      selectedMovieIds,
-      intervalMinutes: parseInt(els.intervalInput.value, 10) || 10,
-      enabled: true, // 保存完整配置视为恢复监控
-    };
-    // Bark 输入留空时不发送, 保留云端已配置的 Key(免令牌模式下不回显)
-    if (els.barkInput.value.trim()) body.barkKey = els.barkInput.value.trim();
-    else if (barkSaved) log("info", "Bark 输入为空，保留云端已有的 Bark Key");
-    await api("/api/config", { method: "POST", body: JSON.stringify(body) });
-    monitorEnabled = true;
-    updateMonitorBtn();
-    log("ok", `配置已保存到云端（监控 ${selectedMovieIds.length} 部电影，间隔 ${els.intervalInput.value} 分钟）`);
-    showToast("配置已保存！云端将按间隔自动检查并推送 Bark。", "success");
-  } catch (e) {
-    showToast("保存失败：" + e.message, "error");
-  }
+  await withButtonLoading(els.btnSave, "保存中...", async () => {
+    try {
+      const selectedMovieIds = getSelectedIds();
+      const body = pushConfigBody({
+        cinemaId: els.cinemaInput.value.trim(),
+        selectedMovieIds,
+        intervalMinutes: parseInt(els.intervalInput.value, 10) || 10,
+        enabled: true, // 保存完整配置视为恢复监控
+      });
+      await api("/api/config", { method: "POST", body: JSON.stringify(body) });
+      monitorEnabled = true;
+      log("ok", `配置已保存到云端（监控 ${selectedMovieIds.length} 部电影，间隔 ${els.intervalInput.value} 分钟，推送 ${CHANNEL_LABELS[getChannel()]}）`);
+      showToast(`配置已保存！云端将按间隔自动检查并推送到 ${CHANNEL_LABELS[getChannel()]}。`, "success");
+    } catch (e) {
+      showToast("保存失败：" + e.message, "error");
+    } finally {
+      updateMonitorBtn();
+    }
+  });
 });
 
 els.btnCheck.addEventListener("click", async () => {
   if (!connected) return showToast("请先连接云端", "warn");
-  els.btnCheck.disabled = true;
-  els.btnCheck.textContent = "检查中...";
-  try {
-    const res = await api("/api/check", { method: "POST" });
-    log(res.newTotal ? "new" : "ok", `检查完成: ${res.cinemaName || ""}，新增 ${res.newTotal ?? 0} 场`);
-    await refreshChanges();
-  } catch (e) {
-    showToast("检查失败：" + e.message, "error");
-  } finally {
-    els.btnCheck.disabled = false;
-    els.btnCheck.textContent = "立即检查";
-  }
+  await withButtonLoading(els.btnCheck, "检查中...", async () => {
+    try {
+      const res = await api("/api/check", { method: "POST" });
+      log(res.newTotal ? "new" : "ok", `检查完成: ${res.cinemaName || ""}，新增 ${res.newTotal ?? 0} 场`);
+      await refreshChanges();
+    } catch (e) {
+      showToast("检查失败：" + e.message, "error");
+    }
+  });
 });
 
-els.btnTestBark.addEventListener("click", async () => {
+els.btnTestPush.addEventListener("click", async () => {
   if (!connected) return showToast("请先连接云端", "warn");
-  // 先保存 Bark 配置再测试
-  if (els.barkInput.value.trim()) {
-    await api("/api/config", { method: "POST", body: JSON.stringify({ barkKey: els.barkInput.value.trim() }) });
-    barkSaved = true;
-  }
-  try {
-    await api("/api/test-bark", { method: "POST" });
-    showToast("测试推送已发送，请查看 iPhone", "success");
-    log("ok", "Bark 测试推送已发送");
-  } catch (e) {
-    showToast("测试失败：" + e.message, "error");
-  }
+  await withButtonLoading(els.btnTestPush, "发送中...", async () => {
+    try {
+      // 先保存当前渠道的推送配置再测试
+      const key = currentKeyInput().value.trim();
+      if (key) {
+        await api("/api/config", { method: "POST", body: JSON.stringify(pushConfigBody()) });
+        pushSaved = true;
+      }
+      const res = await api("/api/test-push", { method: "POST" });
+      const label = res.label || CHANNEL_LABELS[getChannel()];
+      showToast(`测试推送已发送（${label}），请查收`, "success");
+      log("ok", `${label} 测试推送已发送`);
+    } catch (e) {
+      showToast("测试失败：" + e.message, "error");
+    }
+  });
 });
 
 // ---------------- 变化记录 ----------------
-async function refreshChanges() {
+// showLoading: 手动刷新时显示面板占位, 自动轮询不显示(避免闪烁)
+async function refreshChanges(showLoading = false) {
   try {
+    if (showLoading) setPanelLoading(els.logPanel, "正在加载变化记录...");
     const { status, changes } = await api("/api/status");
     const stopped = status.enabled === false;
     setStatus(`已连接，上次检查 ${status.lastCheck ? new Date(status.lastCheck).toLocaleString("zh-CN", { hour12: false }) : "从未"}${stopped ? "（监控已停止）" : ""}`);
@@ -573,11 +639,14 @@ async function refreshChanges() {
       els.logPanel.innerHTML = '<div class="log-entry log-info">暂无变化记录，点「立即检查」试试</div>';
     }
   } catch (e) {
+    if (showLoading) els.logPanel.innerHTML = '<div class="log-entry log-error">加载失败，请重试</div>';
     log("error", "获取变化记录失败: " + e.message);
   }
 }
 
-els.btnRefresh.addEventListener("click", refreshChanges);
+els.btnRefresh.addEventListener("click", () =>
+  withButtonLoading(els.btnRefresh, "刷新中...", () => refreshChanges(true))
+);
 
 // 每 60 秒自动刷新状态与记录
 setInterval(() => { if (connected) refreshChanges(); }, 60000);

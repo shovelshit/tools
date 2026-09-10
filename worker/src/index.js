@@ -2,7 +2,7 @@
 
 import { CORS, json } from "./common/http.js";
 import { userKey, getUserConfig } from "./common/user.js";
-import { CITY_LIST, fetchCinemaDetail, searchCinemasByKw, runCheck, pushBark, checkAuthFull, syncCronTokens, handleAdminTokens, runScheduledChecks } from "./maoyan/index.js";
+import { CITY_LIST, fetchCinemaDetail, searchCinemasByKw, runCheck, pushBark, pushNotify, PUSH_CHANNELS, currentChannel, channelLabel, checkAuthFull, syncCronTokens, handleAdminTokens, runScheduledChecks } from "./maoyan/index.js";
 import { handleStoreApi, handleStoreFile } from "./store/proxy.js";
 
 export default {
@@ -80,6 +80,11 @@ export default {
         if (body.selectedMovieIds !== void 0) cfg.selectedMovieIds = (body.selectedMovieIds || []).map(String);
         if (body.intervalMinutes !== void 0) cfg.intervalMinutes = Math.max(1, parseInt(body.intervalMinutes, 10) || 10);
         if (body.barkKey !== void 0) cfg.barkKey = String(body.barkKey).trim();
+        if (body.serverChanKey !== void 0) cfg.serverChanKey = String(body.serverChanKey).trim();
+        if (body.notifyChannel !== void 0) {
+          const ch = String(body.notifyChannel).trim();
+          cfg.notifyChannel = PUSH_CHANNELS[ch] ? ch : "bark";
+        }
         if (body.enabled === void 0 && body.cinemaId !== void 0) cfg.enabled = true;
         await env.MAOYAN_KV.put(key, JSON.stringify(cfg));
         return json({ ok: true, config: { enabled: cfg.enabled !== false, ...cfg } });
@@ -91,6 +96,12 @@ export default {
         const cfg = await getUserConfig(env, token);
         await pushBark(cfg.barkKey, "猫眼场次监控", "这是一条测试推送, 云端 Bark 配置成功 ✅");
         return json({ ok: true });
+      }
+      // ---- 按当前选中渠道发送测试推送 ----
+      if (url.pathname === "/api/test-push" && request.method === "POST") {
+        const cfg = await getUserConfig(env, token);
+        const label = await pushNotify(cfg, "猫眼场次监控", "这是一条测试推送, 云端推送配置成功 ✅");
+        return json({ ok: true, channel: currentChannel(cfg), label });
       }
       if (url.pathname === "/api/status" && request.method === "GET") {
         const cfg = await getUserConfig(env, token);

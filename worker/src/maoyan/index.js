@@ -3,5 +3,5 @@
 export { CITY_LIST } from "./cities.js";
 export { fetchCinemaDetail, searchCinemasByKw } from "./api.js";
 export { runCheck } from "./check.js";
-export { pushBark } from "./push.js";
+export { pushBark, pushServerChan, pushNotify, PUSH_CHANNELS, currentChannel, channelLabel } from "./push.js";
 export { checkAuthFull, syncCronTokens, handleAdminTokens, runScheduledChecks } from "./tokens.js";
