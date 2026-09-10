@@ -1,0 +1,26 @@
+name = "tools-api"
+main = "src/index.js"
+compatibility_date = "2026-09-08"
+workers_dev = true
+
+# ============ 自定义域名路由 (zone: ltools.asia) ============
+# 注意: routes 必须在 [triggers] 之前, 否则会被解析为 triggers 的子字段
+routes = [
+  { pattern = "ltools.asia/api/*", zone_name = "ltools.asia" },
+  { pattern = "www.ltools.asia/api/*", zone_name = "ltools.asia" },
+  { pattern = "ltools.asia/store/api/*", zone_name = "ltools.asia" },
+  { pattern = "www.ltools.asia/store/api/*", zone_name = "ltools.asia" },
+  { pattern = "ltools.asia/store/file", zone_name = "ltools.asia" },
+  { pattern = "www.ltools.asia/store/file", zone_name = "ltools.asia" }
+]
+
+# ============ 定时触发 ============
+[triggers]
+crons = ["*/10 * * * *"]
+
+# ============ KV 绑定(令牌/用户数据/影院缓存) ============
+[[kv_namespaces]]
+binding = "MAOYAN_KV"
+id = "2027a99d8e934025b3b82ef203c4acff"
+
+# ADMIN_TOKEN 为 secret(保护 admin 页), 控制台设置或 wrangler secret put 注入
