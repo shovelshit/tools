@@ -52,7 +52,7 @@ function showLoginError(msg) {
 async function login() {
   baseUrl = els.workerUrl.value.trim().replace(/\/+$/, "");
   adminToken = els.adminToken.value.trim();
-  if (!baseUrl && !SAME_ORIGIN) return showLoginError("请填写 Worker 地址");
+  if (!baseUrl && !SAME_ORIGIN) return showLoginError("请填写服务地址");
   if (!adminToken) return showLoginError("请填写管理令牌");
   els.btnLogin.disabled = true;
   els.btnLogin.textContent = "验证中...";
@@ -70,7 +70,7 @@ async function login() {
     if (/HTTP 40[13]/.test(msg)) {
       msg = `管理令牌错误或无权限（${msg}）`;
     } else if (msg.includes("HTTP 404") || msg.includes("Unknown API")) {
-      msg = "Worker 暂不支持令牌管理接口（/api/admin/tokens），请先更新 Worker 部署";
+      msg = "服务端暂不支持令牌管理接口，请先更新服务端部署";
     }
     showLoginError("连接失败：" + msg);
   } finally {
@@ -192,12 +192,15 @@ els.btnAdd.addEventListener("click", async () => {
     });
     const newToken = res.token || token;
     try { await copyText(newToken); } catch (e) { /* 复制失败不阻断 */ }
-    alert(`令牌已创建并复制到剪贴板：\n\n${newToken}\n\n请发给使用者在监控页登录时填写。`);
+    await showDialog(
+      `令牌已创建并复制到剪贴板：\n\n${newToken}\n\n请发给使用者在监控页登录时填写。`,
+      { title: "令牌已创建", type: "success" }
+    );
     els.remark.value = "";
     els.tokenValue.value = "";
     await refreshTokens();
   } catch (e) {
-    alert("新增失败：" + e.message);
+    showToast("新增失败：" + e.message, "error");
   } finally {
     els.btnAdd.disabled = false;
     els.btnAdd.textContent = "新增";
@@ -206,13 +209,17 @@ els.btnAdd.addEventListener("click", async () => {
 
 async function deleteToken(t) {
   const label = t.remark ? `「${t.remark}」` : "";
-  if (!confirm(`确定删除令牌 ${maskToken(t.token)} ${label}？\n删除后使用者将无法再连接云端。`)) return;
+  const ok = await showConfirm(
+    `确定删除令牌 ${maskToken(t.token)} ${label}？\n删除后使用者将无法再连接云端。`,
+    { title: "删除令牌", danger: true, okText: "删除" }
+  );
+  if (!ok) return;
   try {
     await adminApi("/api/admin/tokens?token=" + encodeURIComponent(t.token), { method: "DELETE" });
     tokens = tokens.filter((x) => x.token !== t.token);
     renderTokens();
   } catch (e) {
-    alert("删除失败：" + e.message);
+    showToast("删除失败：" + e.message, "error");
   }
 }
 

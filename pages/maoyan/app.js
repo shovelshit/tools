@@ -95,7 +95,7 @@ function enterMainPage() {
 }
 
 async function connect() {
-  if (!els.workerUrl.value.trim() && !SAME_ORIGIN) return showLoginError("请填写 Worker 地址");
+  if (!els.workerUrl.value.trim() && !SAME_ORIGIN) return showLoginError("请填写服务地址");
   localStorage.setItem("workerUrl", els.workerUrl.value.trim());
   await secureSet("token", els.token.value.trim());
   els.btnConnect.disabled = true;
@@ -159,17 +159,17 @@ function updateMonitorBtn() {
 }
 
 els.btnToggleMonitor.addEventListener("click", async () => {
-  if (!connected) return alert("请先连接云端");
+  if (!connected) return showToast("请先连接云端", "warn");
   els.btnToggleMonitor.disabled = true;
   try {
     const target = !monitorEnabled;
     await api("/api/config", { method: "POST", body: JSON.stringify({ enabled: target }) });
     monitorEnabled = target;
     updateMonitorBtn();
-    log(target ? "ok" : "info", target ? "监控已恢复，Workers 将继续按间隔检查" : "监控已停止，云端不再自动检查（配置已保留）");
+    log(target ? "ok" : "info", target ? "监控已恢复，云端将继续按间隔检查" : "监控已停止，云端不再自动检查（配置已保留）");
     setStatus(`已连接${monitorEnabled ? "" : "（监控已停止）"}`);
   } catch (e) {
-    alert("操作失败：" + e.message);
+    showToast("操作失败：" + e.message, "error");
   } finally {
     updateMonitorBtn();
   }
@@ -378,7 +378,7 @@ els.btnLoadCinema.addEventListener("click", () => {
     els.cinemaInput.value = id;
     loadCinema(id);
   } catch (e) {
-    alert(e.message);
+    showToast(e.message, "error");
   }
 });
 els.cinemaInput.addEventListener("keydown", (e) => {
@@ -397,7 +397,7 @@ async function loadCinema(cinemaId, prevSelected) {
     renderMovies();
     log("ok", `加载影院成功: ${res.cinemaName}，在映影片 ${res.movies.length} 部`);
   } catch (e) {
-    alert("加载失败：" + e.message);
+    showToast("加载失败：" + e.message, "error");
     log("error", "加载影院失败: " + e.message);
   } finally {
     els.btnLoadCinema.disabled = false;
@@ -496,10 +496,10 @@ els.btnToggleAll.addEventListener("click", () => {
 
 // ---------------- 保存 / 检查 / 测试 ----------------
 els.btnSave.addEventListener("click", async () => {
-  if (!connected) return alert("请先连接云端");
-  if (!cinemaMovies.length) return alert("请先加载影院");
+  if (!connected) return showToast("请先连接云端", "warn");
+  if (!cinemaMovies.length) return showToast("请先加载影院", "warn");
   const selectedMovieIds = getSelectedIds();
-  if (!selectedMovieIds.length) return alert("请至少勾选一部电影");
+  if (!selectedMovieIds.length) return showToast("请至少勾选一部电影", "warn");
   try {
     const body = {
       cinemaId: els.cinemaInput.value.trim(),
@@ -514,14 +514,14 @@ els.btnSave.addEventListener("click", async () => {
     monitorEnabled = true;
     updateMonitorBtn();
     log("ok", `配置已保存到云端（监控 ${selectedMovieIds.length} 部电影，间隔 ${els.intervalInput.value} 分钟）`);
-    alert("配置已保存！Workers 将按间隔自动检查并推送 Bark。");
+    showToast("配置已保存！云端将按间隔自动检查并推送 Bark。", "success");
   } catch (e) {
-    alert("保存失败：" + e.message);
+    showToast("保存失败：" + e.message, "error");
   }
 });
 
 els.btnCheck.addEventListener("click", async () => {
-  if (!connected) return alert("请先连接云端");
+  if (!connected) return showToast("请先连接云端", "warn");
   els.btnCheck.disabled = true;
   els.btnCheck.textContent = "检查中...";
   try {
@@ -529,7 +529,7 @@ els.btnCheck.addEventListener("click", async () => {
     log(res.newTotal ? "new" : "ok", `检查完成: ${res.cinemaName || ""}，新增 ${res.newTotal ?? 0} 场`);
     await refreshChanges();
   } catch (e) {
-    alert("检查失败：" + e.message);
+    showToast("检查失败：" + e.message, "error");
   } finally {
     els.btnCheck.disabled = false;
     els.btnCheck.textContent = "立即检查";
@@ -537,7 +537,7 @@ els.btnCheck.addEventListener("click", async () => {
 });
 
 els.btnTestBark.addEventListener("click", async () => {
-  if (!connected) return alert("请先连接云端");
+  if (!connected) return showToast("请先连接云端", "warn");
   // 先保存 Bark 配置再测试
   if (els.barkInput.value.trim()) {
     await api("/api/config", { method: "POST", body: JSON.stringify({ barkKey: els.barkInput.value.trim() }) });
@@ -545,10 +545,10 @@ els.btnTestBark.addEventListener("click", async () => {
   }
   try {
     await api("/api/test-bark", { method: "POST" });
-    alert("测试推送已发送，请查看 iPhone");
+    showToast("测试推送已发送，请查看 iPhone", "success");
     log("ok", "Bark 测试推送已发送");
   } catch (e) {
-    alert("测试失败：" + e.message);
+    showToast("测试失败：" + e.message, "error");
   }
 });
 

@@ -275,7 +275,77 @@ input[type="password"]:focus { border-color: var(--primary); }
 .btn.success:hover { background: #1b8a5a; }
 .btn.ghost { background: #fff; color: var(--primary); border: 1px solid var(--primary); }
 .btn.ghost:hover { background: #fff5f5; }
+.btn.danger { background: var(--danger); }
 .btn.small { padding: 4px 12px; font-size: 12px; }
+
+/* ---------- Toast 顶部提示 ---------- */
+.toast-wrap {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.toast {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 18px;
+  font-size: 13px;
+  color: var(--text);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+  max-width: min(90vw, 420px);
+  text-align: center;
+  opacity: 0;
+  transform: translateY(-8px);
+  transition: opacity 0.25s, transform 0.25s;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast-success { border-color: #b8e6d4; background: #f0fbf6; color: #1b8a5a; }
+.toast-error { border-color: #f2c7c7; background: #fdf1f1; color: var(--danger); }
+.toast-warn { border-color: #f0dcb0; background: #fff8e6; color: #b07f00; }
+
+/* ---------- 模态对话框(替代 alert/confirm) ---------- */
+.dlg-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2500;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: dlg-fade 0.15s ease;
+}
+.dlg-box {
+  width: 100%;
+  max-width: 360px;
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+  padding: 24px 22px 18px;
+  text-align: center;
+  animation: dlg-pop 0.18s ease;
+}
+@keyframes dlg-fade { from { opacity: 0; } }
+@keyframes dlg-pop { from { opacity: 0; transform: scale(0.94) translateY(6px); } }
+.dlg-icon { font-size: 34px; margin-bottom: 8px; }
+.dlg-title { font-size: 15px; font-weight: 700; margin-bottom: 8px; }
+.dlg-msg {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin-bottom: 18px;
+}
+.dlg-btns { display: flex; gap: 10px; }
+.dlg-btns .btn { flex: 1; }
 
 /* ---------- 影片列表 ---------- */
 .cinema-name { font-size: 14px; font-weight: 600; color: var(--primary-dark); }

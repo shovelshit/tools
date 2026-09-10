@@ -12,18 +12,17 @@
     <div class="login-card">
       <div class="login-logo">🎬</div>
       <h1>猫眼影院场次监控</h1>
-      <p class="login-sub">Workers 每 10 分钟自动检查 · 新增场次 Bark 推送到 iPhone</p>
+      <p class="login-sub">云端每 10 分钟自动检查 · 新增场次 Bark 推送到 iPhone</p>
       <div class="form-grid login-grid">
-        <label for="worker-url">Worker 地址</label>
-        <input id="worker-url" type="text" placeholder="默认同域(ltools.asia), 无需填写" />
+        <label for="worker-url">服务地址</label>
+        <input id="worker-url" type="text" placeholder="默认使用本站服务，无需填写" />
         <label for="token-input">访问令牌</label>
         <input id="token-input" type="password" placeholder="请输入访问令牌" autocomplete="off" />
       </div>
       <div id="login-error" class="login-error hidden"></div>
       <button id="btn-connect" class="btn primary block">进入监控</button>
       <div class="login-foot muted">
-        配置自动保存在本机浏览器 · 多人使用请各自填自己的令牌<br />
-        <a href="admin.html">🛡️ 令牌管理（管理员）</a>
+        配置自动保存在本机浏览器 · 多人使用请各自填自己的令牌
       </div>
     </div>
   </div>
@@ -33,13 +32,12 @@
     <header>
       <div class="title-block">
         <h1>猫眼影院场次监控</h1>
-        <span class="subtitle">Workers 每 10 分钟自动检查，新增场次 Bark 推送到 iPhone</span>
+        <span class="subtitle">云端每 10 分钟自动检查，新增场次 Bark 推送到 iPhone</span>
       </div>
       <div class="header-right">
         <div id="status-line" class="status-line muted">状态：未连接</div>
-        <a class="btn small ghost" href="admin.html">🛡️ 令牌管理</a>
         <button id="btn-logout" class="btn small ghost">切换连接</button>
-        <a class="btn small ghost" href="../">🏠 回到首页</a>
+        <a class="btn small ghost" href="../">🧰 工具箱</a>
       </div>
     </header>
 
@@ -87,7 +85,7 @@
             <button id="btn-test-bark" class="btn ghost">测试 Bark</button>
             <button id="btn-toggle-monitor" class="btn danger">停止监控</button>
           </div>
-          <div class="muted tip-line">Workers 每 10 分钟唤醒一次，间隔设为 30/60 分钟时会跳过过近的触发；最小生效间隔为 10 分钟。停止监控不会丢失配置，可随时恢复</div>
+          <div class="muted tip-line">云端每 10 分钟唤醒一次，间隔设为 30/60 分钟时会跳过过近的触发；最小生效间隔为 10 分钟。停止监控不会丢失配置，可随时恢复</div>
         </section>
 
         <section class="card grow muted-card">
@@ -129,6 +127,7 @@
   </div>
 
   <script src="secure-store.js"></script>
+  <script src="ui.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
