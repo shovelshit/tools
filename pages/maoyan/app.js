@@ -35,6 +35,7 @@ const els = {
   pushBarkRow: $("push-bark-row"),
   pushServerChanRow: $("push-serverchan-row"),
   pushChannelRow: $("push-channel-row"),
+  pageSub: $("page-sub"),
   // 电影列表
   movieList: $("movie-list"),
   movieCount: $("movie-count"),
@@ -105,12 +106,15 @@ function fmtClock(ts) {
 }
 
 // 分钟步进型 cron 可精确推算下一批触发时间; 其他形式不显示
+// 跨天时标注「明天」, 避免和当天时间混淆
 function nextBatchText() {
   if (!cronMinuteStep || cronMinutes >= 60) return "";
   const now = new Date();
   const add = cronMinutes - (now.getMinutes() % cronMinutes);
   const t = new Date(now.getTime() + add * 60000);
-  return `下批 ${t.toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit" })}`;
+  const hm = t.toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit" });
+  const crossDay = t.getDate() !== now.getDate() ? "明天 " : "";
+  return `下批次检查时间 ${crossDay}${hm}`;
 }
 
 // 组合状态文案: 非空片段用 " · " 连接, 避免词语粘连
@@ -328,7 +332,7 @@ els.serverChanInput.addEventListener("change", () => autoSaveConfig({}, { msg: "
 
 // ---------------- 监控启停 ----------------
 function fmtDate(ts) {
-  return new Date(ts).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit" });
+  return new Date(ts).toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" });
 }
 
 function updateMonitorBtn() {
@@ -737,13 +741,14 @@ async function refreshChanges(showLoading = false) {
     const stopped = status.enabled === false;
     const expired = stopped && monitorDdl && Date.now() > Date.parse(monitorDdl); // 已到期被自动停止
     const lastTxt = status.lastCheck ? fmtClock(new Date(status.lastCheck).getTime()) : "从未";
-    setStatus(
-      statusText(
-        stopped ? (monitorDdl ? "已到期" : "已停止") : "监控中",
-        [monitorDdl && `截止 ${fmtDate(Date.parse(monitorDdl))}`, `上次检查 ${lastTxt}`, !stopped && nextBatchText()]
-      ),
-      stopped || expired ? "stopped" : "running"
-    );
+    const main = stopped ? (monitorDdl ? "已到期" : "已停止") : status.lastError ? "检查异常" : "监控中";
+    const segments = [
+      monitorDdl && `截止 ${fmtDate(Date.parse(monitorDdl))}`,
+      `上次检查 ${lastTxt}`,
+      !stopped && nextBatchText(),
+      !stopped && status.lastError && `失败原因: ${status.lastError}`,
+    ];
+    setStatus(statusText(main, segments), main === "监控中" ? "running" : "stopped");
     if (stopped !== !monitorEnabled) {
       monitorEnabled = !stopped;
       updateMonitorBtn();
@@ -781,6 +786,10 @@ function updateBatchTip() {
   if (!els.batchTip) return;
   els.batchTip.textContent =
     `云端按定时批次自动检查（${cronText}）。停止监控不会丢失配置，可随时恢复`;
+  // 页面副标题同步展示实际批次与推送渠道
+  if (els.pageSub) {
+    els.pageSub.textContent = `云端定时检查新增场次（${cronText}）· Bark / Server酱 推送到手机`;
+  }
 }
 
 // 从接口响应同步批次信息

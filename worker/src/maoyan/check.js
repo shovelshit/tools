@@ -44,13 +44,14 @@ export async function runCheck(env, manual, token) {
   if (!manual && st.lastCheckTs && now - st.lastCheckTs < batchMs / 2) {
     return { ok: true, skipped: true };
   }
-  const data = await fetchCinemaDetail(cfg.cinemaId);
-  const cinemaName = data.showData.cinemaName || "";
   const snapKey = userKey(token, "snapshot");
   const chKey = userKey(token, "changes");
   const snapshot = await env.MAOYAN_KV.get(snapKey, "json") || {};
   const changes = await env.MAOYAN_KV.get(chKey, "json") || [];
-  let newTotal = 0;
+  try {
+    const data = await fetchCinemaDetail(cfg.cinemaId);
+    const cinemaName = data.showData.cinemaName || "";
+    let newTotal = 0;
   for (const movie of data.showData.movies || []) {
     const idStr = String(movie.id);
     const shows = [];
@@ -77,9 +78,29 @@ export async function runCheck(env, manual, token) {
   while (changes.length > 100) changes.pop();
   await env.MAOYAN_KV.put(snapKey, JSON.stringify(snapshot));
   await env.MAOYAN_KV.put(chKey, JSON.stringify(changes));
+  delete st.lastError;
   await env.MAOYAN_KV.put(
     stKey,
     JSON.stringify({ lastCheckTs: now, lastCheck: new Date().toISOString(), cinemaName, newTotal, enabled: cfg.enabled !== false })
   );
   return { ok: true, cinemaName, newTotal, enabled: cfg.enabled !== false };
+  } catch (e) {
+    // 失败也要留痕: 更新 lastCheck/lastError, 让界面能看出定时检查发生过但失败了
+    st.lastCheckTs = now;
+    st.lastCheck = new Date(now).toISOString();
+    st.lastError = e.message;
+    await env.MAOYAN_KV.put(stKey, JSON.stringify(st));
+    // 变化记录节流: 同一错误 1 小时内只记一次, 避免刷屏和 KV 写入放大
+    const lastEntry = changes[0];
+    const recentSame =
+      lastEntry && lastEntry.type === "error" &&
+      lastEntry.text === `定时检查失败: ${e.message}` &&
+      now - Date.parse(lastEntry.time) < 3600e3;
+    if (!recentSame) {
+      changes.unshift({ time: new Date(now).toISOString(), type: "error", text: `定时检查失败: ${e.message}` });
+      while (changes.length > 100) changes.pop();
+      await env.MAOYAN_KV.put(chKey, JSON.stringify(changes));
+    }
+    throw e;
+  }
 }

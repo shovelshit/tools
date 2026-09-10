@@ -123,6 +123,7 @@ export default {
         const status = {
           lastCheckTs: st.lastCheckTs,
           lastCheck: st.lastCheck,
+          lastError: st.lastError || null,
           cinemaName: st.cinemaName,
           newTotal: st.newTotal,
           enabled: cfg.enabled === true,

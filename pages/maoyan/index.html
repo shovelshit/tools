@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>猫眼影院场次监控 - 云端版</title>
-  <link rel="stylesheet" href="style.css?v=20260911h" />
+  <link rel="stylesheet" href="style.css?v=20260911i" />
 </head>
 <body>
   <!-- 登录层: 首次进入 / 切换连接时显示 -->
@@ -12,7 +12,7 @@
     <div class="login-card">
       <div class="login-logo">🎬</div>
       <h1>猫眼影院场次监控</h1>
-      <p class="login-sub">云端每 10 分钟自动检查 · 新增场次 Bark 推送到 iPhone</p>
+      <p class="login-sub">云端定时检查影院新增场次 · 支持 Bark / Server酱 推送到手机</p>
       <div class="form-grid login-grid">
         <label for="worker-url">服务地址</label>
         <input id="worker-url" type="text" placeholder="默认使用本站服务，无需填写" />
@@ -34,7 +34,7 @@
     <header>
       <div class="title-block">
         <h1>猫眼影院场次监控</h1>
-        <span class="subtitle">云端每 10 分钟自动检查，新增场次 Bark 推送到 iPhone</span>
+        <span class="subtitle" id="page-sub">云端定时检查影院新增场次，Bark / Server酱 推送到手机</span>
       </div>
       <div class="header-right">
         <div id="status-line" class="status-line st-off">未连接</div>
@@ -147,8 +147,8 @@
     </main>
   </div>
 
-  <script src="secure-store.js?v=20260911h"></script>
-  <script src="ui.js?v=20260911h"></script>
-  <script src="app.js?v=20260911h"></script>
+  <script src="secure-store.js?v=20260911i"></script>
+  <script src="ui.js?v=20260911i"></script>
+  <script src="app.js?v=20260911i"></script>
 </body>
 </html>
