@@ -19,6 +19,53 @@
 /* 免令牌模式: Worker 未配置 ACCESS_TOKEN 时由 JS 给 body 加 open-mode */
 .open-mode .token-ui { display: none !important; }
 
+/* ---------- 登录层 / 弹层 ---------- */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: radial-gradient(ellipse at 50% 0%, #fbe9e9 0%, var(--bg) 55%);
+}
+
+.login-card {
+  width: 100%;
+  max-width: 400px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 32px 30px 24px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
+  text-align: center;
+}
+
+.login-logo { font-size: 44px; margin-bottom: 8px; }
+.login-card h1 { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
+.login-sub { color: var(--muted); font-size: 12px; margin-bottom: 20px; line-height: 1.6; }
+.login-grid { text-align: left; }
+
+.login-error {
+  font-size: 12px;
+  color: var(--danger);
+  background: #fdf1f1;
+  border: 1px solid #f2c7c7;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  text-align: left;
+}
+
+.login-foot { margin-top: 14px; font-size: 11px; line-height: 1.8; }
+.login-foot a { color: var(--primary); text-decoration: none; }
+.login-foot a:hover { text-decoration: underline; }
+
+.btn.block { display: block; width: 100%; padding: 10px 16px; font-size: 14px; }
+
 html, body { height: 100%; }
 
 body {
@@ -47,6 +94,9 @@ header {
 }
 
 header h1 { font-size: 19px; font-weight: 700; display: inline; }
+
+.header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.header-right a.btn { text-decoration: none; }
 
 .title-block { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 
@@ -91,6 +141,7 @@ header h1 { font-size: 19px; font-weight: 700; display: inline; }
 
 .row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
 .row.space-between { justify-content: space-between; }
+.row.no-margin { margin-bottom: 0; }
 
 /* ---------- 表单 ---------- */
 input[type="text"], input[type="number"] {
@@ -107,7 +158,18 @@ input[type="text"], input[type="number"] {
 }
 
 input[type="number"] { flex: 0 0 100px; }
-input:focus { border-color: var(--primary); }
+input[type="password"] {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  outline: none;
+  background: #fff;
+  color: var(--text);
+  transition: border-color 0.15s;
+  width: 100%;
+}
+input[type="password"]:focus { border-color: var(--primary); }
 
 .form-grid {
   display: grid;
@@ -120,6 +182,58 @@ input:focus { border-color: var(--primary); }
 .form-grid label { font-size: 12px; }
 
 .tip-line { font-size: 11px; margin-top: 4px; }
+
+/* ---------- 城市/影院搜索下拉 ---------- */
+.suggest-wrap { position: relative; }
+
+.suggest-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.suggest-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid #f1f3f6;
+}
+.suggest-item:last-child { border-bottom: none; }
+.suggest-item:hover { background: #fdf3f3; }
+.suggest-item .s-name { font-size: 13px; font-weight: 500; }
+.suggest-item .s-addr {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60%;
+}
+
+.suggest-empty { padding: 12px; color: var(--muted); font-size: 12px; text-align: center; }
+
+/* 手动输入影院折叠区 */
+.manual-cinema { margin-top: 8px; }
+.manual-cinema summary {
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  margin-bottom: 6px;
+}
+.manual-cinema summary:hover { color: var(--primary); }
+.manual-cinema .row { margin-top: 4px; }
 
 /* 令牌同步指引框 */
 .token-tip {
@@ -227,6 +341,58 @@ input:focus { border-color: var(--primary); }
 
 .empty-tip { padding: 10px 0; }
 .muted { color: var(--muted); font-size: 12px; }
+
+/* ---------- 令牌管理页 ---------- */
+.token-table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.token-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+
+.token-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--log-bg);
+  padding: 8px 12px;
+  position: sticky;
+  top: 0;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+}
+
+.token-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #f1f3f6;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.token-table tr:last-child td { border-bottom: none; }
+.token-cell { font-family: Consolas, "Courier New", monospace; }
+
+.badge {
+  display: inline-block;
+  font-size: 11px;
+  border-radius: 20px;
+  padding: 2px 10px;
+}
+.badge.in-use { color: #1b8a5a; background: #e6f7f0; border: 1px solid #b8e6d4; }
+.badge.idle { color: var(--muted); background: #f1f3f6; border: 1px solid var(--border); }
+
+.link-btn {
+  border: none;
+  background: none;
+  color: var(--primary);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+.link-btn:hover { text-decoration: underline; }
+.link-btn.danger { color: var(--danger); }
 
 /* ---------- 说明 ---------- */
 .muted-card { background: #fafbfc; }

@@ -1,29 +1,42 @@
 // 猫眼影院场次监控 - 云端版前端
 // 与 Cloudflare Worker 的 /api/* 交互; Worker 地址和令牌存 localStorage
+// 首次进入显示登录层, 连接成功后进入主页面
 
 const $ = (id) => document.getElementById(id);
 const els = {
+  // 登录层
+  loginOverlay: $("login-overlay"),
+  mainPage: $("main-page"),
   workerUrl: $("worker-url"),
   token: $("token-input"),
   btnConnect: $("btn-connect"),
-  btnGenToken: $("btn-gen-token"),
-  btnCopyToken: $("btn-copy-token"),
-  tokenSyncTip: $("token-sync-tip"),
+  loginError: $("login-error"),
+  // 顶栏
+  statusLine: $("status-line"),
+  btnLogout: $("btn-logout"),
+  // 影院设置
+  cityInput: $("city-input"),
+  cityDropdown: $("city-dropdown"),
+  cinemaSearch: $("cinema-search"),
+  cinemaDropdown: $("cinema-dropdown"),
+  btnSearchCinema: $("btn-search-cinema"),
   cinemaInput: $("cinema-input"),
   btnLoadCinema: $("btn-load-cinema"),
   cinemaName: $("cinema-name"),
+  // 监控设置
   btnSave: $("btn-save"),
   btnCheck: $("btn-check"),
   btnTestBark: $("btn-test-bark"),
   btnToggleMonitor: $("btn-toggle-monitor"),
+  intervalInput: $("interval-input"),
+  barkInput: $("bark-input"),
+  // 电影列表
   movieList: $("movie-list"),
   movieCount: $("movie-count"),
   btnToggleAll: $("btn-toggle-all"),
-  intervalInput: $("interval-input"),
-  barkInput: $("bark-input"),
+  // 日志
   btnRefresh: $("btn-refresh"),
   logPanel: $("log-panel"),
-  statusLine: $("status-line"),
 };
 
 let cinemaMovies = []; // [{id, nm, showCount, checked}]
@@ -31,30 +44,16 @@ let connected = false;
 let monitorEnabled = true;
 let barkSaved = false; // 云端已存有 Bark Key(免令牌模式下接口不回显, 保存时避免误覆盖)
 
-// ---------------- 监控启停 ----------------
-function updateMonitorBtn() {
-  els.btnToggleMonitor.textContent = monitorEnabled ? "停止监控" : "恢复监控";
-  els.btnToggleMonitor.classList.toggle("danger", monitorEnabled);
-  els.btnToggleMonitor.classList.toggle("success", !monitorEnabled);
-  els.btnToggleMonitor.disabled = !connected;
-}
+// 城市 / 影院搜索
+let allCities = [];        // [{id, name, pinyin}]
+let selectedCity = null;   // {id, name}
+let selectedCinema = null; // {id, name}
+let cinemaSearchTimer = null;
 
-els.btnToggleMonitor.addEventListener("click", async () => {
-  if (!connected) return alert("请先连接云端");
-  els.btnToggleMonitor.disabled = true;
-  try {
-    const target = !monitorEnabled;
-    await api("/api/config", { method: "POST", body: JSON.stringify({ enabled: target }) });
-    monitorEnabled = target;
-    updateMonitorBtn();
-    log(target ? "ok" : "info", target ? "监控已恢复，Workers 将继续按间隔检查" : "监控已停止，云端不再自动检查（配置已保留）");
-    setStatus(`已连接${monitorEnabled ? "" : "（监控已停止）"}`);
-  } catch (e) {
-    alert("操作失败：" + e.message);
-  } finally {
-    updateMonitorBtn();
-  }
-});
+// 同域部署下 Worker 地址可留空(直接请求当前域名); 其他托管环境给出默认后端
+const SAME_ORIGIN_HOSTS = ["ltools.asia", "www.ltools.asia", "tools-a65.pages.dev"];
+const SAME_ORIGIN = SAME_ORIGIN_HOSTS.includes(location.hostname);
+const DEFAULT_WORKER = SAME_ORIGIN ? "" : "https://ltools.asia";
 
 // ---------------- 基础 ----------------
 function apiPath(path, params = "") {
@@ -85,62 +84,59 @@ function setStatus(text) {
   els.statusLine.textContent = "状态：" + text;
 }
 
-// ---------------- 随机令牌 ----------------
-els.btnGenToken.addEventListener("click", () => {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  els.token.value = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
-  els.btnCopyToken.classList.remove("hidden");
-  els.tokenSyncTip.classList.remove("hidden");
-  els.tokenSyncTip.innerHTML =
-    "已生成新令牌（<b>先别急着点连接</b>，Worker 还不认识它）。同步任选其一：<br>" +
-    "① 点「复制令牌」→ 电脑运行 <code>npx wrangler secret put ACCESS_TOKEN</code>，提示输入时粘贴。多人要保留旧令牌时填 <code>旧令牌,新令牌</code><br>" +
-    "② 手机/电脑浏览器打开 dash.cloudflare.com → Workers &amp; Pages → maoyan-monitor → Settings → Variables and Secrets → 编辑 ACCESS_TOKEN。同步完成后再回来点「连接」";
-  log("info", "已生成随机令牌，请先同步到 Worker（见上方提示），再点连接");
-});
+// ---------------- 登录 / 连接 ----------------
+function showLoginError(msg) {
+  els.loginError.textContent = msg;
+  els.loginError.classList.remove("hidden");
+}
 
-els.btnCopyToken.addEventListener("click", async () => {
-  const token = els.token.value.trim();
-  if (!token) return;
-  try {
-    await navigator.clipboard.writeText(token);
-    log("ok", "令牌已复制到剪贴板");
-  } catch (e) {
-    // 非安全上下文(file://)回退方案
-    els.token.select();
-    document.execCommand("copy");
-    log("ok", "令牌已复制（回退方式），如未复制成功请手动选择复制");
-  }
-});
+function enterMainPage() {
+  els.loginOverlay.classList.add("hidden");
+  els.mainPage.classList.remove("hidden");
+}
 
-// ---------------- 连接 ----------------
-els.btnConnect.addEventListener("click", async () => {
-  if (!els.workerUrl.value.trim()) return alert("请填写 Worker 地址");
+async function connect() {
+  if (!els.workerUrl.value.trim() && !SAME_ORIGIN) return showLoginError("请填写 Worker 地址");
   localStorage.setItem("workerUrl", els.workerUrl.value.trim());
   localStorage.setItem("token", els.token.value.trim());
   els.btnConnect.disabled = true;
   els.btnConnect.textContent = "连接中...";
+  els.loginError.classList.add("hidden");
   try {
     const st = await api("/api/status");
     connected = true;
     const openMode = st.authMode === "open";
     document.body.classList.toggle("open-mode", openMode);
     setStatus(`已连接，上次检查 ${st.status.lastCheck || "从未"}${openMode ? "（免令牌模式）" : ""}`);
+    enterMainPage();
     log("ok", "云端连接成功");
-    await restoreConfig();
-    await refreshChanges();
+    await Promise.all([loadCities(), restoreConfig()]);
+    refreshChanges();
   } catch (e) {
     connected = false;
     setStatus("连接失败");
+    // 令牌错误只做简短提示, 不暴露 Worker 名称与配置步骤(多人使用场景)
     let msg = e.message;
-    if (msg.includes("访问令牌错误")) {
-      msg += "\n\n常见原因：刚点了「🎲 随机生成令牌」，新令牌还没同步到 Worker。\n解决办法（任选其一）：\n1. 电脑上运行: npx wrangler secret put ACCESS_TOKEN\n   （多人则填 旧令牌,新令牌 逗号分隔）\n2. 浏览器登录 dash.cloudflare.com → Workers & Pages →\n   maoyan-monitor → Settings → Variables and Secrets →\n   编辑 ACCESS_TOKEN";
-    }
-    alert("连接失败：" + msg);
+    if (msg.includes("访问令牌错误")) msg = "访问令牌无效，请检查令牌是否输入正确";
+    showLoginError("连接失败：" + msg);
   } finally {
     els.btnConnect.disabled = false;
-    els.btnConnect.textContent = "连接";
+    els.btnConnect.textContent = "进入监控";
   }
+}
+
+els.btnConnect.addEventListener("click", connect);
+els.token.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") connect();
+});
+
+// 切换连接: 回到登录层, 保留上次填写的地址/令牌便于修改
+els.btnLogout.addEventListener("click", () => {
+  connected = false;
+  setStatus("未连接");
+  els.mainPage.classList.add("hidden");
+  els.loginOverlay.classList.remove("hidden");
+  els.loginError.classList.add("hidden");
 });
 
 async function restoreConfig() {
@@ -155,7 +151,217 @@ async function restoreConfig() {
   if (config.cinemaId) await loadCinema(config.cinemaId, prevSelected);
 }
 
-// ---------------- 影院 ----------------
+// ---------------- 监控启停 ----------------
+function updateMonitorBtn() {
+  els.btnToggleMonitor.textContent = monitorEnabled ? "停止监控" : "恢复监控";
+  els.btnToggleMonitor.classList.toggle("danger", monitorEnabled);
+  els.btnToggleMonitor.classList.toggle("success", !monitorEnabled);
+  els.btnToggleMonitor.disabled = !connected;
+}
+
+els.btnToggleMonitor.addEventListener("click", async () => {
+  if (!connected) return alert("请先连接云端");
+  els.btnToggleMonitor.disabled = true;
+  try {
+    const target = !monitorEnabled;
+    await api("/api/config", { method: "POST", body: JSON.stringify({ enabled: target }) });
+    monitorEnabled = target;
+    updateMonitorBtn();
+    log(target ? "ok" : "info", target ? "监控已恢复，Workers 将继续按间隔检查" : "监控已停止，云端不再自动检查（配置已保留）");
+    setStatus(`已连接${monitorEnabled ? "" : "（监控已停止）"}`);
+  } catch (e) {
+    alert("操作失败：" + e.message);
+  } finally {
+    updateMonitorBtn();
+  }
+});
+
+// ---------------- 城市选择 ----------------
+async function loadCities() {
+  try {
+    const res = await api("/api/cities");
+    allCities = (res.cities || []).map((c) => ({
+      id: String(c.id),
+      name: c.name,
+      pinyin: String(c.pinyin || "").toLowerCase(),
+    }));
+  } catch (e) {
+    // 云端暂不支持城市/影院搜索接口, 降级为仅手动输入
+    allCities = [];
+    selectedCity = null;
+    els.cityInput.disabled = true;
+    els.cityInput.placeholder = "城市列表加载失败（云端暂不支持）";
+    els.cinemaSearch.disabled = true;
+    els.btnSearchCinema.disabled = true;
+    els.cinemaSearch.placeholder = "云端暂不支持影院搜索，请展开下方手动输入";
+  }
+}
+
+function filterCities(kw) {
+  if (!allCities.length) return [];
+  const k = kw.trim().toLowerCase();
+  if (!k) return allCities.slice(0, 20);
+  const starts = [];
+  const contains = [];
+  for (const c of allCities) {
+    if (c.name.startsWith(k) || c.pinyin.startsWith(k)) starts.push(c);
+    else if (c.name.includes(k) || c.pinyin.includes(k)) contains.push(c);
+  }
+  return [...starts, ...contains].slice(0, 30);
+}
+
+function renderCityDropdown() {
+  const list = filterCities(els.cityInput.value);
+  els.cityDropdown.innerHTML = "";
+  if (!list.length) {
+    appendSuggestMsg(els.cityDropdown, "未找到城市");
+  } else {
+    const showPinyin = /^[a-z]+$/i.test(els.cityInput.value.trim());
+    for (const c of list) {
+      const item = document.createElement("div");
+      item.className = "suggest-item";
+      const name = document.createElement("span");
+      name.className = "s-name";
+      name.textContent = c.name;
+      item.appendChild(name);
+      if (showPinyin && c.pinyin) {
+        const meta = document.createElement("span");
+        meta.className = "s-addr";
+        meta.textContent = c.pinyin;
+        item.appendChild(meta);
+      }
+      item.addEventListener("mousedown", (e) => { e.preventDefault(); chooseCity(c); });
+      els.cityDropdown.appendChild(item);
+    }
+  }
+  els.cityDropdown.classList.remove("hidden");
+}
+
+function chooseCity(c) {
+  selectedCity = c;
+  els.cityInput.value = c.name;
+  els.cityDropdown.classList.add("hidden");
+  // 切换城市后重置影院搜索
+  selectedCinema = null;
+  els.cinemaSearch.value = "";
+  els.cinemaSearch.disabled = false;
+  els.btnSearchCinema.disabled = false;
+  els.cinemaSearch.placeholder = `在${c.name}搜索影院（模糊匹配）`;
+  els.cinemaSearch.focus();
+}
+
+els.cityInput.addEventListener("focus", () => {
+  if (allCities.length) renderCityDropdown();
+});
+els.cityInput.addEventListener("input", () => {
+  selectedCity = null;
+  renderCityDropdown();
+});
+
+// ---------------- 影院模糊搜索 ----------------
+function appendSuggestMsg(dropdown, text) {
+  const div = document.createElement("div");
+  div.className = "suggest-empty";
+  div.textContent = text;
+  dropdown.appendChild(div);
+}
+
+function scheduleCinemaSearch(immediate = false) {
+  clearTimeout(cinemaSearchTimer);
+  if (immediate) return searchCinemas();
+  cinemaSearchTimer = setTimeout(searchCinemas, 350);
+}
+
+async function searchCinemas() {
+  if (!allCities.length) return; // 城市接口不可用时整体禁用
+  if (!selectedCity) {
+    els.cinemaDropdown.innerHTML = "";
+    appendSuggestMsg(els.cinemaDropdown, "请先在上方选择城市");
+    els.cinemaDropdown.classList.remove("hidden");
+    return;
+  }
+  const kw = els.cinemaSearch.value.trim();
+  if (!kw) {
+    els.cinemaDropdown.classList.add("hidden");
+    return;
+  }
+  els.cinemaDropdown.innerHTML = "";
+  appendSuggestMsg(els.cinemaDropdown, "搜索中...");
+  els.cinemaDropdown.classList.remove("hidden");
+  try {
+    const res = await api(
+      `/api/cinemas?cityId=${encodeURIComponent(selectedCity.id)}&kw=${encodeURIComponent(kw)}`
+    );
+    renderCinemaResults(res.cinemas || []);
+  } catch (e) {
+    els.cinemaDropdown.innerHTML = "";
+    appendSuggestMsg(els.cinemaDropdown, "搜索失败：" + e.message);
+    els.cinemaDropdown.classList.remove("hidden");
+  }
+}
+
+function renderCinemaResults(list) {
+  els.cinemaDropdown.innerHTML = "";
+  if (!list.length) {
+    appendSuggestMsg(els.cinemaDropdown, "未找到匹配的影院，换个关键词试试");
+    els.cinemaDropdown.classList.remove("hidden");
+    return;
+  }
+  for (const c of list.slice(0, 20)) {
+    const id = String(c.id);
+    const name = c.nm || c.name || `影院 ${id}`;
+    const addr = c.addr || c.address || "";
+    const item = document.createElement("div");
+    item.className = "suggest-item";
+    const nameEl = document.createElement("span");
+    nameEl.className = "s-name";
+    nameEl.textContent = name;
+    item.appendChild(nameEl);
+    if (addr) {
+      const addrEl = document.createElement("span");
+      addrEl.className = "s-addr";
+      addrEl.textContent = addr;
+      item.appendChild(addrEl);
+    }
+    item.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      selectedCinema = { id, name };
+      els.cinemaSearch.value = name;
+      els.cinemaDropdown.classList.add("hidden");
+      loadCinema(id);
+    });
+    els.cinemaDropdown.appendChild(item);
+  }
+  els.cinemaDropdown.classList.remove("hidden");
+}
+
+els.cinemaSearch.addEventListener("input", () => {
+  selectedCinema = null;
+  scheduleCinemaSearch();
+});
+els.cinemaSearch.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    scheduleCinemaSearch(true);
+  }
+});
+els.btnSearchCinema.addEventListener("click", () => scheduleCinemaSearch(true));
+
+// 点击下拉外部时收起
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("#city-input") && !e.target.closest("#city-dropdown")) {
+    els.cityDropdown.classList.add("hidden");
+  }
+  if (
+    !e.target.closest("#cinema-search") &&
+    !e.target.closest("#cinema-dropdown") &&
+    !e.target.closest("#btn-search-cinema")
+  ) {
+    els.cinemaDropdown.classList.add("hidden");
+  }
+});
+
+// ---------------- 影院(手动加载) ----------------
 function parseCinemaInput(input) {
   const s = String(input || "").trim();
   let m = s.match(/cinema\/(\d+)/i);
@@ -167,9 +373,16 @@ function parseCinemaInput(input) {
 }
 
 els.btnLoadCinema.addEventListener("click", () => {
-  const id = parseCinemaInput(els.cinemaInput.value);
-  els.cinemaInput.value = id;
-  loadCinema(id);
+  try {
+    const id = parseCinemaInput(els.cinemaInput.value);
+    els.cinemaInput.value = id;
+    loadCinema(id);
+  } catch (e) {
+    alert(e.message);
+  }
+});
+els.cinemaInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") els.btnLoadCinema.click();
 });
 
 async function loadCinema(cinemaId, prevSelected) {
@@ -371,16 +584,17 @@ setInterval(() => { if (connected) refreshChanges(); }, 60000);
 
 // ---------------- 初始化 ----------------
 (async function init() {
-  els.workerUrl.value = localStorage.getItem("workerUrl") || "";
+  els.workerUrl.value = localStorage.getItem("workerUrl") ?? DEFAULT_WORKER;
   els.token.value = localStorage.getItem("token") || "";
   // 支持 URL 参数直达: ?worker=https://xxx.workers.dev&token=xxx
   const qs = new URLSearchParams(location.search);
   if (qs.get("worker")) els.workerUrl.value = qs.get("worker");
   if (qs.get("token")) els.token.value = qs.get("token");
   const explicit = qs.has("worker"); // 带参数打开视为明确意图, 免令牌模式也能自动连
-  if (els.workerUrl.value && (els.token.value || explicit)) {
-    els.btnConnect.click();
-  } else {
-    setStatus("未连接");
+  // 有保存的凭据时自动连接, 失败则停留在登录层展示错误
+  if (els.workerUrl.value.trim() !== "" || SAME_ORIGIN) {
+    if (els.token.value.trim() || explicit) {
+      await connect();
+    }
   }
 })();
