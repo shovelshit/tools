@@ -3,7 +3,7 @@
 import { CORS, json } from "./common/http.js";
 import { NOTIFY_CHANNELS, pushBark } from "./common/notify.js";
 import { userKey, getUserConfig } from "./maoyan/user.js";
-import { CITY_LIST, fetchCinemaDetail, searchCinemasByKw, runCheck, pushNotify, currentChannel, cronBatchMinutes, describeCron, isMinuteStepCron, CRON_EXPRESSION, checkAuthFull, syncCronTokens, handleAdminTokens, runScheduledChecks } from "./maoyan/index.js";
+import { CITY_LIST, fetchCinemaDetail, searchCinemasByKw, runCheck, pushNotify, currentChannel, cronBatchMinutes, describeCron, isMinuteStepCron, CRON_EXPRESSION, ddlFromNow, checkAuthFull, syncCronTokens, handleAdminTokens, runScheduledChecks } from "./maoyan/index.js";
 import { handleStoreApi, handleStoreFile } from "./store/proxy.js";
 
 export default {
@@ -73,7 +73,7 @@ export default {
         return json({
           ok: true,
           config: {
-            enabled: cfg.enabled !== false,
+            enabled: cfg.enabled === true, // 默认停止, 需显式「开始监控」
             ...cfg,
             cronMinutes: cronBatchMinutes(),
             cronExpr: CRON_EXPRESSION,
@@ -86,7 +86,11 @@ export default {
         const body = await request.json();
         const key = userKey(token, "config");
         const cfg = await env.MAOYAN_KV.get(key, "json") || await getUserConfig(env, token);
-        if (body.enabled !== void 0) cfg.enabled = Boolean(body.enabled);
+        if (body.enabled !== void 0) {
+          cfg.enabled = Boolean(body.enabled);
+          // 每次显式「开始监控」都刷新一次截止时间(30 天)
+          if (cfg.enabled) cfg.monitorDdl = ddlFromNow();
+        }
         if (body.cinemaId !== void 0) cfg.cinemaId = String(body.cinemaId).trim();
         if (body.selectedMovieIds !== void 0) cfg.selectedMovieIds = (body.selectedMovieIds || []).map(String);
         // 注: 检查频率已完全跟随 cron 批次, 旧前端的 intervalMinutes 字段不再生效
@@ -96,7 +100,6 @@ export default {
           const ch = String(body.notifyChannel).trim();
           cfg.notifyChannel = NOTIFY_CHANNELS[ch] ? ch : "bark";
         }
-        if (body.enabled === void 0 && body.cinemaId !== void 0) cfg.enabled = true;
         await env.MAOYAN_KV.put(key, JSON.stringify(cfg));
         return json({ ok: true, config: { enabled: cfg.enabled !== false, ...cfg } });
       }
@@ -122,7 +125,8 @@ export default {
           lastCheck: st.lastCheck,
           cinemaName: st.cinemaName,
           newTotal: st.newTotal,
-          enabled: cfg.enabled !== false
+          enabled: cfg.enabled === true,
+          monitorDdl: cfg.monitorDdl || null
         };
         const changes = await env.MAOYAN_KV.get(userKey(token, "changes"), "json") || [];
         return json({

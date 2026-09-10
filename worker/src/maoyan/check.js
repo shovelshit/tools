@@ -4,6 +4,7 @@ import { userKey, getUserConfig } from "./user.js";
 import { fetchCinemaDetail } from "./api.js";
 import { pushNotify } from "./notify.js";
 import { cronBatchMinutes } from "./cron.js";
+import { isExpired } from "./ddl.js";
 
 function fmtShow(s) {
   const parts = [`${s.dt || ""} ${s.tm || ""}`, s.lang || "", s.tp || "", s.th || ""];
@@ -16,6 +17,22 @@ export async function runCheck(env, manual, token) {
   if (!cfg.cinemaId) return { ok: false, error: "未配置影院" };
   if (cfg.enabled === false) {
     return manual ? { ok: false, error: "监控已停止，请先在界面恢复监控" } : { ok: true, skipped: true, stopped: true };
+  }
+  // 到期自动停止: 每次开始监控刷新截止时间, 防止设完就不管
+  if (isExpired(cfg)) {
+    cfg.enabled = false;
+    await env.MAOYAN_KV.put(userKey(token, "config"), JSON.stringify(cfg));
+    const chKey = userKey(token, "changes");
+    const changes = await env.MAOYAN_KV.get(chKey, "json") || [];
+    changes.unshift({
+      time: new Date().toISOString(),
+      type: "warn",
+      text: `监控已到期（截止 ${(cfg.monitorDdl || "").slice(0, 10) || "未设置"}），已自动停止；在监控页点「开始监控」可再续 ${30} 天`,
+    });
+    while (changes.length > 100) changes.pop();
+    await env.MAOYAN_KV.put(chKey, JSON.stringify(changes));
+    if (manual) return { ok: false, error: "监控已到期，已自动停止；点「开始监控」可再续 30 天" };
+    return { ok: true, stopped: true, expired: true };
   }
   const selected = new Set((cfg.selectedMovieIds || []).map(String));
   const stKey = userKey(token, "status");

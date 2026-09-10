@@ -46,7 +46,8 @@ const els = {
 
 let cinemaMovies = []; // [{id, nm, showCount, checked}]
 let connected = false;
-let monitorEnabled = true;
+let monitorEnabled = false; // 默认停止, 需显式「开始监控」
+let monitorDdl = null; // 监控截止时间(ISO), 每次开始监控刷新 30 天
 let pushSaved = false; // 云端已存有当前渠道的推送配置(接口不回显时, 保存时避免误覆盖)
 
 // 城市 / 影院搜索
@@ -191,7 +192,8 @@ async function restoreConfig() {
   restoring = true; // 恢复期间自动保存全部跳过, 避免每次连接都冗余写 KV
   try {
     const { config } = await api("/api/config");
-    monitorEnabled = config.enabled !== false;
+    monitorEnabled = config.enabled === true; // 默认停止, 需显式「开始监控」
+    monitorDdl = config.monitorDdl || null;
     updateMonitorBtn();
     if (config.cinemaId) els.cinemaInput.value = config.cinemaId;
     // 批次信息以服务端 cron 为准
@@ -325,8 +327,12 @@ els.barkInput.addEventListener("change", () => autoSaveConfig({}, { msg: "推送
 els.serverChanInput.addEventListener("change", () => autoSaveConfig({}, { msg: "推送配置已保存" }));
 
 // ---------------- 监控启停 ----------------
+function fmtDate(ts) {
+  return new Date(ts).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit" });
+}
+
 function updateMonitorBtn() {
-  els.btnToggleMonitor.textContent = monitorEnabled ? "停止监控" : "恢复监控";
+  els.btnToggleMonitor.textContent = monitorEnabled ? "停止监控" : "开始监控";
   els.btnToggleMonitor.classList.toggle("danger", monitorEnabled);
   els.btnToggleMonitor.classList.toggle("success", !monitorEnabled);
   els.btnToggleMonitor.disabled = !connected;
@@ -337,10 +343,22 @@ els.btnToggleMonitor.addEventListener("click", async () => {
   await withButtonLoading(els.btnToggleMonitor, "处理中...", async () => {
     try {
       const target = !monitorEnabled;
-      await api("/api/config", { method: "POST", body: JSON.stringify({ enabled: target }) });
+      const res = await api("/api/config", { method: "POST", body: JSON.stringify({ enabled: target }) });
       monitorEnabled = target;
-      log(target ? "ok" : "info", target ? "监控已恢复，云端将继续按间隔检查" : "监控已停止，云端不再自动检查（配置已保留）");
-      setStatus(statusText(monitorEnabled ? "监控中" : "已停止", [monitorEnabled && nextBatchText()]), monitorEnabled ? "running" : "stopped");
+      if (res.config) monitorDdl = res.config.monitorDdl || monitorDdl;
+      log(
+        target ? "ok" : "info",
+        target
+          ? statusText("监控已开始", [monitorDdl && `截止 ${fmtDate(Date.parse(monitorDdl))}，到期前再次开始可续期`])
+          : "监控已停止，云端不再自动检查（配置已保留）"
+      );
+      setStatus(
+        statusText(monitorEnabled ? "监控中" : "已停止", [
+          monitorEnabled && monitorDdl && `截止 ${fmtDate(Date.parse(monitorDdl))}`,
+          monitorEnabled && nextBatchText(),
+        ]),
+        monitorEnabled ? "running" : "stopped"
+      );
     } catch (e) {
       showToast("操作失败：" + e.message, "error");
     }
@@ -715,11 +733,16 @@ async function refreshChanges(showLoading = false) {
     const data = await api("/api/status");
     const { status, changes } = data;
     syncCronInfo(data); // 批次描述保持与服务端一致
+    if (status.monitorDdl !== void 0) monitorDdl = status.monitorDdl;
     const stopped = status.enabled === false;
+    const expired = stopped && monitorDdl && Date.now() > Date.parse(monitorDdl); // 已到期被自动停止
     const lastTxt = status.lastCheck ? fmtClock(new Date(status.lastCheck).getTime()) : "从未";
     setStatus(
-      statusText(stopped ? "已停止" : "监控中", [`上次检查 ${lastTxt}`, !stopped && nextBatchText()]),
-      stopped ? "stopped" : "running"
+      statusText(
+        stopped ? (monitorDdl ? "已到期" : "已停止") : "监控中",
+        [monitorDdl && `截止 ${fmtDate(Date.parse(monitorDdl))}`, `上次检查 ${lastTxt}`, !stopped && nextBatchText()]
+      ),
+      stopped || expired ? "stopped" : "running"
     );
     if (stopped !== !monitorEnabled) {
       monitorEnabled = !stopped;
