@@ -204,7 +204,7 @@ async function restoreConfig() {
     syncCronInfo(config);
     applyPushConfig(config);
     const prevSelected = new Set((config.selectedMovieIds || []).map(String));
-    if (config.cinemaId) await loadCinema(config.cinemaId, prevSelected);
+    if (config.cinemaId) await loadCinema(config.cinemaId, prevSelected, { restore: true });
   } finally {
     // 恢复完成: 记录当前状态签名, 与云端一致的内容不再重复写入
     lastSavedSig = JSON.stringify(
@@ -582,9 +582,9 @@ els.cinemaInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") els.btnLoadCinema.click();
 });
 
-async function loadCinema(cinemaId, prevSelected) {
+async function loadCinema(cinemaId, prevSelected, { restore = false } = {}) {
   setPanelLoading(els.movieList, "正在加载影院影片...");
-  await withButtonLoading(els.btnLoadCinema, "加载中...", async () => {
+  await withButtonLoading(restore ? null : els.btnLoadCinema, "加载中...", async () => {
     try {
       const res = await api("/api/shows?cinemaId=" + encodeURIComponent(cinemaId));
       els.cinemaName.textContent = `🎬 ${res.cinemaName}（ID: ${res.cinemaId}）`;
@@ -598,9 +598,15 @@ async function loadCinema(cinemaId, prevSelected) {
         { msg: `影院已保存到云端：${res.cinemaName}` }
       );
     } catch (e) {
-      showToast("加载失败：" + e.message, "error");
-      log("error", "加载影院失败: " + e.message);
-      els.movieList.innerHTML = '<div class="muted empty-tip">加载失败，请重试</div>';
+      if (restore) {
+        // 恢复配置时拉取失败: 影院 ID 仍在, 提示手动重试
+        log("warn", `影院影片自动加载失败（${e.message}），点「加载」按钮可重试`);
+        els.movieList.innerHTML = '<div class="muted empty-tip">影院影片加载失败，点上方「加载」按钮重试</div>';
+      } else {
+        showToast("加载失败：" + e.message, "error");
+        log("error", "加载影院失败: " + e.message);
+        els.movieList.innerHTML = '<div class="muted empty-tip">加载失败，请重试</div>';
+      }
     }
   });
 }

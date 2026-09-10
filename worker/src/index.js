@@ -91,7 +91,10 @@ export default {
           // 每次显式「开始监控」都刷新一次截止时间(30 天)
           if (cfg.enabled) cfg.monitorDdl = ddlFromNow();
         }
-        if (body.cinemaId !== void 0) cfg.cinemaId = String(body.cinemaId).trim();
+        if (body.cinemaId !== void 0 && String(body.cinemaId).trim()) {
+          // 空值不覆盖: 防止异常状态下误清空已配置的影院
+          cfg.cinemaId = String(body.cinemaId).trim();
+        }
         if (body.selectedMovieIds !== void 0) cfg.selectedMovieIds = (body.selectedMovieIds || []).map(String);
         // 注: 检查频率已完全跟随 cron 批次, 旧前端的 intervalMinutes 字段不再生效
         if (body.barkKey !== void 0) cfg.barkKey = String(body.barkKey).trim();
