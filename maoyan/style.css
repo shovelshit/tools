@@ -16,7 +16,7 @@
 /* 通用隐藏类(供 JS 动态切换, 如场次明细收起) */
 .hidden { display: none !important; }
 
-/* 免令牌模式: Worker 未配置 ACCESS_TOKEN 时由 JS 给 body 加 open-mode */
+/* 免令牌模式已移除: 令牌统一由 admin 页管理, 保留类名避免旧缓存报错 */
 .open-mode .token-ui { display: none !important; }
 
 /* ---------- 登录层 / 弹层 ---------- */
