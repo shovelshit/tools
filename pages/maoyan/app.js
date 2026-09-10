@@ -90,8 +90,26 @@ function log(type, text) {
   els.logPanel.prepend(div);
 }
 
-function setStatus(text) {
-  els.statusLine.textContent = "状态：" + text;
+function setStatus(text, state = "off") {
+  if (!els.statusLine) return;
+  // state: running(监控中, 绿) / stopped(已停止或连接失败, 红) / off(未连接, 灰)
+  els.statusLine.className = `status-line st-${state}`;
+  els.statusLine.innerHTML = '<span class="dot"></span><span></span>';
+  els.statusLine.lastChild.textContent = text;
+}
+
+function fmtClock(ts) {
+  return new Date(ts).toLocaleString("zh-CN", {
+    hour12: false, month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+  });
+}
+
+// 分钟步进型 cron 可精确推算下一批触发时间; 其他形式不显示
+function nextBatchText() {
+  if (!cronMinuteStep || cronMinutes >= 60) return "";
+  const now = new Date();
+  const add = cronMinutes - (now.getMinutes() % cronMinutes);
+  return `下批 ${fmtClock(new Date(now.getTime() + add * 60000))}`;
 }
 
 // ---------------- 登录 / 连接 ----------------
@@ -129,7 +147,8 @@ async function connect() {
         // 免令牌模式下没有令牌可存, 记一个标记供刷新后自动重连
         if (openMode) localStorage.setItem("authMode", "open");
         else localStorage.removeItem("authMode");
-        setStatus(`已连接，上次检查 ${st.status.lastCheck || "从未"}${openMode ? "（免令牌模式）" : ""}`);
+        const lastTxt = st.status.lastCheck ? fmtClock(new Date(st.status.lastCheck).getTime()) : "从未";
+        setStatus(`监控中 · 上次检查 ${lastTxt}${nextBatchText()}${openMode ? " · 免令牌模式" : ""}`, "running");
         enterMainPage();
         log("ok", "云端连接成功");
         await Promise.all([loadCities(), restoreConfig()]);
@@ -140,7 +159,7 @@ async function connect() {
     });
   } catch (e) {
     connected = false;
-    setStatus("连接失败");
+    setStatus("连接失败", "stopped");
     // 令牌错误只做简短提示, 不暴露 Worker 名称与配置步骤(多人使用场景)
     let msg = e.message;
     if (msg.includes("访问令牌错误")) msg = "访问令牌无效，请检查令牌是否输入正确";
@@ -254,7 +273,7 @@ els.btnToggleMonitor.addEventListener("click", async () => {
       await api("/api/config", { method: "POST", body: JSON.stringify({ enabled: target }) });
       monitorEnabled = target;
       log(target ? "ok" : "info", target ? "监控已恢复，云端将继续按间隔检查" : "监控已停止，云端不再自动检查（配置已保留）");
-      setStatus(`已连接${monitorEnabled ? "" : "（监控已停止）"}`);
+      setStatus(monitorEnabled ? `监控中${nextBatchText()}` : "已停止", monitorEnabled ? "running" : "stopped");
     } catch (e) {
       showToast("操作失败：" + e.message, "error");
     }
@@ -650,7 +669,11 @@ async function refreshChanges(showLoading = false) {
     const { status, changes } = data;
     syncCronInfo(data); // 批次描述保持与服务端一致
     const stopped = status.enabled === false;
-    setStatus(`已连接，上次检查 ${status.lastCheck ? new Date(status.lastCheck).toLocaleString("zh-CN", { hour12: false }) : "从未"}${stopped ? "（监控已停止）" : ""}`);
+    const lastTxt = status.lastCheck ? fmtClock(new Date(status.lastCheck).getTime()) : "从未";
+    setStatus(
+      stopped ? `已停止 · 上次检查 ${lastTxt}` : `监控中 · 上次检查 ${lastTxt}${nextBatchText()}`,
+      stopped ? "stopped" : "running"
+    );
     if (stopped !== !monitorEnabled) {
       monitorEnabled = !stopped;
       updateMonitorBtn();
@@ -681,6 +704,7 @@ setInterval(() => { if (connected) refreshChanges(); }, 60000);
 // ---------------- 初始化 ----------------
 let cronMinutes = 10; // 云端 cron 批次(分钟), 连接后以服务端下发为准
 let cronText = "每 10 分钟一批"; // cron 的人话描述(简单表达式)或原始表达式(复杂)
+let cronMinuteStep = true; // 是否分钟步进型 cron(可推算下一批时间)
 
 // 批次提示: 检查频率完全跟随 worker 的 cron, 界面不再提供间隔设置
 function updateBatchTip() {
@@ -693,6 +717,7 @@ function updateBatchTip() {
 function syncCronInfo(data) {
   if (data.cronMinutes && data.cronMinutes !== cronMinutes) cronMinutes = data.cronMinutes;
   if (data.cronText) cronText = data.cronText;
+  if (typeof data.cronMinuteStep === "boolean") cronMinuteStep = data.cronMinuteStep;
   updateBatchTip();
 }
 

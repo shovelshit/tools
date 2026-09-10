@@ -135,6 +135,19 @@ header h1 { font-size: 19px; font-weight: 700; display: inline; }
   white-space: nowrap;
 }
 
+/* 状态灯: 绿=监控中 红=已停止/失败 灰=未连接 */
+.status-line .dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: 0;
+}
+.st-running .dot { background: var(--success); box-shadow: 0 0 0 3px rgba(34, 160, 107, 0.15); }
+.st-stopped .dot { background: var(--danger); box-shadow: 0 0 0 3px rgba(214, 69, 69, 0.12); }
+.st-off .dot { background: var(--muted); }
+
 /* ---------- 三列 ---------- */
 .main-grid {
   flex: 1 1 auto;
@@ -167,6 +180,13 @@ header h1 { font-size: 19px; font-weight: 700; display: inline; }
 .row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
 .row.space-between { justify-content: space-between; }
 .row.no-margin { margin-bottom: 0; }
+.row .spacer { flex: 1 1 auto; }
+
+/* 幽灵按钮的状态配色(停止/恢复监控) */
+.btn.ghost.danger { color: var(--danger); border-color: var(--danger); background: #fff; }
+.btn.ghost.danger:hover { background: #fdf1f1; }
+.btn.ghost.success { color: var(--success); border-color: var(--success); background: #fff; }
+.btn.ghost.success:hover { background: #f0fbf6; }
 
 /* ---------- 表单 ---------- */
 input[type="text"], input[type="number"] {

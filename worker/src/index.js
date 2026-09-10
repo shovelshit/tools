@@ -3,7 +3,7 @@
 import { CORS, json } from "./common/http.js";
 import { NOTIFY_CHANNELS, pushBark } from "./common/notify.js";
 import { userKey, getUserConfig } from "./maoyan/user.js";
-import { CITY_LIST, fetchCinemaDetail, searchCinemasByKw, runCheck, pushNotify, currentChannel, cronBatchMinutes, describeCron, CRON_EXPRESSION, checkAuthFull, syncCronTokens, handleAdminTokens, runScheduledChecks } from "./maoyan/index.js";
+import { CITY_LIST, fetchCinemaDetail, searchCinemasByKw, runCheck, pushNotify, currentChannel, cronBatchMinutes, describeCron, isMinuteStepCron, CRON_EXPRESSION, checkAuthFull, syncCronTokens, handleAdminTokens, runScheduledChecks } from "./maoyan/index.js";
 import { handleStoreApi, handleStoreFile } from "./store/proxy.js";
 
 export default {
@@ -78,6 +78,7 @@ export default {
             cronMinutes: cronBatchMinutes(),
             cronExpr: CRON_EXPRESSION,
             cronText: describeCron(),
+            cronMinuteStep: isMinuteStepCron(),
           },
         });
       }
@@ -131,6 +132,7 @@ export default {
           changes,
           cronMinutes: cronBatchMinutes(),
           cronText: describeCron(),
+          cronMinuteStep: isMinuteStepCron(),
         });
       }
       return json({ error: "Unknown API" }, 404);

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>猫眼影院场次监控 - 云端版</title>
-  <link rel="stylesheet" href="style.css?v=20260911d" />
+  <link rel="stylesheet" href="style.css?v=20260911e" />
 </head>
 <body>
   <!-- 登录层: 首次进入 / 切换连接时显示 -->
@@ -37,7 +37,7 @@
         <span class="subtitle">云端每 10 分钟自动检查，新增场次 Bark 推送到 iPhone</span>
       </div>
       <div class="header-right">
-        <div id="status-line" class="status-line muted">状态：未连接</div>
+        <div id="status-line" class="status-line st-off">未连接</div>
         <button id="btn-logout" class="btn small ghost">切换连接</button>
         <a class="btn small ghost" href="../">🧰 工具箱</a>
       </div>
@@ -82,6 +82,7 @@
                 <label><input type="radio" name="push-channel" value="bark" checked /> Bark（iPhone）</label>
                 <label><input type="radio" name="push-channel" value="serverchan" /> Server酱（微信）</label>
               </div>
+              <button id="btn-test-push" class="btn small ghost">发送测试</button>
             </div>
             <div id="push-bark-row" class="row-span-all">
               <label for="bark-input">Bark Key 或 URL</label>
@@ -100,9 +101,8 @@
           </div>
           <div class="row">
             <button id="btn-save" class="btn success">保存配置</button>
-            <button id="btn-check" class="btn">立即检查</button>
-            <button id="btn-test-push" class="btn ghost">测试推送</button>
-            <button id="btn-toggle-monitor" class="btn danger">停止监控</button>
+            <span class="spacer"></span>
+            <button id="btn-toggle-monitor" class="btn small ghost danger">停止监控</button>
           </div>
           <div class="muted tip-line" id="batch-tip">云端按定时批次自动检查（当前每 10 分钟一批，以服务端为准）。停止监控不会丢失配置，可随时恢复</div>
         </section>
@@ -137,7 +137,10 @@
         <section class="card grow">
           <div class="row space-between">
             <h2>变化记录</h2>
-            <button id="btn-refresh" class="btn small ghost">刷新</button>
+            <div class="row no-margin">
+              <button id="btn-check" class="btn small ghost">立即检查</button>
+              <button id="btn-refresh" class="btn small ghost">刷新</button>
+            </div>
           </div>
           <div id="log-panel" class="log-panel" aria-live="polite"></div>
         </section>
@@ -145,8 +148,8 @@
     </main>
   </div>
 
-  <script src="secure-store.js?v=20260911d"></script>
-  <script src="ui.js?v=20260911d"></script>
-  <script src="app.js?v=20260911d"></script>
+  <script src="secure-store.js?v=20260911e"></script>
+  <script src="ui.js?v=20260911e"></script>
+  <script src="app.js?v=20260911e"></script>
 </body>
 </html>

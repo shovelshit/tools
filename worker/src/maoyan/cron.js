@@ -22,6 +22,13 @@ export function cronBatchMinutes(expr = CRON_EXPRESSION) {
   return 10;
 }
 
+// 是否为分钟步进型 cron(每 N 分钟一批, 可精确推算下一批时间)
+export function isMinuteStepCron(expr = CRON_EXPRESSION) {
+  const f = String(expr || "").trim().split(/\s+/);
+  if (f.length < 5) return false;
+  return f[1] === "*" && (f[0] === "*" || /^\*\/\d+$/.test(f[0]));
+}
+
 // cron 表达式的人话描述, 供前端展示; 复杂表达式原样返回
 export function describeCron(expr = CRON_EXPRESSION) {
   const f = String(expr || "").trim().split(/\s+/);
