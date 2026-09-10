@@ -18,7 +18,7 @@ routes = [
 # 注意: 修改 crons 时需同步修改 src/maoyan/cron.js 里的 CRON_EXPRESSION
 # (监控页的批次提示与检查频率都依赖它)
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["*/30 * * * *"]
 
 # ============ 环境变量 ============
 # CF_ACCOUNT_ID: 供运行时查询本 Worker 的真实 cron 调度(配合 CF_API_TOKEN secret)
