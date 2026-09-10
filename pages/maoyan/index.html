@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>猫眼影院场次监控 - 云端版</title>
-  <link rel="stylesheet" href="style.css?v=20260911k" />
+  <link rel="stylesheet" href="style.css?v=20260911l" />
 </head>
 <body>
   <!-- 登录层: 首次进入 / 切换连接时显示 -->
@@ -14,18 +14,14 @@
       <h1>猫眼影院场次监控</h1>
       <p class="login-sub">云端定时检查影院新增场次 · 支持 Bark / Server酱 推送到手机</p>
       <div class="form-grid login-grid">
-        <label for="worker-url">服务地址</label>
-        <input id="worker-url" type="text" placeholder="默认使用本站服务，无需填写" />
+        <label for="worker-url" class="hidden">服务地址</label>
+        <input id="worker-url" class="hidden" type="text" placeholder="默认使用本站服务，无需填写" />
         <label for="token-input">访问令牌</label>
         <input id="token-input" type="password" placeholder="请输入访问令牌" autocomplete="off" />
       </div>
       <div id="login-error" class="login-error hidden"></div>
       <button id="btn-connect" class="btn primary block">进入监控</button>
       <div id="login-hint" class="login-hint hidden"></div>
-      <div class="login-foot muted">
-        配置自动保存在本机浏览器 · 多人使用请各自填自己的令牌
-      </div>
-      <div id="login-debug" class="login-debug"></div>
     </div>
   </div>
 
@@ -147,8 +143,8 @@
     </main>
   </div>
 
-  <script src="secure-store.js?v=20260911k"></script>
-  <script src="ui.js?v=20260911k"></script>
-  <script src="app.js?v=20260911k"></script>
+  <script src="secure-store.js?v=20260911l"></script>
+  <script src="ui.js?v=20260911l"></script>
+  <script src="app.js?v=20260911l"></script>
 </body>
 </html>

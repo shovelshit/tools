@@ -12,7 +12,6 @@ const els = {
   btnConnect: $("btn-connect"),
   loginError: $("login-error"),
   loginHint: $("login-hint"),
-  loginDebug: $("login-debug"),
   // 顶栏
   statusLine: $("status-line"),
   btnLogout: $("btn-logout"),
@@ -842,7 +841,7 @@ function syncCronInfo(data) {
     return h.toString(16).padStart(8, "0");
   }
 
-  // 令牌指纹: 与 worker 端 KV 键名 u:<指纹>:config 中的段一致, 便于核对是哪份配置
+  // 令牌指纹仅输出到控制台: 与 worker 端 KV 键名 u:<指纹>:config 对应
   function tokenFingerprint(t) {
     let h = 2166136261;
     for (let i = 0; i < t.length; i++) {
@@ -859,21 +858,13 @@ function syncCronInfo(data) {
   if (qs.get("worker")) els.workerUrl.value = qs.get("worker");
   if (qs.get("token")) els.token.value = qs.get("token");
   const explicit = qs.has("worker"); // 带参数打开视为明确意图, 免令牌模式也能自动连
-  const fp = tokenFingerprint(els.token.value.trim() || "anonymous");
-  // 登录页常驻一行环境状态: 排查手机端刷新后需要重新登录的问题
-  if (els.loginDebug) {
-    const yn = (b) => (b ? "可用" : "不可用");
-    els.loginDebug.textContent =
-      `本机存储 ${yn(env.storageOk)} · WebCrypto ${yn(env.cryptoOk)} · ` +
-      `安全上下文 ${env.secureContext ? "是" : "否"} · 已存令牌 ${savedToken ? "有" : "无"} · ` +
-      `模式 ${openMode ? "免令牌" : "令牌"} · 令牌指纹 ${fp} · ${location.hostname}`;
-  }
   const canAutoConnect = Boolean(els.token.value.trim() || explicit || openMode);
   console.warn("[maoyan init]", {
     ...env,
     hasSavedToken: Boolean(savedToken),
     openMode,
     canAutoConnect,
+    tokenFingerprint: tokenFingerprint(els.token.value.trim() || "anonymous"),
     host: location.hostname,
   });
   if (canAutoConnect && (els.workerUrl.value.trim() !== "" || SAME_ORIGIN)) {
