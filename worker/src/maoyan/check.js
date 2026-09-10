@@ -3,7 +3,7 @@
 import { userKey, getUserConfig } from "./user.js";
 import { fetchCinemaDetail } from "./api.js";
 import { pushNotify } from "./notify.js";
-import { cronBatchMinutes } from "./cron.js";
+import { cronBatchMinutes, resolveCronExpr } from "./cron.js";
 import { isExpired } from "./ddl.js";
 
 function fmtShow(s) {
@@ -39,7 +39,8 @@ export async function runCheck(env, manual, token) {
   const st = await env.MAOYAN_KV.get(stKey, "json") || {};
   const now = Date.now();
   // 检查频率完全跟随 cron 批次: 每批检查一次, 半个批次的容差吸收触发时间抖动
-  const batchMinutes = cronBatchMinutes();
+  const cronExpr = await resolveCronExpr(env);
+  const batchMinutes = cronBatchMinutes(cronExpr);
   const batchMs = batchMinutes * 60 * 1e3;
   if (!manual && st.lastCheckTs && now - st.lastCheckTs < batchMs / 2) {
     return { ok: true, skipped: true };

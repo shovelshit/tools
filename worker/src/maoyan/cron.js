@@ -1,8 +1,34 @@
 // ---------------- cron 批次解析 ----------------
 // 定时批次在两处定义: wrangler.toml [triggers].crons 与下面的 CRON_EXPRESSION
 // 修改 crons 时请同步修改 CRON_EXPRESSION, 间隔对齐与前端选项生成都依赖它
+// 配置了 CF_API_TOKEN + CF_ACCOUNT_ID 后, 会改为运行时调 Cloudflare API
+// 查询真实调度, Dashboard 里改 cron 也能自动同步, 常量仅作回落
 
 export const CRON_EXPRESSION = "*/10 * * * *";
+const SCRIPT_NAME = "tools-api";
+let cronCache = null; // { expr, ts }
+
+// 运行时解析真实 cron: 优先 Cloudflare API, 失败/未配置回落常量, 结果缓存 5 分钟
+export async function resolveCronExpr(env) {
+  const now = Date.now();
+  if (cronCache && now - cronCache.ts < 300e3) return cronCache.expr;
+  let expr = CRON_EXPRESSION;
+  try {
+    if (env && env.CF_API_TOKEN && env.CF_ACCOUNT_ID) {
+      const res = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/workers/scripts/${SCRIPT_NAME}/schedules`,
+        { headers: { Authorization: `Bearer ${env.CF_API_TOKEN}` }, signal: AbortSignal.timeout(8e3) }
+      );
+      const data = await res.json();
+      const cron = data && data.success && Array.isArray(data.result) && data.result[0] && data.result[0].cron;
+      if (cron) expr = cron;
+    }
+  } catch (e) {
+    // 查询失败: 沿用常量
+  }
+  cronCache = { expr, ts: now };
+  return expr;
+}
 
 // 解析 cron 的批次间隔(分钟):
 //   "*/3 * * * *"  -> 3

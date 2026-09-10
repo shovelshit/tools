@@ -3,7 +3,7 @@
 import { CORS, json } from "./common/http.js";
 import { NOTIFY_CHANNELS, pushBark } from "./common/notify.js";
 import { userKey, getUserConfig } from "./maoyan/user.js";
-import { CITY_LIST, fetchCinemaDetail, searchCinemasByKw, runCheck, pushNotify, currentChannel, cronBatchMinutes, describeCron, isMinuteStepCron, CRON_EXPRESSION, ddlFromNow, checkAuthFull, syncCronTokens, handleAdminTokens, runScheduledChecks } from "./maoyan/index.js";
+import { CITY_LIST, fetchCinemaDetail, searchCinemasByKw, runCheck, pushNotify, currentChannel, cronBatchMinutes, describeCron, isMinuteStepCron, resolveCronExpr, ddlFromNow, checkAuthFull, syncCronTokens, handleAdminTokens, runScheduledChecks } from "./maoyan/index.js";
 import { handleStoreApi, handleStoreFile } from "./store/proxy.js";
 
 export default {
@@ -70,15 +70,16 @@ export default {
       }
       if (url.pathname === "/api/config" && request.method === "GET") {
         const cfg = await getUserConfig(env, token);
+        const cronExpr = await resolveCronExpr(env);
         return json({
           ok: true,
           config: {
             enabled: cfg.enabled === true, // 默认停止, 需显式「开始监控」
             ...cfg,
-            cronMinutes: cronBatchMinutes(),
-            cronExpr: CRON_EXPRESSION,
-            cronText: describeCron(),
-            cronMinuteStep: isMinuteStepCron(),
+            cronMinutes: cronBatchMinutes(cronExpr),
+            cronExpr,
+            cronText: describeCron(cronExpr),
+            cronMinuteStep: isMinuteStepCron(cronExpr),
           },
         });
       }
@@ -122,6 +123,7 @@ export default {
       }
       if (url.pathname === "/api/status" && request.method === "GET") {
         const cfg = await getUserConfig(env, token);
+        const cronExpr = await resolveCronExpr(env);
         const st = await env.MAOYAN_KV.get(userKey(token, "status"), "json") || {};
         const status = {
           lastCheckTs: st.lastCheckTs,
@@ -138,9 +140,9 @@ export default {
           authMode: "token",
           status,
           changes,
-          cronMinutes: cronBatchMinutes(),
-          cronText: describeCron(),
-          cronMinuteStep: isMinuteStepCron(),
+          cronMinutes: cronBatchMinutes(cronExpr),
+          cronText: describeCron(cronExpr),
+          cronMinuteStep: isMinuteStepCron(cronExpr),
         });
       }
       return json({ error: "Unknown API" }, 404);
