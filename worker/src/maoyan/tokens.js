@@ -24,10 +24,14 @@ async function saveManagedTokens(env, list) {
 
 async function markTokenUsed(env, token) {
   try {
+    const now = Date.now();
     const list = await getManagedTokens(env);
     const i = list.findIndex((t) => t.token === token);
     if (i >= 0) {
-      list[i].lastUsedAt = new Date().toISOString();
+      // 节流: lastUsedAt 每 24 小时最多写一次 KV(免费版写入限额 1000 次/天)
+      const last = Date.parse(list[i].lastUsedAt || "") || 0;
+      if (now - last < 24 * 3600 * 1000) return;
+      list[i].lastUsedAt = new Date(now).toISOString();
       await env.MAOYAN_KV.put("meta:tokens", JSON.stringify(list));
     }
   } catch (e) {
@@ -42,8 +46,9 @@ function checkAdminAuth(request, env) {
 }
 
 // 鉴权: 仅认 KV meta:tokens 中的令牌; KV 为空则拒绝所有人
+// 安全: 仅认 X-Token 请求头, 不接受 ?token= URL 参数(避免令牌进入日志/历史记录)
 export async function checkAuthFull(request, env, url) {
-  const given = request.headers.get("X-Token") || url.searchParams.get("token") || "";
+  const given = request.headers.get("X-Token") || "";
   const managed = await getManagedTokens(env);
   if (!managed.length) return null; // 无任何令牌: 全站关闭
   const hit = managed.find((t) => t.token === given);

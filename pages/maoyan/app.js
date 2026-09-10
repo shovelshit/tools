@@ -56,11 +56,10 @@ const SAME_ORIGIN = SAME_ORIGIN_HOSTS.includes(location.hostname);
 const DEFAULT_WORKER = SAME_ORIGIN ? "" : "https://ltools.asia";
 
 // ---------------- 基础 ----------------
+// 安全: 令牌只通过 X-Token 请求头传递, 不再拼进 URL(避免进入日志/历史记录)
 function apiPath(path, params = "") {
   const base = els.workerUrl.value.trim().replace(/\/+$/, "");
-  const token = els.token.value.trim();
-  const sep = path.includes("?") ? "&" : "?";
-  return `${base}${path}${sep}token=${encodeURIComponent(token)}${params}`;
+  return `${base}${path}${params}`;
 }
 
 async function api(path, options = {}) {
@@ -98,7 +97,7 @@ function enterMainPage() {
 async function connect() {
   if (!els.workerUrl.value.trim() && !SAME_ORIGIN) return showLoginError("请填写 Worker 地址");
   localStorage.setItem("workerUrl", els.workerUrl.value.trim());
-  localStorage.setItem("token", els.token.value.trim());
+  await secureSet("token", els.token.value.trim());
   els.btnConnect.disabled = true;
   els.btnConnect.textContent = "连接中...";
   els.loginError.classList.add("hidden");
@@ -586,7 +585,7 @@ setInterval(() => { if (connected) refreshChanges(); }, 60000);
 // ---------------- 初始化 ----------------
 (async function init() {
   els.workerUrl.value = localStorage.getItem("workerUrl") ?? DEFAULT_WORKER;
-  els.token.value = localStorage.getItem("token") || "";
+  els.token.value = (await secureGet("token")) || "";
   // 支持 URL 参数直达: ?worker=https://xxx.workers.dev&token=xxx
   const qs = new URLSearchParams(location.search);
   if (qs.get("worker")) els.workerUrl.value = qs.get("worker");

@@ -61,7 +61,7 @@ async function login() {
     const res = await adminApi("/api/admin/tokens");
     tokens = res.tokens || [];
     localStorage.setItem("adminWorkerUrl", baseUrl);
-    localStorage.setItem("adminToken", adminToken);
+    await secureSet("adminToken", adminToken);
     renderTokens();
     els.loginOverlay.classList.add("hidden");
     els.adminMain.classList.remove("hidden");
@@ -238,7 +238,7 @@ async function copyText(text) {
   // 支持 URL 参数直达: ?worker=https://xxx.workers.dev&adminToken=xxx
   const qs = new URLSearchParams(location.search);
   els.workerUrl.value = qs.get("worker") || (localStorage.getItem("adminWorkerUrl") ?? DEFAULT_WORKER);
-  els.adminToken.value = qs.get("adminToken") || localStorage.getItem("adminToken") || "";
+  els.adminToken.value = qs.get("adminToken") || (await secureGet("adminToken")) || "";
   if (els.adminToken.value.trim()) {
     await login();
   }

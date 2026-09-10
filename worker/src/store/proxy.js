@@ -21,9 +21,20 @@ export async function handleStoreApi(request, url) {
 }
 
 // /store/file?url=... 代理 http 直链(解决 HTTPS 页面加载 HTTP 资源被拦)
+// 安全限制: 仅允许上游 AList 域名的 http 直链, 防止被当作开放代理滥用
+const FILE_PROXY_ALLOWED_HOSTS = new Set(["appstore.cnmlynk.org"]);
+
 export async function handleStoreFile(url) {
   const fileUrl = url.searchParams.get("url") || "";
-  if (!/^http:\/\//i.test(fileUrl)) return json({ error: "仅支持代理 http 直链" }, 400);
+  let target;
+  try {
+    target = new URL(fileUrl);
+  } catch (e) {
+    return json({ error: "无效的 url 参数" }, 400);
+  }
+  if (target.protocol !== "http:" || !FILE_PROXY_ALLOWED_HOSTS.has(target.hostname)) {
+    return json({ error: "仅支持代理上游 AList 域名的 http 直链" }, 403);
+  }
   try {
     const res = await fetch(fileUrl, { redirect: "follow" });
     return new Response(res.body, {
