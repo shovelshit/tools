@@ -20,7 +20,9 @@ export async function runCheck(env, manual, token) {
   const stKey = userKey(token, "status");
   const st = await env.MAOYAN_KV.get(stKey, "json") || {};
   const now = Date.now();
-  const intervalMs = Math.max(1, Number(cfg.intervalMinutes) || 10) * 60 * 1e3;
+  // 间隔按 cron 批次对齐: 云端每 10 分钟唤醒一批, 间隔量化为 10 的倍数(10-720)
+  const intervalMinutes = Math.min(720, Math.max(10, Math.round((Number(cfg.intervalMinutes) || 10) / 10) * 10));
+  const intervalMs = intervalMinutes * 60 * 1e3;
   if (!manual && st.lastCheckTs && now - st.lastCheckTs < intervalMs * 0.9) {
     return { ok: true, skipped: true };
   }

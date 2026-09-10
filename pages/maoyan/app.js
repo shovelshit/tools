@@ -590,10 +590,13 @@ els.btnSave.addEventListener("click", async () => {
   await withButtonLoading(els.btnSave, "保存中...", async () => {
     try {
       const selectedMovieIds = getSelectedIds();
+      // cron 每 10 分钟一批, 间隔按 10 分钟对齐(10-720)
+      const intervalMinutes = Math.min(720, Math.max(10, Math.round((parseInt(els.intervalInput.value, 10) || 10) / 10) * 10));
+      els.intervalInput.value = intervalMinutes;
       const body = pushConfigBody({
         cinemaId: els.cinemaInput.value.trim(),
         selectedMovieIds,
-        intervalMinutes: parseInt(els.intervalInput.value, 10) || 10,
+        intervalMinutes,
         enabled: true, // 保存完整配置视为恢复监控
       });
       await api("/api/config", { method: "POST", body: JSON.stringify(body) });

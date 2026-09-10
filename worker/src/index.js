@@ -79,7 +79,11 @@ export default {
         if (body.enabled !== void 0) cfg.enabled = Boolean(body.enabled);
         if (body.cinemaId !== void 0) cfg.cinemaId = String(body.cinemaId).trim();
         if (body.selectedMovieIds !== void 0) cfg.selectedMovieIds = (body.selectedMovieIds || []).map(String);
-        if (body.intervalMinutes !== void 0) cfg.intervalMinutes = Math.max(1, parseInt(body.intervalMinutes, 10) || 10);
+        if (body.intervalMinutes !== void 0) {
+          const n = parseInt(body.intervalMinutes, 10) || 10;
+          // cron 每 10 分钟一批, 间隔按 10 分钟对齐(10-720)
+          cfg.intervalMinutes = Math.min(720, Math.max(10, Math.round(n / 10) * 10));
+        }
         if (body.barkKey !== void 0) cfg.barkKey = String(body.barkKey).trim();
         if (body.serverChanKey !== void 0) cfg.serverChanKey = String(body.serverChanKey).trim();
         if (body.notifyChannel !== void 0) {
