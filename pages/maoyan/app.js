@@ -188,15 +188,24 @@ els.btnLogout.addEventListener("click", () => {
 });
 
 async function restoreConfig() {
-  const { config } = await api("/api/config");
-  monitorEnabled = config.enabled !== false;
-  updateMonitorBtn();
-  if (config.cinemaId) els.cinemaInput.value = config.cinemaId;
-  // 批次信息以服务端 cron 为准
-  syncCronInfo(config);
-  applyPushConfig(config);
-  const prevSelected = new Set((config.selectedMovieIds || []).map(String));
-  if (config.cinemaId) await loadCinema(config.cinemaId, prevSelected);
+  restoring = true; // 恢复期间自动保存全部跳过, 避免每次连接都冗余写 KV
+  try {
+    const { config } = await api("/api/config");
+    monitorEnabled = config.enabled !== false;
+    updateMonitorBtn();
+    if (config.cinemaId) els.cinemaInput.value = config.cinemaId;
+    // 批次信息以服务端 cron 为准
+    syncCronInfo(config);
+    applyPushConfig(config);
+    const prevSelected = new Set((config.selectedMovieIds || []).map(String));
+    if (config.cinemaId) await loadCinema(config.cinemaId, prevSelected);
+  } finally {
+    // 恢复完成: 记录当前状态签名, 与云端一致的内容不再重复写入
+    lastSavedSig = JSON.stringify(
+      pushConfigBody({ cinemaId: els.cinemaInput.value.trim(), selectedMovieIds: getSelectedIds() })
+    );
+    restoring = false;
+  }
 }
 
 // ---------------- 推送渠道 ----------------
@@ -248,14 +257,21 @@ function pushConfigBody(extra = {}) {
 }
 
 // ---------------- 自动保存 ----------------
-// 改动即保存, 不再需要"保存配置"按钮; 签名去重避免重复写 KV
+// 改动即保存, 不再需要"保存配置"按钮
+// 写入频率控制: 签名去重(与云端一致不写) + 恢复期间不写 + 并发合并(只写最新状态)
 let lastSavedSig = "";
 let movieSaveTimer = null;
+let saving = false;
+let savePending = false;
+let restoring = false;
 
 async function autoSaveConfig(extra = {}, { msg = "配置已自动保存", silent = false } = {}) {
+  if (restoring) return; // 恢复配置期间不写
   const body = pushConfigBody(extra);
   const sig = JSON.stringify(body);
   if (sig === lastSavedSig) return;
+  if (saving) { savePending = true; return; } // 上一次还在写: 完成后按最新状态补写一次
+  saving = true;
   lastSavedSig = sig;
   try {
     await api("/api/config", { method: "POST", body: sig });
@@ -263,6 +279,15 @@ async function autoSaveConfig(extra = {}, { msg = "配置已自动保存", silen
   } catch (e) {
     lastSavedSig = ""; // 失败允许重试
     showToast("自动保存失败：" + e.message, "error");
+  } finally {
+    saving = false;
+    if (savePending) {
+      savePending = false;
+      autoSaveConfig(
+        { selectedMovieIds: getSelectedIds(), cinemaId: els.cinemaInput.value.trim() },
+        { silent: true }
+      );
+    }
   }
 }
 
