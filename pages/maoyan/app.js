@@ -581,11 +581,25 @@ els.cinemaInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") els.btnLoadCinema.click();
 });
 
+// 拉取影院排期, 自动重试 2 次(猫眼接口偶发失败)
+async function fetchShowsWithRetry(cinemaId) {
+  let lastErr;
+  for (let i = 0; i < 3; i++) {
+    try {
+      return await api("/api/shows?cinemaId=" + encodeURIComponent(cinemaId));
+    } catch (e) {
+      lastErr = e;
+      if (i < 2) await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 async function loadCinema(cinemaId, prevSelected, { restore = false } = {}) {
   setPanelLoading(els.movieList, "正在加载影院影片...");
   await withButtonLoading(restore ? null : els.btnLoadCinema, "加载中...", async () => {
     try {
-      const res = await api("/api/shows?cinemaId=" + encodeURIComponent(cinemaId));
+      const res = await fetchShowsWithRetry(cinemaId);
       els.cinemaName.textContent = `🎬 ${res.cinemaName}（ID: ${res.cinemaId}）`;
       els.cinemaName.classList.remove("hidden");
       const sel = prevSelected || new Set(getSelectedIds());
