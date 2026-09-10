@@ -120,7 +120,8 @@ header h1 { font-size: 19px; font-weight: 700; display: inline; }
 }
 
 .col { display: flex; flex-direction: column; gap: 12px; min-height: 0; min-width: 0; }
-.col-settings { flex: 0.95; }
+.col-settings { flex: 0.95; overflow-y: auto; }
+.col-settings::-webkit-scrollbar { width: 4px; }
 .col-movies { flex: 1.15; }
 .col-log { flex: 1.25; }
 
@@ -435,7 +436,7 @@ input[type="password"]:focus { border-color: var(--primary); }
 ::-webkit-scrollbar-thumb:hover { background: #b8c0cb; }
 
 /* ---------- 窄屏(手机)回退为单列 ---------- */
-@media (max-width: 900px) {
+@media (max-width: 1020px) {
   html, body { height: auto; }
   .container { height: auto; }
   .main-grid { flex-direction: column; }
