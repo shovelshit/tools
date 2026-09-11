@@ -53,6 +53,13 @@ function safeError(error) {
     return response({ error: "已有进行中的锁座规则" }, 409);
   }
   if (providerError(error)) return response({ error: "猫眼会话验证失败" }, 502);
+  // 猫眼接口网络/状态错误: 透传真实原因, 便于用户判断(场次失效/接口波动等)
+  if (/^猫眼请求失败：/.test(String(error?.message || ""))) {
+    return response({ error: error.message }, 502);
+  }
+  if (/^猫眼座位图格式无效$/.test(String(error?.message || ""))) {
+    return response({ error: "座位图获取失败，场次可能已失效或暂无座位图" }, 502);
+  }
   return response({ error: "锁座服务暂时不可用" }, 500);
 }
 

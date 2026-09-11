@@ -2,6 +2,8 @@ name = "tools-api"
 main = "src/index.js"
 compatibility_date = "2026-09-08"
 workers_dev = true
+# 保留 Dashboard 中配置的明文变量(部署时不删除/不覆盖不在 toml 中的变量)
+keep_vars = true
 
 # ============ 自定义域名路由 (zone: ltools.asia) ============
 # 注意: routes 必须在 [triggers] 之前, 否则会被解析为 triggers 的子字段
@@ -21,11 +23,12 @@ routes = [
 crons = ["*/30 * * * *", "* * * * *"]
 
 # ============ 环境变量 ============
-# CF_ACCOUNT_ID: 供运行时查询本 Worker 的真实 cron 调度(配合 CF_API_TOKEN secret)
-[vars]
-CF_ACCOUNT_ID = "4872db2724154d6cbee0709216b70a01"
- LOCK_AUTOMATION_ENABLED = "true"
- LOCK_SERVICE_ENABLED = "true"
+# 变量已改为仅在 Dashboard 中配置(配合 keep_vars, 部署不会删除/覆盖)
+# 需要恢复仓库管理时, 取消下面的注释即可
+# [vars]
+# CF_ACCOUNT_ID = "4872db2724154d6cbee0709216b70a01"
+# LOCK_AUTOMATION_ENABLED = "true"
+# LOCK_SERVICE_ENABLED = "true"
 
 # ============ KV 绑定(令牌/用户数据/影院缓存) ============
 [[kv_namespaces]]
