@@ -90,6 +90,7 @@ export async function runCheck(env, manual, token) {
   return { ok: true, cinemaName, newTotal, enabled: cfg.enabled !== false };
   } catch (e) {
     // 失败也要留痕: 更新 lastCheck/lastError, 让界面能看出定时检查发生过但失败了
+    console.error("[monitor] 检查失败:", e?.message || e);
     st.lastCheckTs = now;
     st.lastCheck = new Date(now).toISOString();
     st.lastError = e.message;

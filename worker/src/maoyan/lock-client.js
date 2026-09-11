@@ -88,6 +88,11 @@ function assertId(value) {
   return String(value);
 }
 
+function snippet(text, max = 400) {
+  const value = String(text ?? "").replace(/\s+/g, " ").trim();
+  return value.length > max ? `${value.slice(0, max)}...` : value;
+}
+
 export async function requestMaoyan(session, value, options = {}) {
   const url = trustedUrl(value);
   const { allowHttpError = false, ...requestOptions } = options;
@@ -111,6 +116,19 @@ export async function requestMaoyan(session, value, options = {}) {
   }
   if (!response.ok && !allowHttpError) throw new Error(`猫眼请求失败：HTTP ${response.status}`);
   return response;
+}
+
+// 解析失败时的页面诊断信息: 标题 + 关键标记, 帮助判断是登录页/验证页/改版
+function pageHint(html) {
+  const source = String(html);
+  const title = (source.match(/<title[^>]*>([^<]*)<\/title>/i) || [])[1] || "";
+  const flags = [];
+  if (/登录|login/i.test(source)) flags.push("含登录提示");
+  if (/验证|captcha|geetest/i.test(source)) flags.push("含验证提示");
+  if (/seats-block/.test(source)) flags.push("含座位块");
+  if (/selectable/.test(source)) flags.push("含可选座位");
+  const titleText = title.trim().slice(0, 40);
+  return flags.length ? `页面「${titleText}」${flags.join("/")}` : `页面「${titleText}」无座位相关标记`;
 }
 
 export function parseSeatPage(html) {
@@ -171,19 +189,6 @@ export function findExactShows(data, { movieId, targetDate, templateTime }) {
   });
 }
 
-// 解析失败时的页面诊断信息: 标题 + 关键标记, 帮助判断是登录页/验证页/改版
-function pageHint(html) {
-  const source = String(html);
-  const title = (source.match(/<title[^>]*>([^<]*)<\/title>/i) || [])[1] || "";
-  const flags = [];
-  if (/登录|login/i.test(source)) flags.push("含登录提示");
-  if (/验证|captcha|geetest/i.test(source)) flags.push("含验证提示");
-  if (/seats-block/.test(source)) flags.push("含座位块");
-  if (/selectable/.test(source)) flags.push("含可选座位");
-  const titleText = title.trim().slice(0, 40);
-  return flags.length ? `页面「${titleText}」${flags.join("/")}` : `页面「${titleText}」无座位相关标记`;
-}
-
 export async function fetchSeatMap(session, { cinemaId, movieId, seqNo }) {
   const url = new URL(`${ORIGIN}/xseats/${assertId(seqNo)}`);
   url.searchParams.set("movieId", assertId(movieId));
@@ -209,6 +214,7 @@ function selectedSeats(seatMap, seats) {
   return seats.map(String);
 }
 
+
 export async function createUnpaidOrder(session, seatMap, seats) {
   const selected = selectedSeats(seatMap, seats);
   const url = new URL(`${ORIGIN}/ajax/createOrder`);
@@ -221,6 +227,7 @@ export async function createUnpaidOrder(session, seatMap, seats) {
     seqNo: seatMap.seqNo,
     seats: JSON.stringify({ count: selected.length, list: selected })
   });
+  console.log("[lock] createOrder POST", `${url.pathname}${url.search}`, "seats=", seats.join(","));
   let response;
   try {
     response = await requestMaoyan(session, url.toString(), {
@@ -234,24 +241,31 @@ export async function createUnpaidOrder(session, seatMap, seats) {
       },
       body
     });
-  } catch {
+  } catch (error) {
+    console.error("[lock] createOrder 请求异常:", error?.message || error);
     throw new OrderAttemptError("创建订单结果不确定，请在猫眼订单中确认", true);
   }
-
+  const text = await response.text();
+  console.log("[lock] createOrder HTTP", response.status, "body:", snippet(text));
   let payload;
   try {
-    payload = await response.json();
+    payload = JSON.parse(text);
   } catch {
     throw new OrderAttemptError("创建订单结果不确定，请在猫眼订单中确认", true);
   }
   const order = payload?.data?.data;
   if (order && (typeof order.id === "string" || typeof order.id === "number")) {
     const payLeftSecond = Number(order.payLeftSecond);
+    console.log("[lock] createOrder 成功 orderId=", order.id);
     return {
       orderId: String(order.id),
       payLeftSecond: Number.isFinite(payLeftSecond) ? payLeftSecond : null
     };
   }
-  if (explicitProviderRejection(payload)) throw new OrderAttemptError("猫眼拒绝创建订单", false);
+  if (explicitProviderRejection(payload)) {
+    console.error("[lock] createOrder 被拒绝:", snippet(text, 200));
+    throw new OrderAttemptError("猫眼拒绝创建订单", false);
+  }
+  console.error("[lock] createOrder 响应无法识别:", snippet(text, 200));
   throw new OrderAttemptError("创建订单结果不确定，请在猫眼订单中确认", true);
 }

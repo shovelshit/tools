@@ -173,6 +173,8 @@ export async function createLockRule(env, tokenId, input, options = {}) {
   const ignoreAvailability = !targetShow;
   const seats = selectedSeats(seatMap, values.seatNos, { ignoreAvailability });
   const timestamp = new Date(now).toISOString();
+  console.log("[lock] create tokenId=", String(tokenId).slice(0, 8), "mode=", targetShow ? "real" : "template",
+    "targetDate=", values.targetDate, "seatSeqNo=", seatSeqNo, "seats=", values.seatNos.join(","));
   const buildRule = (state, extra = {}) => ({
     id: crypto.randomUUID(),
     cinemaId: values.cinemaId,
@@ -197,6 +199,7 @@ export async function createLockRule(env, tokenId, input, options = {}) {
     // 目标场次真实存在: 跳过等待, 立即尝试锁座下单
     try {
       const order = await createUnpaidOrder(session, seatMap, seats.map((seat) => seat.seatNo));
+      console.log("[lock] 立即锁座成功 orderId=", order.orderId);
       const rule = buildRule("locked", {
         orderId: String(order.orderId),
         payLeftSecond: order.payLeftSecond ?? null,
@@ -206,14 +209,17 @@ export async function createLockRule(env, tokenId, input, options = {}) {
       return publicLockRule(rule, false);
     } catch (error) {
       if (error instanceof OrderAttemptError && !error.uncertain) {
+        console.error("[lock] 立即锁座被拒绝");
         throw new Error("猫眼拒绝创建订单：座位可能已被抢占");
       }
       // 结果不确定(网络异常等): 保存为待人工确认, 避免重复下单
+      console.error("[lock] 立即锁座结果不确定");
       const rule = buildRule("unknown", { lastError: "创建订单结果不确定，请到猫眼订单中确认" });
       await putLockRule(env, tokenId, rule);
       return publicLockRule(rule, false);
     }
   }
+  console.log("[lock] 目标日期暂无排期, 保存等待规则");
   const rule = buildRule("waiting_schedule");
   await putLockRule(env, tokenId, rule);
   return publicLockRule(rule, false);

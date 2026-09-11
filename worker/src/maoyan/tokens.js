@@ -56,6 +56,7 @@ export async function runScheduledChecks(env) {
     try {
       await runCheck(env, false, token.id);
     } catch (e) {
+      console.error("[monitor] 定时检查异常:", e?.message || e);
     }
   }
 }

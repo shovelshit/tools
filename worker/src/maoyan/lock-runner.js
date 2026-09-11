@@ -50,8 +50,13 @@ async function notifyTerminal(env, tokenId, rule, deps) {
 
 async function terminal(env, tokenId, rule, state, changes, deps) {
   const next = await saveRule(env, tokenId, rule, { ...changes, state }, deps);
+  console.log(`[lock-run] 规则终态 ${state}: ${rule.movieName} ${rule.targetDate} ${rule.templateTime} ${lastErrorText(changes)}`);
   await notifyTerminal(env, tokenId, next, deps);
   return { ok: true, state };
+}
+
+function lastErrorText(changes) {
+  return changes?.lastError ? `(${changes.lastError})` : "";
 }
 
 export async function runOneLockRule(env, tokenId, deps = {}) {
@@ -87,6 +92,7 @@ export async function runOneLockRule(env, tokenId, deps = {}) {
       return await terminal(env, tokenId, rule, "failed", { lastError: "所选未来座位不可用或影厅布局已变化" }, deps);
     }
   } catch (error) {
+    console.error("[lock-run] 场次/座位获取失败:", messageFor(error));
     await saveRule(env, tokenId, rule, { lastError: messageFor(error) }, deps);
     return { ok: false, waiting: true };
   }
@@ -188,6 +194,7 @@ export class LockCoordinator {
       if (RULE_KNOWN_ERRORS.includes(message)) {
         return Response.json({ ok: false, error: message }, { status: 400 });
       }
+      console.error("[lock-run] 协调器错误:", message);
       return Response.json({ ok: false, error: "锁座服务暂时不可用" }, { status: 500 });
     }
   }
