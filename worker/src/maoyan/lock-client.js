@@ -96,11 +96,12 @@ function assertId(value) {
 
 export async function requestMaoyan(session, value, options = {}) {
   const url = trustedUrl(value);
+  const { allowHttpError = false, ...requestOptions } = options;
   let response;
   try {
     response = await fetch(url, {
-      ...options,
-      headers: requestHeaders(session, options.headers),
+      ...requestOptions,
+      headers: requestHeaders(session, requestOptions.headers),
       redirect: "manual",
       signal: AbortSignal.timeout(TIMEOUT_MS),
       cf: { cacheTtl: 0 }
@@ -114,7 +115,7 @@ export async function requestMaoyan(session, value, options = {}) {
   if (response.status >= 300 && response.status < 400) {
     throw new Error(`猫眼请求失败：HTTP ${response.status}`);
   }
-  if (!response.ok) throw new Error(`猫眼请求失败：HTTP ${response.status}`);
+  if (!response.ok && !allowHttpError) throw new Error(`猫眼请求失败：HTTP ${response.status}`);
   return response;
 }
 
@@ -185,6 +186,7 @@ export async function createUnpaidOrder(session, seatMap, seats) {
   let response;
   try {
     response = await requestMaoyan(session, url.toString(), {
+      allowHttpError: true,
       method: "POST",
       headers: {
         mtgsig: session.mtgsig,

@@ -140,6 +140,20 @@ test("classifies an explicit provider rejection as a certain order failure", asy
   });
 });
 
+test("classifies a 409 JSON provider rejection as a certain order failure", async () => {
+  await withMockFetch(async () => jsonResponse({ data: { msg: "provider-private-detail" } }, 409), async () => {
+    await assert.rejects(
+      () => createUnpaidOrder(session, parseSeatPage(seatHtml), ["1-6-18"]),
+      (error) => {
+        assert.equal(error instanceof OrderAttemptError, true);
+        assert.equal(error.uncertain, false);
+        assert.equal(error.message.includes("provider-private-detail"), false);
+        return true;
+      }
+    );
+  });
+});
+
 test("classifies ambiguous post-order failures as uncertain", async () => {
   const failures = [
     async () => {
