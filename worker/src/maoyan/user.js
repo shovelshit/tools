@@ -23,7 +23,10 @@ export async function getUserConfig(env, token) {
 
 // 删除令牌时级联清理其用户数据
 export async function cleanupUserData(env, token) {
-  for (const name of ["config", "snapshot", "changes", "status"]) {
+  for (const name of [
+    "config", "snapshot", "changes", "status",
+    "maoyan-session", "maoyan-lock-rule"
+  ]) {
     try {
       await env.MAOYAN_KV.delete(userKey(token, name));
     } catch (e) {
