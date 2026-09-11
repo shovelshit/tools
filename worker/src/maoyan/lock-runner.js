@@ -1,7 +1,7 @@
 import { fetchCinemaDetail } from "./api.js";
 import { findExactShows, fetchSeatMap, createUnpaidOrder, OrderAttemptError } from "./lock-client.js";
 import { getLockSessionStatus, loadLockSession, removeLockSession } from "./lock-session.js";
-import { createLockRule, getLockRule, isLockRuleTerminal, putLockRule, removeLockRule } from "./lock-rule.js";
+import { createLockRule, getLockRule, isLockRuleTerminal, putLockRule, removeLockRule, RULE_KNOWN_ERRORS } from "./lock-rule.js";
 import { getManagedTokens } from "./tokens.js";
 import { getUserConfig } from "./user.js";
 import { pushNotify } from "./notify.js";
@@ -181,9 +181,14 @@ export class LockCoordinator {
       if (latest && isLockRuleTerminal(latest.state)) await this.state.storage.put("terminalRuleId", latest.id);
       return Response.json(result);
     } catch (error) {
-      return Response.json({ ok: false, error: error.message === "已有进行中的锁座规则" ? error.message : "Bad Request" }, {
-        status: error.message === "已有进行中的锁座规则" ? 409 : 400
-      });
+      const message = String(error?.message || "");
+      if (message === "已有进行中的锁座规则") {
+        return Response.json({ ok: false, error: message }, { status: 409 });
+      }
+      if (RULE_KNOWN_ERRORS.includes(message)) {
+        return Response.json({ ok: false, error: message }, { status: 400 });
+      }
+      return Response.json({ ok: false, error: "锁座服务暂时不可用" }, { status: 500 });
     }
   }
 }
@@ -202,7 +207,7 @@ export async function createLockRuleThroughCoordinator(env, tokenId, input) {
   const body = await response.json().catch(() => ({}));
   if (response.status === 201 && body?.ok === true && body.rule) return body.rule;
   if (response.status === 409) throw new Error("已有进行中的锁座规则");
-  if (response.status === 400) throw new Error("锁座参数无效");
+  if (response.status === 400 && body?.error) throw new Error(body.error);
   throw new Error("锁座服务暂时不可用");
 }
 

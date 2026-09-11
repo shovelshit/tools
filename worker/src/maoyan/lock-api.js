@@ -5,11 +5,7 @@ import {
   loadLockSession,
   saveLockSession
 } from "./lock-session.js";
-import {
-  getLockRule,
-  publicLockRule,
-  validateLockRuleInput
-} from "./lock-rule.js";
+import { getLockRule, publicLockRule, RULE_KNOWN_ERRORS, validateLockRuleInput } from "./lock-rule.js";
 import { cancelLockRuleThroughCoordinator, createLockRuleThroughCoordinator, removeLockSessionThroughCoordinator } from "./lock-runner.js";
 
 const MAX_UPLOAD_BYTES = 256 * 1024;
@@ -36,7 +32,7 @@ function providerError(error) {
 }
 
 function ruleInputError(error) {
-  return /^(锁座参数无效|请确认锁座风险提示|所选座位(?:无效|不可用)|情侣座需成对选择|影片未在当前影院监控配置中选择|模板场次不属于当前影院影片|目标日期需在今天起 30 天内|猫眼场次数据无效|猫眼座位图场次无效)$/.test(String(error?.message || ""));
+  return RULE_KNOWN_ERRORS.includes(String(error?.message || ""));
 }
 
 function safeError(error) {
