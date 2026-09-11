@@ -73,12 +73,6 @@ function requiredSeatMapValue(value) {
   return String(value);
 }
 
-function requiredSeatNumber(value) {
-  const seatNo = String(value || "");
-  if (!/^\d+-\d+-\d+$/.test(seatNo)) throw malformedSeatMap();
-  return seatNo;
-}
-
 function explicitProviderRejection(body) {
   if (!body || typeof body !== "object") return false;
   const data = body.data && typeof body.data === "object" ? body.data : {};
@@ -148,10 +142,15 @@ export function parseSeatPage(html) {
   for (const match of seatMarkup.matchAll(/<span\b[^>]*>/gi)) {
     const seatAttributes = attributes(match[0]);
     if (!hasClass(seatAttributes.class, "seat")) continue;
+    // 跳过空位/走道占位符(与本地 CLI 一致: 只收集字段完整的可选座位)
+    const seatNo = String(seatAttributes["data-no"] || "");
+    const rowId = String(seatAttributes["data-row-id"] || "");
+    const columnId = String(seatAttributes["data-column-id"] || "");
+    if (!/^\d+-\d+-\d+$/.test(seatNo) || !rowId || !columnId) continue;
     seats.push({
-      rowId: requiredSeatMapValue(seatAttributes["data-row-id"]),
-      columnId: requiredSeatMapValue(seatAttributes["data-column-id"]),
-      seatNo: requiredSeatNumber(seatAttributes["data-no"]),
+      rowId,
+      columnId,
+      seatNo,
       type: String(seatAttributes["data-st"] || ""),
       available: hasClass(seatAttributes.class, "selectable")
     });
@@ -172,12 +171,33 @@ export function findExactShows(data, { movieId, targetDate, templateTime }) {
   });
 }
 
+// 解析失败时的页面诊断信息: 标题 + 关键标记, 帮助判断是登录页/验证页/改版
+function pageHint(html) {
+  const source = String(html);
+  const title = (source.match(/<title[^>]*>([^<]*)<\/title>/i) || [])[1] || "";
+  const flags = [];
+  if (/登录|login/i.test(source)) flags.push("含登录提示");
+  if (/验证|captcha|geetest/i.test(source)) flags.push("含验证提示");
+  if (/seats-block/.test(source)) flags.push("含座位块");
+  if (/selectable/.test(source)) flags.push("含可选座位");
+  const titleText = title.trim().slice(0, 40);
+  return flags.length ? `页面「${titleText}」${flags.join("/")}` : `页面「${titleText}」无座位相关标记`;
+}
+
 export async function fetchSeatMap(session, { cinemaId, movieId, seqNo }) {
   const url = new URL(`${ORIGIN}/xseats/${assertId(seqNo)}`);
   url.searchParams.set("movieId", assertId(movieId));
   url.searchParams.set("cinemaId", assertId(cinemaId));
   const response = await requestMaoyan(session, url.toString());
-  return parseSeatPage(await response.text());
+  const html = await response.text();
+  try {
+    return parseSeatPage(html);
+  } catch (error) {
+    if (/^猫眼座位图格式无效$/.test(String(error?.message || ""))) {
+      error.message = `${error.message}（${pageHint(html)}）`;
+    }
+    throw error;
+  }
 }
 
 function selectedSeats(seatMap, seats) {
