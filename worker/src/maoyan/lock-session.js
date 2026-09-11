@@ -39,6 +39,17 @@ function encryptedSessionError() {
   return new Error("猫眼会话不可用，请重新上传");
 }
 
+function normalizedSessionAsUpload(raw) {
+  return {
+    cookies: raw.cookies,
+    csrf: raw.csrf,
+    mtgsig: raw.mtgsig,
+    user_agent: raw.userAgent,
+    create_order_query: raw.createOrderQuery,
+    saved_at: raw.sourceSavedAt
+  };
+}
+
 export function maskUid(uid) {
   const value = String(uid || "");
   if (value.length <= 6) return `UID ${"*".repeat(Math.max(3, value.length))}`;
@@ -55,7 +66,7 @@ export function normalizeSession(raw) {
   const uid = cookies.find((cookie) => cookie.name === "uid")?.value || "";
   const csrf = String(raw.csrf || "");
   const mtgsig = String(raw.mtgsig || "");
-  const userAgent = String(raw.user_agent || raw.userAgent || "");
+  const userAgent = String(raw.user_agent || "");
 
   if (!cookies.length || !/^\d+$/.test(uid) || !csrf || !mtgsig || !userAgent) {
     throw new Error("猫眼会话不完整，请重新登录后上传");
@@ -63,8 +74,6 @@ export function normalizeSession(raw) {
 
   const sourceQuery = raw.create_order_query && typeof raw.create_order_query === "object"
     ? raw.create_order_query
-    : raw.createOrderQuery && typeof raw.createOrderQuery === "object"
-      ? raw.createOrderQuery
     : {};
   const createOrderQuery = Object.fromEntries(
     QUERY_KEYS
@@ -79,7 +88,7 @@ export function normalizeSession(raw) {
     mtgsig,
     userAgent,
     createOrderQuery,
-    sourceSavedAt: String(raw.saved_at || raw.sourceSavedAt || "")
+    sourceSavedAt: String(raw.saved_at || "")
   };
 }
 
@@ -125,7 +134,7 @@ export async function loadLockSession(env, tokenId) {
       await encryptionKey(env.SESSION_ENCRYPTION_KEY),
       base64ToBytes(envelope.data)
     );
-    return normalizeSession(JSON.parse(decoder.decode(plaintext)));
+    return normalizeSession(normalizedSessionAsUpload(JSON.parse(decoder.decode(plaintext))));
   } catch (error) {
     if (error?.message === "锁座服务尚未配置加密密钥") throw error;
     throw encryptedSessionError();

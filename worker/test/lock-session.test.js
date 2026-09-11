@@ -9,6 +9,7 @@ import {
   removeLockSession,
   saveLockSession
 } from "../src/maoyan/lock-session.js";
+import { userKey } from "../src/maoyan/user.js";
 
 test("normalizes a local session and masks its uid", () => {
   const session = normalizeSession(validSession());
@@ -26,15 +27,59 @@ test("rejects a session without uid or mtgsig", () => {
   assert.throws(() => normalizeSession(validSession({ cookies: [] })), /会话不完整/);
 });
 
+test("rejects camelCase upload fields", () => {
+  const raw = validSession();
+  raw.userAgent = raw.user_agent;
+  delete raw.user_agent;
+  assert.throws(() => normalizeSession(raw), /会话不完整/);
+});
+
 test("stores ciphertext bound to the token namespace", async () => {
   const env = { MAOYAN_KV: new MemoryKV(), SESSION_ENCRYPTION_KEY: testEncryptionKey() };
   const status = await saveLockSession(env, "token-a", validSession());
-  const stored = env.MAOYAN_KV.data.get("u:token-a:maoyan-session");
+  const stored = env.MAOYAN_KV.data.get(userKey("token-a", "maoyan-session"));
   assert.equal(status.uidMasked, "UID 123***789");
   assert.equal(stored.includes("cookie-secret"), false);
   assert.equal(stored.includes("signature-secret"), false);
   assert.equal((await loadLockSession(env, "token-a")).uid, "123456789");
-  await assert.rejects(() => loadLockSession(env, "token-b"), /未上传猫眼会话/);
+  await env.MAOYAN_KV.put(userKey("token-b", "maoyan-session"), stored);
+  await assert.rejects(
+    () => loadLockSession(env, "token-b"),
+    (error) => {
+      assert.match(error.message, /猫眼会话不可用/);
+      assert.equal(error.message.includes("cookie-secret"), false);
+      assert.equal(error.message.includes("signature-secret"), false);
+      return true;
+    }
+  );
+});
+
+test("rejects unavailable encryption keys without echoing them", async () => {
+  const keys = [undefined, "not-base64!", Buffer.alloc(31, 9).toString("base64")];
+  for (const key of keys) {
+    const env = { MAOYAN_KV: new MemoryKV(), SESSION_ENCRYPTION_KEY: key };
+    await assert.rejects(
+      () => saveLockSession(env, "token-a", validSession()),
+      (error) => {
+        assert.equal(error.message, "锁座服务尚未配置加密密钥");
+        if (key) assert.equal(error.message.includes(key), false);
+        return true;
+      }
+    );
+  }
+});
+
+test("uses a fresh 12-byte IV for every session save", async () => {
+  const env = { MAOYAN_KV: new MemoryKV(), SESSION_ENCRYPTION_KEY: testEncryptionKey() };
+  const key = userKey("token-a", "maoyan-session");
+  await saveLockSession(env, "token-a", validSession());
+  const first = JSON.parse(await env.MAOYAN_KV.get(key));
+  await saveLockSession(env, "token-a", validSession());
+  const second = JSON.parse(await env.MAOYAN_KV.get(key));
+  assert.equal(Buffer.from(first.iv, "base64").length, 12);
+  assert.equal(Buffer.from(second.iv, "base64").length, 12);
+  assert.notEqual(first.iv, second.iv);
+  assert.notEqual(first.data, second.data);
 });
 
 test("status and removal never return credentials", async () => {
