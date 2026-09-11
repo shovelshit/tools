@@ -262,7 +262,7 @@ function applyPushConfig(config) {
   setChannel(config.notifyChannel || "bark");
   if (config.barkKey) els.barkInput.value = config.barkKey;
   if (config.serverChanKey) els.serverChanInput.value = config.serverChanKey;
-  pushSaved = Boolean(config.barkKey || config.serverChanKey || config.hasBark);
+  pushSaved = Boolean(config.hasBark || config.hasServerChan);
   if (pushSaved && !currentKeyInput().value.trim()) {
     log("info", `${CHANNEL_LABELS[getChannel()]} 已配置（为防泄露不回显，留空保存不会覆盖）`);
   }
@@ -873,22 +873,11 @@ function syncCronInfo(data) {
     return h.toString(16).padStart(8, "0");
   }
 
-  // 令牌指纹仅输出到控制台: 与 worker 端 KV 键名 u:<指纹>:config 对应
-  function tokenFingerprint(t) {
-    let h = 2166136261;
-    for (let i = 0; i < t.length; i++) {
-      h ^= t.charCodeAt(i);
-      h = (h + (h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24)) >>> 0;
-    }
-    return h.toString(16).padStart(8, "0");
-  }
-
   els.workerUrl.value = localStorage.getItem("workerUrl") ?? DEFAULT_WORKER;
   els.token.value = savedToken;
-  // 支持 URL 参数直达: ?worker=https://xxx.workers.dev&token=xxx
+  // 仅支持通过 URL 指定 Worker 地址，令牌不接受 URL 参数以免泄露到历史记录或日志。
   const qs = new URLSearchParams(location.search);
   if (qs.get("worker")) els.workerUrl.value = qs.get("worker");
-  if (qs.get("token")) els.token.value = qs.get("token");
   const explicit = qs.has("worker"); // 带参数打开视为明确意图, 免令牌模式也能自动连
   const canAutoConnect = Boolean(els.token.value.trim() || explicit || openMode);
   console.warn("[maoyan init]", {

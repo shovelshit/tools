@@ -1,8 +1,8 @@
 // ---------------- 令牌管理(KV 存储) + 鉴权 ----------------
-// 令牌唯一来源: KV meta:tokens: [{token, remark, createdAt, lastUsedAt}]
-// KV 为空时监控页拒绝所有人访问; admin 页凭 ADMIN_TOKEN(secret) 管理
+// 令牌唯一来源: KV meta:tokens: [{id, token, remark, createdAt}]
 
-import { cleanupUserData } from "./user.js";
+import { cleanupUserData, getUserConfig } from "./user.js";
+import { isExpired } from "./ddl.js";
 import { json } from "../common/http.js";
 import { runCheck } from "./check.js";
 
@@ -12,126 +12,86 @@ export function randomToken() {
   return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+function maskToken(token) {
+  const value = String(token || "");
+  return value.length <= 10 ? value : `${value.slice(0, 4)} **** ${value.slice(-4)}`;
+}
+
 export async function getManagedTokens(env) {
-  return (await env.MAOYAN_KV.get("meta:tokens", "json")) || [];
+  const tokens = await env.MAOYAN_KV.get("meta:tokens", "json");
+  return Array.isArray(tokens) ? tokens.filter((token) => token && token.id && token.token) : [];
 }
 
 async function saveManagedTokens(env, list) {
   await env.MAOYAN_KV.put("meta:tokens", JSON.stringify(list));
-  // 同步到 cron 令牌列表(单一来源: KV)
-  await env.MAOYAN_KV.put("meta:cron_tokens", JSON.stringify(list.map((t) => t.token).filter(Boolean)));
-}
-
-async function markTokenUsed(env, token) {
-  try {
-    const now = Date.now();
-    const list = await getManagedTokens(env);
-    const i = list.findIndex((t) => t.token === token);
-    if (i >= 0) {
-      // 节流: lastUsedAt 每 24 小时最多写一次 KV(免费版写入限额 1000 次/天)
-      const last = Date.parse(list[i].lastUsedAt || "") || 0;
-      if (now - last < 24 * 3600 * 1000) return;
-      list[i].lastUsedAt = new Date(now).toISOString();
-      await env.MAOYAN_KV.put("meta:tokens", JSON.stringify(list));
-    }
-  } catch (e) {
-  }
 }
 
 function checkAdminAuth(request, env) {
   const admin = String(env.ADMIN_TOKEN || "").trim();
-  if (!admin) return false; // 未配置 ADMIN_TOKEN 时管理接口不可用
   const given = request.headers.get("X-Admin-Token") || "";
-  return given === admin;
+  return Boolean(admin) && given === admin;
 }
 
-// 鉴权: 仅认 KV meta:tokens 中的令牌; KV 为空则拒绝所有人
-// 安全: 仅认 X-Token 请求头, 不接受 ?token= URL 参数(避免令牌进入日志/历史记录)
-export async function checkAuthFull(request, env, url) {
+async function publicTokenRecord(env, token) {
+  const config = await getUserConfig(env, token.id);
+  return {
+    id: token.id,
+    token: maskToken(token.token),
+    remark: token.remark || "",
+    createdAt: token.createdAt || null,
+    state: config.enabled === true && !isExpired(config) ? "monitoring" : "stopped",
+  };
+}
+
+// 仅认 X-Token; 返回随机 namespace ID，而不是令牌本身。
+export async function checkAuthFull(request, env) {
   const given = request.headers.get("X-Token") || "";
-  const managed = await getManagedTokens(env);
-  if (!managed.length) return null; // 无任何令牌: 全站关闭
-  const hit = managed.find((t) => t.token === given);
-  if (hit) {
-    markTokenUsed(env, given); // 异步更新使用时间, 不阻塞
-    return given;
-  }
-  return null;
+  const hit = (await getManagedTokens(env)).find((token) => token.token === given);
+  return hit ? hit.id : null;
 }
 
-// cron 检查的令牌 = admin 页管理的 KV 令牌(单一来源); 请求时自动纠偏副本
-export async function syncCronTokens(env) {
-  try {
-    const managed = await getManagedTokens(env);
-    const list = managed.map((t) => t.token).filter(Boolean);
-    const key = "meta:cron_tokens";
-    const prev = await env.MAOYAN_KV.get(key, "json");
-    if (JSON.stringify(prev) !== JSON.stringify(list)) {
-      await env.MAOYAN_KV.put(key, JSON.stringify(list));
-    }
-  } catch (e) {
-  }
-}
-
-// cron: 逐令牌执行检查; 无令牌则跳过
+// cron 直接读取唯一的令牌元数据，不维护会与删除操作竞争的副本。
 export async function runScheduledChecks(env) {
-  let list = null;
-  try {
-    const meta = await env.MAOYAN_KV.get("meta:cron_tokens", "json");
-    if (Array.isArray(meta)) list = meta.filter(Boolean);
-  } catch (e) {
-  }
-  if (list === null) list = [];
-  if (!list.length) return; // 无令牌: 不跑任何检查
-  for (const token of list) {
+  for (const token of await getManagedTokens(env)) {
     try {
-      await runCheck(env, false, token);
+      await runCheck(env, false, token.id);
     } catch (e) {
     }
   }
 }
 
-// /api/admin/tokens 路由(增删查, X-Admin-Token 鉴权); 删除时级联清理用户数据
 export async function handleAdminTokens(request, env, url) {
   if (!checkAdminAuth(request, env)) {
     return json({ error: "管理令牌错误或未配置 ADMIN_TOKEN" }, 401);
   }
   try {
-    if (request.method === "GET") {
-      const managed = await getManagedTokens(env);
-      const tokens = managed.map((t) => ({
-        token: t.token,
-        remark: t.remark || "",
-        inUse: Boolean(t.lastUsedAt),
-        createdAt: t.createdAt || null,
-        lastUsedAt: t.lastUsedAt || null,
-      }));
+    if (url.pathname === "/api/admin/tokens" && request.method === "GET") {
+      const tokens = await Promise.all((await getManagedTokens(env)).map((token) => publicTokenRecord(env, token)));
       return json({ ok: true, tokens });
     }
-    if (request.method === "POST") {
+    if (url.pathname === "/api/admin/tokens" && request.method === "POST") {
       const body = await request.json().catch(() => ({}));
       const token = String(body.token || "").trim() || randomToken();
       if (!/^[\x21-\x7e]{6,64}$/.test(token)) {
         return json({ ok: false, error: "令牌须为 6-64 位可见 ASCII 字符" }, 400);
       }
       const list = await getManagedTokens(env);
-      if (list.some((t) => t.token === token)) {
+      if (list.some((item) => item.token === token)) {
         return json({ ok: false, error: "令牌已存在" }, 400);
       }
-      list.push({ token, remark: String(body.remark || "").slice(0, 50), createdAt: new Date().toISOString(), lastUsedAt: null });
+      const id = crypto.randomUUID();
+      list.push({ id, token, remark: String(body.remark || "").slice(0, 50), createdAt: new Date().toISOString() });
       await saveManagedTokens(env, list);
-      return json({ ok: true, token });
+      return json({ ok: true, id, token });
     }
-    if (request.method === "DELETE") {
-      const token = url.searchParams.get("token") || "";
+    if (url.pathname === "/api/admin/tokens/revoke" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const id = String(body.id || "");
       const list = await getManagedTokens(env);
-      const next = list.filter((t) => t.token !== token);
-      if (next.length === list.length) {
-        return json({ ok: false, error: "令牌不存在" }, 404);
-      }
-      await saveManagedTokens(env, next);
-      // 级联清理该令牌的用户数据(config/snapshot/changes/status), 避免孤儿数据
-      await cleanupUserData(env, token);
+      const revoked = list.find((token) => token.id === id);
+      if (!revoked) return json({ ok: false, error: "令牌不存在" }, 404);
+      await saveManagedTokens(env, list.filter((token) => token.id !== id));
+      await cleanupUserData(env, id);
       return json({ ok: true });
     }
     return json({ error: "Method Not Allowed" }, 405);

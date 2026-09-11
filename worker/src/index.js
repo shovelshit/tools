@@ -3,12 +3,22 @@
 import { CORS, json } from "./common/http.js";
 import { NOTIFY_CHANNELS, pushBark } from "./common/notify.js";
 import { userKey, getUserConfig } from "./maoyan/user.js";
-import { CITY_LIST, fetchCinemaDetail, publicCinemaShows, searchCinemasByKw, runCheck, pushNotify, currentChannel, minBatchMinutes, describeCrons, isMinuteStepCrons, resolveCronExprs, ddlFromNow, checkAuthFull, syncCronTokens, handleAdminTokens, handleLockApi, runScheduledChecks } from "./maoyan/index.js";
+import { CITY_LIST, fetchCinemaDetail, publicCinemaShows, searchCinemasByKw, runCheck, pushNotify, currentChannel, minBatchMinutes, describeCrons, isMinuteStepCrons, resolveCronExprs, ddlFromNow, checkAuthFull, handleAdminTokens, handleLockApi, runScheduledChecks } from "./maoyan/index.js";
 import { LOCK_CRON_EXPRESSION } from "./maoyan/cron.js";
 import { runScheduledLocks } from "./maoyan/lock-runner.js";
 import { handleStoreApi, handleStoreFile } from "./store/proxy.js";
 
 export { LockCoordinator } from "./maoyan/lock-runner.js";
+
+function publicConfig(config) {
+  const { barkKey, serverChanKey, ...safeConfig } = config || {};
+  return {
+    ...safeConfig,
+    enabled: config?.enabled === true,
+    hasBark: Boolean(barkKey),
+    hasServerChan: Boolean(serverChanKey),
+  };
+}
 
 export default {
   async fetch(request, env) {
@@ -24,12 +34,13 @@ export default {
     }
 
     // ---- 令牌管理接口(管理员, X-Admin-Token 鉴权) ----
-    if (url.pathname === "/api/admin/tokens") return handleAdminTokens(request, env, url);
+    if (url.pathname === "/api/admin/tokens" || url.pathname === "/api/admin/tokens/revoke") {
+      return handleAdminTokens(request, env, url);
+    }
 
     // ---- 以下接口均需 X-Token ----
-    const token = await checkAuthFull(request, env, url);
+    const token = await checkAuthFull(request, env);
     if (token === null) return json({ error: "访问令牌错误" }, 401);
-    await syncCronTokens(env);
     try {
       const lockResponse = await handleLockApi(request, env, url, token);
       if (lockResponse) return lockResponse;
@@ -59,8 +70,7 @@ export default {
         return json({
           ok: true,
           config: {
-            enabled: cfg.enabled === true, // 默认停止, 需显式「开始监控」
-            ...cfg,
+            ...publicConfig(cfg),
             cronMinutes: minBatchMinutes(cronExprs),
             cronExprs,
             cronText: describeCrons(cronExprs),
@@ -90,7 +100,7 @@ export default {
           cfg.notifyChannel = NOTIFY_CHANNELS[ch] ? ch : "bark";
         }
         await env.MAOYAN_KV.put(key, JSON.stringify(cfg));
-        return json({ ok: true, config: { enabled: cfg.enabled !== false, ...cfg } });
+        return json({ ok: true, config: publicConfig(cfg) });
       }
       if (url.pathname === "/api/check" && request.method === "POST") {
         return json(await runCheck(env, true, token));

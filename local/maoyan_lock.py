@@ -14,18 +14,23 @@ from html import unescape
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urljoin, urlparse
-from urllib.request import Request, build_opener
+from urllib.parse import parse_qs, urlencode, urljoin, urlparse
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
 ROOT = Path(__file__).resolve().parent
 SESSION_PATH = ROOT / ".maoyan-lock-session.json"
 PROFILE_PATH = ROOT / ".maoyan-lock-profile"
 MAOYAN_ORIGIN = "https://www.maoyan.com"
-CREATE_ORDER_URL = (
-    MAOYAN_ORIGIN
-    + "/ajax/createOrder?yodaReady=h5&csecplatform=4&csecversion=2.6.0"
+LOGIN_URL = (
+    "https://passport.maoyan.com/pc/login?pagesource=maoyan"
+    "&redirectURL=https%3A%2F%2Fwww.maoyan.com%2F"
 )
+DEFAULT_CREATE_ORDER_QUERY = {
+    "yodaReady": "h5",
+    "csecplatform": "4",
+    "csecversion": "2.6.0",
+}
 DEFAULT_TIMEOUT_SECONDS = 15
 
 
@@ -38,6 +43,7 @@ class SessionState:
     cookies: List[Dict[str, object]]
     csrf: str
     mtgsig: str
+    create_order_query: Dict[str, str]
     user_agent: str
     saved_at: str
 
@@ -47,6 +53,11 @@ class SessionState:
             cookies=list(raw.get("cookies") or []),
             csrf=str(raw.get("csrf") or ""),
             mtgsig=str(raw.get("mtgsig") or ""),
+            create_order_query={
+                str(key): str(value)
+                for key, value in dict(raw.get("create_order_query") or {}).items()
+                if key in DEFAULT_CREATE_ORDER_QUERY and value
+            },
             user_agent=str(raw.get("user_agent") or ""),
             saved_at=str(raw.get("saved_at") or ""),
         )
@@ -80,10 +91,15 @@ def cookie_header(cookies: Sequence[Dict[str, object]]) -> str:
     return "; ".join(pairs)
 
 
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        return None
+
+
 class MaoyanClient:
     def __init__(self, state: SessionState):
         self.state = state
-        self.opener = build_opener()
+        self.opener = build_opener(NoRedirect())
 
     def _headers(self, referer: str, include_signature: bool = False) -> Dict[str, str]:
         headers = {
@@ -134,7 +150,7 @@ def login(args: argparse.Namespace) -> None:
     except ImportError as exc:
         raise MaoyanError("未安装 Python Playwright，无法启动 Chromium 登录") from exc
 
-    captured: Dict[str, str] = {}
+    captured: Dict[str, object] = {"create_order_query": {}}
     with sync_playwright() as playwright:
         context = playwright.chromium.launch_persistent_context(
             user_data_dir=str(PROFILE_PATH),
@@ -150,9 +166,15 @@ def login(args: argparse.Namespace) -> None:
                 signature = request.headers.get("mtgsig", "")
                 if signature:
                     captured["mtgsig"] = signature
+                    query = parse_qs(urlparse(request.url).query)
+                    actual = captured["create_order_query"]
+                    if isinstance(actual, dict):
+                        for key in DEFAULT_CREATE_ORDER_QUERY:
+                            if query.get(key):
+                                actual[key] = query[key][0]
 
             context.on("request", capture_request)
-            page.goto(MAOYAN_ORIGIN + "/", wait_until="domcontentloaded")
+            page.goto(LOGIN_URL, wait_until="domcontentloaded")
             input("请在打开的 Chromium 中完成猫眼登录，完成后回到这里按 Enter：")
             page.goto(
                 f"{MAOYAN_ORIGIN}/cinema/{args.cinema_id}",
@@ -181,6 +203,7 @@ def login(args: argparse.Namespace) -> None:
             cookies=cookies,
             csrf=csrf,
             mtgsig=signature,
+            create_order_query=dict(captured["create_order_query"]),
             user_agent=user_agent,
             saved_at=datetime.now(timezone.utc).isoformat(),
         )
@@ -248,6 +271,11 @@ def choose_adjacent_seats(seats: Iterable[Dict[str, str]], count: int) -> List[D
     return min(pairs, key=score)
 
 
+def create_order_url(state: SessionState) -> str:
+    query = {**DEFAULT_CREATE_ORDER_QUERY, **state.create_order_query}
+    return MAOYAN_ORIGIN + "/ajax/createOrder?" + urlencode(query)
+
+
 def create_order(client: MaoyanClient, config: Dict[str, str], seats: List[Dict[str, str]], referer: str) -> Dict[str, object]:
     form = urlencode({
         "sectionId": config["section-id"],
@@ -255,7 +283,7 @@ def create_order(client: MaoyanClient, config: Dict[str, str], seats: List[Dict[
         "seqNo": config["seq-no"],
         "seats": json.dumps({"count": len(seats), "list": seats}, separators=(",", ":")),
     }).encode("utf-8")
-    _, text = client.request(CREATE_ORDER_URL, method="POST", data=form, referer=referer, signed=True)
+    _, text = client.request(create_order_url(client.state), method="POST", data=form, referer=referer, signed=True)
     try:
         response = json.loads(text)
         order = response["data"]["data"]

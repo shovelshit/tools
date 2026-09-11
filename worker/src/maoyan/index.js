@@ -9,4 +9,4 @@ export { runScheduledLocks, createLockRuleThroughCoordinator } from "./lock-runn
 export { LOCK_CRON_EXPRESSION } from "./cron.js";
 export { parseBatchMinutes, describeCron, isMinuteStepCron, resolveCronExprs, minBatchMinutes, describeCrons, isMinuteStepCrons, CRON_EXPRESSION } from "./cron.js";
 export { MONITOR_DDL_DAYS, ddlFromNow, isExpired } from "./ddl.js";
-export { checkAuthFull, syncCronTokens, handleAdminTokens, runScheduledChecks } from "./tokens.js";
+export { checkAuthFull, handleAdminTokens, runScheduledChecks } from "./tokens.js";

@@ -7,7 +7,7 @@ import { minBatchMinutes, resolveCronExprs } from "./cron.js";
 import { isExpired } from "./ddl.js";
 
 function fmtShow(s) {
-  const parts = [`${s.dt || ""} ${s.tm || ""}`, s.lang || "", s.tp || "", s.th || ""];
+  const parts = [`${s.showDate || s.dt || ""} ${s.tm || ""}`, s.lang || "", s.tp || "", s.th || ""];
   if (s.vipPrice) parts.push(`¥${s.vipPrice}${s.vipPriceSuffix || ""}`);
   return parts.filter(Boolean).join(" | ");
 }
@@ -56,12 +56,13 @@ export async function runCheck(env, manual, token) {
   for (const movie of data.showData.movies || []) {
     const idStr = String(movie.id);
     const shows = [];
-    for (const day of movie.shows || []) for (const p of day.plist || []) shows.push(p);
+    for (const day of movie.shows || []) {
+      for (const p of day.plist || []) shows.push({ ...p, showDate: day.showDate || day.dt || p.dt || "" });
+    }
     const isFirst = !Object.prototype.hasOwnProperty.call(snapshot, idStr);
     const prev = new Set(snapshot[idStr] || []);
     const added = shows.filter((s) => !prev.has(s.seqNo));
     if (selected.has(idStr) && !isFirst && added.length > 0) {
-      newTotal += added.length;
       const lines = added.slice(0, 20).map(fmtShow);
       if (added.length > 20) lines.push(`...等共 ${added.length} 场`);
       const title = `🎬新增场次: ${movie.nm}`;
@@ -69,9 +70,11 @@ export async function runCheck(env, manual, token) {
       changes.unshift({ time: new Date().toISOString(), type: "new", text: `新增 ${added.length} 场《${movie.nm}》: ${lines[0]}` });
       try {
         const label = await pushNotify(cfg, title, content);
+        newTotal += added.length;
         changes.unshift({ time: new Date().toISOString(), type: "ok", text: `已推送 ${label}(${movie.nm}, ${added.length} 场)` });
       } catch (e) {
         changes.unshift({ time: new Date().toISOString(), type: "error", text: "推送失败: " + e.message });
+        continue;
       }
     }
     snapshot[idStr] = shows.map((s) => s.seqNo);

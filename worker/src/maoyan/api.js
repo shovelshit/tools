@@ -2,6 +2,8 @@
 // cookie jar 跟随 + 影院详情 / 影院搜索(moreCinemas HTML 解析)
 
 const MAOYAN_API = "https://m.maoyan.com/ajax/cinemaDetail?cinemaId=";
+const MAOYAN_HOST = "m.maoyan.com";
+const FETCH_TIMEOUT_MS = 12e3;
 const COMMON_HEADERS = {
   "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
   Accept: "application/json, text/plain, */*",
@@ -25,9 +27,23 @@ function mergeCookies(jar, setCookieList) {
 async function fetchWithJar(url, jar) {
   let current = url;
   for (let i = 0; i < 5; i++) {
+    const target = new URL(current);
+    if (target.protocol !== "https:" || target.hostname !== MAOYAN_HOST) {
+      throw new Error("猫眼请求目标不受信任");
+    }
     const headers = { ...COMMON_HEADERS };
     if (jar.length) headers.Cookie = jar.join("; ");
-    const res = await fetch(current, { headers, redirect: "manual", cf: { cacheTtl: 0 } });
+    let res;
+    try {
+      res = await fetch(current, {
+        headers,
+        redirect: "manual",
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        cf: { cacheTtl: 0 },
+      });
+    } catch (e) {
+      throw new Error(e.name === "TimeoutError" ? "猫眼请求超时" : `猫眼请求失败: ${e.message}`);
+    }
     mergeCookies(jar, res.headers.getSetCookie?.() || []);
     if ([301, 302, 303, 307, 308].includes(res.status)) {
       const loc = res.headers.get("location");
@@ -35,9 +51,21 @@ async function fetchWithJar(url, jar) {
       current = new URL(loc, current).href;
       continue;
     }
+    if (!res.ok) throw new Error(`猫眼接口异常: HTTP ${res.status}`);
     return res;
   }
   throw new Error("重定向超过 5 次");
+}
+
+function chinaToday() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const value = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}`;
 }
 
 export function publicCinemaShows(data) {
@@ -70,7 +98,12 @@ export async function fetchCinemaDetail(cinemaId) {
   const jar = [];
   await fetchWithJar("https://m.maoyan.com/", jar);
   const res = await fetchWithJar(MAOYAN_API + cinemaId, jar);
-  const data = JSON.parse(await res.text());
+  let data;
+  try {
+    data = JSON.parse(await res.text());
+  } catch (e) {
+    throw new Error("猫眼接口返回了无效 JSON");
+  }
   if (!data || !data.showData || !Array.isArray(data.showData.movies)) {
     throw new Error("接口数据异常(缺少 showData.movies)");
   }
@@ -91,7 +124,7 @@ function parseCinemasHTML(html) {
 
 async function fetchCinemaPage(cityId, jar, offset, limit) {
   const params = new URLSearchParams({
-    day: new Date().toISOString().slice(0, 10),
+    day: chinaToday(),
     offset: String(offset),
     limit: String(limit),
     districtId: "-1",

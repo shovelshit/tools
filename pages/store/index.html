@@ -886,7 +886,6 @@
     }
   </style>
   <!-- Marked.js for Markdown rendering -->
-  <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
 </head>
 <body>
 
@@ -969,28 +968,10 @@
 
 <script>
   // ===== API 通道 =====
-  // 主通道：Cloudflare Worker 反代 AList（稳定、带 CORS）；公共 CORS 中转仅作兜底
+  // Cloudflare Worker 反代 AList（稳定、带 CORS）。
   const WORKER_BASE = '';  // 同域部署: API 已内嵌 Pages, 直接相对路径
   const API_BASE = WORKER_BASE + '/store/api';
   const PER_PAGE = 20;
-
-  // ===== API 备用通道（公共 CORS 中转 + 上游 GET 接口）=====
-  // 上游 AList 接口仅有 http（https 证书无效且响应不带 CORS 头），
-  // Worker 反代不可用时，自动降级为「公共 CORS 中转 + 上游 GET 接口」，
-  // 多个中转按序探测、失败自动切换，可用中转缓存在 localStorage。
-  const UPSTREAM_API = 'http://appstore.cnmlynk.org/api';
-  const CORS_PROXIES = [
-    u => 'https://proxy.cors.sh/' + u,
-    u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
-    u => 'https://cors.eu.org/' + u,
-    u => 'https://api.codetabs.com/v1/proxy/?quest=' + encodeURIComponent(u),
-    u => 'https://api.cors.lol/?url=' + encodeURIComponent(u),
-  ];
-  const PROXY_TIMEOUT = 9000; // 单个中转的超时时间（毫秒）
-
-  let apiChannel = 'auto'; // 'origin'：Worker 反代 | 'proxy'：CORS 中转
-  let preferredProxy = -1; // 最近一次成功的中转下标
-  try { preferredProxy = parseInt(localStorage.getItem('lc_api_proxy') || '-1', 10); } catch (e) {}
 
   function fetchWithTimeout(url, options, timeout) {
     if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
@@ -1014,52 +995,24 @@
     return res.json();
   }
 
-  // CORS 中转通道：上游支持 GET 查询参数方式，与 POST 接口等价
-  async function requestViaProxy(pathname, params) {
-    const target = `${UPSTREAM_API}${pathname}?${new URLSearchParams(params).toString()}`;
-    const order = [];
-    if (preferredProxy >= 0 && preferredProxy < CORS_PROXIES.length) order.push(preferredProxy);
-    for (let i = 0; i < CORS_PROXIES.length; i++) if (i !== preferredProxy) order.push(i);
-
-    let lastErr = null;
-    for (const idx of order) {
-      try {
-        const res = await fetchWithTimeout(CORS_PROXIES[idx](target), {}, PROXY_TIMEOUT);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = await res.json();
-        preferredProxy = idx;
-        try { localStorage.setItem('lc_api_proxy', String(idx)); } catch (e) {}
-        return json;
-      } catch (err) {
-        lastErr = err; // 该中转不可用，切换下一个
-      }
-    }
-    throw new Error('API 中转通道暂不可用，请稍后点击刷新重试');
-  }
-
-  // 统一入口：先试同源反代，不可用自动降级为 CORS 中转
+  // 统一入口：不将目录请求发送给公共 CORS 中转，避免泄露文件路径和访问数据。
   async function requestApi(pathname, params) {
-    if (apiChannel !== 'proxy') {
-      try {
-        const json = await requestViaOrigin(pathname, params);
-        apiChannel = 'origin';
-        return json;
-      } catch (err) {
-        // 405/404：当前托管没有 /api 服务端（纯静态托管）→ 永久降级为中转模式
-        if (err.status === 405 || err.status === 404) apiChannel = 'proxy';
-        // 其它错误（网络抖动等）仅本次降级重试，不锁死通道
-      }
-    }
-    return requestViaProxy(pathname, params);
+    return requestViaOrigin(pathname, params);
   }
 
   // https 页面下的 http 直链会被浏览器按混合内容拦截，
   // 升级为 Worker 文件代理（仅允许上游 AList 域名），失败时页面自身有报错提示
   function safeUrl(url) {
-    if (url && location.protocol === 'https:' && /^http:\/\//i.test(url)) {
-      return WORKER_BASE + '/store/file?url=' + encodeURIComponent(url);
+    try {
+      const target = new URL(url);
+      if (!/^https?:$/.test(target.protocol)) return '';
+      if (location.protocol === 'https:' && target.protocol === 'http:') {
+        return WORKER_BASE + '/store/file?url=' + encodeURIComponent(target.href);
+      }
+      return target.href;
+    } catch (e) {
+      return '';
     }
-    return url;
   }
 
   const CATEGORIES = [
@@ -1113,6 +1066,20 @@
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   }
 
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>'"]/g, char => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+    })[char]);
+  }
+
+  function escapeAttr(value) {
+    return escapeHtml(value);
+  }
+
+  function jsArg(value) {
+    return escapeAttr(JSON.stringify(String(value ?? '')));
+  }
+
   function getFileIcon(name, isDir) {
     if (isDir) return '📁';
     const ext = (name.split('.').pop() || '').toLowerCase();
@@ -1150,7 +1117,7 @@
     if (path === rootPath) {
       html += `<span class="current">${cat.icon} ${cat.name}</span>`;
     } else {
-      html += `<a onclick="navigateTo('${rootPath}')">${cat.icon} ${cat.name}</a>`;
+      html += `<a onclick="navigateTo(${jsArg(rootPath)})">${cat.icon} ${escapeHtml(cat.name)}</a>`;
     }
     html += `</div>`;
 
@@ -1161,9 +1128,9 @@
       html += `<span class="breadcrumb-sep">›</span>`;
       html += `<div class="breadcrumb-item ${isLast ? 'current' : ''}">`;
       if (isLast) {
-        html += `<span>📁 ${seg}</span>`;
+        html += `<span>📁 ${escapeHtml(seg)}</span>`;
       } else {
-        html += `<a onclick="navigateTo('${segPath}')">📁 ${seg}</a>`;
+        html += `<a onclick="navigateTo(${jsArg(segPath)})">📁 ${escapeHtml(seg)}</a>`;
       }
       html += `</div>`;
     });
@@ -1236,14 +1203,14 @@
     const icon = getFileIcon(item.name, item.is_dir);
     const size = formatSize(item.size);
     const date = formatDate(item.modified);
-    const filePath = `${state.currentPath}/${item.name.replace(/'/g, "\\'")}` ;
+    const filePath = `${state.currentPath}/${item.name}`;
     // 列表模式下直接展示完整文件名，卡片模式用 title 做 tooltip
     const nameHtml = state.viewMode === 'list'
-      ? `<div class="file-name">${item.name}</div>`
-      : `<div class="file-name" title="${item.name.replace(/"/g, '&quot;')}">${item.name}</div>`;
+      ? `<div class="file-name">${escapeHtml(item.name)}</div>`
+      : `<div class="file-name" title="${escapeAttr(item.name)}">${escapeHtml(item.name)}</div>`;
 
     return `
-      <div class="file-card" onclick="openDetail('${filePath}', ${item.is_dir})">
+      <div class="file-card" onclick="openDetail(${jsArg(filePath)}, ${Boolean(item.is_dir)})">
         <div class="file-card-header">
           <div class="file-icon-wrap ${item.is_dir ? 'folder' : ''}">${icon}</div>
           ${nameHtml}
@@ -1309,12 +1276,12 @@
     // 更新标题 + 面包屑
     const cat = getCategory(path);
     const lastName = path === cat.path ? cat.name : path.split('/').pop();
-    document.getElementById('contentTitle').innerHTML = `<span>${cat.icon}</span><span>${lastName}</span>`;
+    document.getElementById('contentTitle').innerHTML = `<span>${cat.icon}</span><span>${escapeHtml(lastName)}</span>`;
     document.getElementById('breadcrumbWrap').innerHTML = renderBreadcrumb(path);
 
     try {
       const data = await fetchList(path, page);
-      state.total = data.total || (data.content ? data.content.length : 0);
+      state.total = Number.isSafeInteger(Number(data.total)) ? Number(data.total) : (data.content ? data.content.length : 0);
       const items = data.content || [];
       state._lastItems = items; // 缓存供视图切换重绘用
 
@@ -1329,7 +1296,7 @@
       updateBadges();
     } catch (err) {
       grid.innerHTML = `<div class="error-banner">
-        ⚠️ 加载失败：${err.message}，请检查网络或稍后重试
+        ⚠️ 加载失败：${escapeHtml(err.message)}，请检查网络或稍后重试
       </div>`;
       meta.textContent = '加载失败';
     } finally {
@@ -1388,8 +1355,8 @@
       <div class="modal-header">
         <div class="modal-file-icon">${icon}</div>
         <div style="flex:1;min-width:0">
-          <div class="modal-title">${name}</div>
-          <div class="modal-subtitle">${extUpper} 文件 · ${provider || '网盘'}</div>
+          <div class="modal-title">${escapeHtml(name)}</div>
+          <div class="modal-subtitle">${escapeHtml(extUpper)} 文件 · ${escapeHtml(provider || '网盘')}</div>
         </div>
         <button class="modal-close" onclick="closeModal()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -1429,19 +1396,19 @@
         const rawUrl = data.raw_url || '';
         document.getElementById('modalDetailArea').innerHTML = rawUrl ? `
           <div style="text-align:center;padding:12px">
-            <img src="${safeUrl(rawUrl)}" alt="${name}" loading="lazy"
-              data-lb-src="${safeUrl(rawUrl)}" data-lb-alt="${name}"
+            <img src="${escapeAttr(safeUrl(rawUrl))}" alt="${escapeAttr(name)}" loading="lazy"
+              data-lb-src="${escapeAttr(safeUrl(rawUrl))}" data-lb-alt="${escapeAttr(name)}"
               style="max-width:100%;max-height:480px;border-radius:10px;object-fit:contain;box-shadow:var(--shadow-md);cursor:zoom-in"
               onerror="this.parentElement.innerHTML='<div style=color:var(--text-muted);padding:20px;font-size:13px>⚠️ 图片加载失败</div>'" />
           </div>
           <div class="copy-url-wrap" style="margin-top:10px">
-            <input class="copy-url-input" type="text" value="${rawUrl}" readonly />
+            <input class="copy-url-input" type="text" value="${escapeAttr(rawUrl)}" readonly />
             <button class="copy-btn" onclick="navigator.clipboard.writeText(this.previousElementSibling.value);this.textContent='✓ 已复制';setTimeout(()=>this.textContent='复制链接',2000)">复制链接</button>
           </div>` :
           `<div style="text-align:center;padding:20px;color:var(--text-muted);font-size:14px">⚠️ 暂时无法获取图片链接</div>`;
       } catch (e) {
         document.getElementById('modalDetailArea').innerHTML =
-          `<div style="text-align:center;padding:20px;color:var(--text-muted);font-size:14px">⚠️ 加载失败：${e.message}</div>`;
+          `<div style="text-align:center;padding:20px;color:var(--text-muted);font-size:14px">⚠️ 加载失败：${escapeHtml(e.message)}</div>`;
       }
       return;
     }
@@ -1463,7 +1430,7 @@
           </div>
           <div class="info-item">
             <div class="info-label">文件类型</div>
-            <div class="info-value">${ext || '未知'}</div>
+            <div class="info-value">${escapeHtml(ext || '未知')}</div>
           </div>
           <div class="info-item">
             <div class="info-label">修改时间</div>
@@ -1476,26 +1443,26 @@
           ${data.provider ? `
           <div class="info-item">
             <div class="info-label">存储来源</div>
-            <div class="info-value">${data.provider}</div>
+            <div class="info-value">${escapeHtml(data.provider)}</div>
           </div>
           ` : ''}
           ${data.hash_info ? `
           <div class="info-item full">
             <div class="info-label">哈希信息</div>
-            <div class="info-value" style="font-size:12px;font-family:monospace">${JSON.stringify(data.hash_info)}</div>
+            <div class="info-value" style="font-size:12px;font-family:monospace">${escapeHtml(JSON.stringify(data.hash_info))}</div>
           </div>
           ` : ''}
         </div>
 
         ${data.raw_url ? `
-          <a class="download-btn" href="${data.raw_url}" target="_blank" download>
+          <a class="download-btn" href="${escapeAttr(safeUrl(data.raw_url))}" target="_blank" rel="noopener noreferrer" download>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
             </svg>
             立即下载 (${formatSize(data.size)})
           </a>
           <div class="copy-url-wrap">
-            <input class="copy-url-input" id="urlInput" type="text" value="${data.raw_url}" readonly />
+            <input class="copy-url-input" id="urlInput" type="text" value="${escapeAttr(data.raw_url)}" readonly />
             <button class="copy-btn" id="copyBtn" onclick="copyUrl()">复制链接</button>
           </div>
           ${renderPreviewBtn(data.name, data.raw_url)}
@@ -1512,7 +1479,7 @@
         <div style="text-align:center;padding:32px;color:var(--text-muted)">
           <div style="font-size:40px;margin-bottom:12px">⚠️</div>
           <div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:6px">获取详情失败</div>
-          <div style="font-size:13px">${err.message}</div>
+          <div style="font-size:13px">${escapeHtml(err.message)}</div>
         </div>`;
     }
   }
@@ -1535,7 +1502,7 @@
     const type = getPreviewType(name);
     if (!type) return '';
     const labels = { txt: '👁️ 在线预览文本', md: '📄 在线预览 Markdown', video: '▶️ 在线播放视频', image: '🖼️ 查看图片' };
-    return `<button class="preview-btn" onclick="loadPreview('${type}', '${url.replace(/'/g, "\\'")}')">` +
+    return `<button class="preview-btn" onclick="loadPreview(${jsArg(type)}, ${jsArg(url)})">` +
       `${labels[type]}</button>`;
   }
 
@@ -1558,7 +1525,7 @@
         <div class="preview-wrap">
           <div class="preview-toolbar"><span>🖼️ 图片预览</span>${CLOSE_BTN}</div>
           <div class="preview-body preview-img-wrap">
-            <img class="preview-img" src="${safeUrl(url)}" alt="预览" loading="lazy" data-lb-src="${safeUrl(url)}" data-lb-alt="图片预览" />
+            <img class="preview-img" src="${escapeAttr(safeUrl(url))}" alt="预览" loading="lazy" data-lb-src="${escapeAttr(safeUrl(url))}" data-lb-alt="图片预览" />
           </div>
         </div>`;
       return;
@@ -1570,7 +1537,7 @@
           <div class="preview-toolbar"><span>▶️ 视频播放</span>${CLOSE_BTN}</div>
           <div class="preview-body" style="padding:0">
             <video class="preview-video" controls autoplay>
-              <source src="${safeUrl(url)}">
+              <source src="${escapeAttr(safeUrl(url))}">
               <p style="padding:16px;color:var(--text-muted)">浏览器不支持视频播放，请下载后观看。</p>
             </video>
           </div>
@@ -1593,10 +1560,7 @@
       let toolbarLabel = '';
       if (type === 'md') {
         toolbarLabel = '📄 Markdown 预览';
-        const html = typeof marked !== 'undefined'
-          ? marked.parse(text)
-          : text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
-        bodyHtml = `<div class="preview-md">${html}</div>`;
+        bodyHtml = `<div class="preview-md">${escapeHtml(text)}</div>`;
       } else {
         toolbarLabel = '👁️ 文本预览';
         const escaped = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -1611,7 +1575,7 @@
     } catch (err) {
       container.innerHTML = `
         <div class="preview-wrap">
-          <div class="preview-body" style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">⚠️ 预览失败：${err.message}</div>
+          <div class="preview-body" style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">⚠️ 预览失败：${escapeHtml(err.message)}</div>
         </div>`;
     }
   }

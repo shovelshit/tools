@@ -1,9 +1,9 @@
 // 猫眼场次监控 - 访问令牌管理页
 // 与 Cloudflare Worker 的 /api/admin/tokens 交互; 管理令牌(ADMIN_TOKEN)存 localStorage
 // 依赖的 Worker 接口:
-//   GET    /api/admin/tokens                       -> { tokens: [{token, remark, inUse, createdAt, lastUsedAt}] }
+//   GET    /api/admin/tokens                       -> { tokens: [{id, token, remark, state, createdAt}] }
 //   POST   /api/admin/tokens  body {token?, remark} -> { ok, token }
-//   DELETE /api/admin/tokens?token=xxx             -> { ok }
+//   POST   /api/admin/tokens/revoke body {id}       -> { ok }
 // 鉴权: 请求头 X-Admin-Token
 // 注意: 同域部署(Pages)下 Worker 地址可留空, 直接请求当前域名
 
@@ -85,6 +85,9 @@ els.adminToken.addEventListener("keydown", (e) => {
 });
 
 els.btnLogout.addEventListener("click", () => {
+  adminToken = "";
+  els.adminToken.value = "";
+  void secureSet("adminToken", "");
   els.adminMain.classList.add("hidden");
   els.loginOverlay.classList.remove("hidden");
   els.loginError.classList.add("hidden");
@@ -105,11 +108,6 @@ async function refreshTokens() {
   }
 }
 
-function maskToken(t) {
-  t = String(t || "");
-  return t.length <= 10 ? t : t.slice(0, 4) + " •••• " + t.slice(-4);
-}
-
 function fmtTime(v) {
   if (!v) return "-";
   const d = new Date(v);
@@ -117,8 +115,8 @@ function fmtTime(v) {
 }
 
 function renderTokens() {
-  const inUse = tokens.filter((t) => t.inUse).length;
-  els.summary.textContent = `共 ${tokens.length} 个令牌 · ${inUse} 个使用中`;
+  const monitoring = tokens.filter((t) => t.state === "monitoring").length;
+  els.summary.textContent = `共 ${tokens.length} 个令牌 · ${monitoring} 个监控中`;
   els.tbody.innerHTML = "";
   if (!tokens.length) {
     renderMsgRow("还没有令牌，请在上方新增");
@@ -129,39 +127,29 @@ function renderTokens() {
 
     const tdToken = document.createElement("td");
     tdToken.className = "token-cell";
-    tdToken.textContent = maskToken(t.token);
+    tdToken.textContent = t.token || "-";
 
     const tdRemark = document.createElement("td");
     tdRemark.textContent = t.remark || "-";
 
     const tdStatus = document.createElement("td");
     const badge = document.createElement("span");
-    badge.className = "badge " + (t.inUse ? "in-use" : "idle");
-    badge.textContent = t.inUse ? "使用中" : "未使用";
+    const monitoring = t.state === "monitoring";
+    badge.className = "badge " + (monitoring ? "in-use" : "idle");
+    badge.textContent = monitoring ? "监控中" : "已停止";
     tdStatus.appendChild(badge);
 
     const tdCreated = document.createElement("td");
     tdCreated.textContent = fmtTime(t.createdAt);
 
-    const tdUsed = document.createElement("td");
-    tdUsed.textContent = fmtTime(t.lastUsedAt);
-
     const tdOps = document.createElement("td");
-    const btnCopy = document.createElement("button");
-    btnCopy.className = "link-btn";
-    btnCopy.textContent = "复制";
-    btnCopy.addEventListener("click", async () => {
-      await copyText(t.token);
-      btnCopy.textContent = "已复制";
-      setTimeout(() => (btnCopy.textContent = "复制"), 1500);
-    });
     const btnDel = document.createElement("button");
     btnDel.className = "link-btn danger";
     btnDel.textContent = "删除";
     btnDel.addEventListener("click", () => deleteToken(t));
-    tdOps.append(btnCopy, btnDel);
+    tdOps.append(btnDel);
 
-    tr.append(tdToken, tdRemark, tdStatus, tdCreated, tdUsed, tdOps);
+    tr.append(tdToken, tdRemark, tdStatus, tdCreated, tdOps);
     els.tbody.appendChild(tr);
   }
 }
@@ -170,7 +158,7 @@ function renderMsgRow(text) {
   els.tbody.innerHTML = "";
   const tr = document.createElement("tr");
   const td = document.createElement("td");
-  td.colSpan = 6;
+  td.colSpan = 5;
   td.className = "muted empty-tip";
   td.textContent = text;
   tr.appendChild(td);
@@ -210,13 +198,13 @@ els.btnAdd.addEventListener("click", async () => {
 async function deleteToken(t) {
   const label = t.remark ? `「${t.remark}」` : "";
   const ok = await showConfirm(
-    `确定删除令牌 ${maskToken(t.token)} ${label}？\n删除后使用者将无法再连接云端。`,
+    `确定删除令牌 ${t.token || ""} ${label}？\n删除后使用者将无法再连接云端。`,
     { title: "删除令牌", danger: true, okText: "删除" }
   );
   if (!ok) return;
   try {
-    await adminApi("/api/admin/tokens?token=" + encodeURIComponent(t.token), { method: "DELETE" });
-    tokens = tokens.filter((x) => x.token !== t.token);
+    await adminApi("/api/admin/tokens/revoke", { method: "POST", body: JSON.stringify({ id: t.id }) });
+    tokens = tokens.filter((x) => x.id !== t.id);
     renderTokens();
   } catch (e) {
     showToast("删除失败：" + e.message, "error");
@@ -242,10 +230,10 @@ async function copyText(text) {
 
 // ---------------- 初始化 ----------------
 (async function init() {
-  // 支持 URL 参数直达: ?worker=https://xxx.workers.dev&adminToken=xxx
+  // 管理令牌不接受 URL 参数，避免泄露到历史记录或日志。
   const qs = new URLSearchParams(location.search);
   els.workerUrl.value = qs.get("worker") || (localStorage.getItem("adminWorkerUrl") ?? DEFAULT_WORKER);
-  els.adminToken.value = qs.get("adminToken") || (await secureGet("adminToken")) || "";
+  els.adminToken.value = (await secureGet("adminToken")) || "";
   if (els.adminToken.value.trim()) {
     await login();
   }
