@@ -59,6 +59,12 @@ test("parses available and unavailable seats without losing layout", () => {
   ]);
 });
 
+test("parses seats only from the matched seats block", () => {
+  const map = parseSeatPage(`${seatHtml}
+    <aside><span class="seat selectable" data-row-id="9" data-column-id="9" data-no="1-9-9" data-st="N"></span></aside>`);
+  assert.deepEqual(map.seats.map((seat) => seat.seatNo), ["1-6-18", "1-6-19"]);
+});
+
 test("matches only the exact target date and HH:mm", () => {
   const data = { showData: { movies: [{ id: 7, shows: [{ showDate: "2026-09-12", plist: [
     { seqNo: "1", tm: "19:59" }, { seqNo: "2", tm: "20:00" }, { seqNo: "3", tm: "20:05" }

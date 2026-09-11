@@ -120,7 +120,8 @@ export async function requestMaoyan(session, value, options = {}) {
 }
 
 export function parseSeatPage(html) {
-  const block = String(html).match(/<div\b[^>]*\bclass\s*=\s*(["'])[^"']*\bseats-block\b[^"']*\1[^>]*>/i);
+  const source = String(html);
+  const block = source.match(/<div\b[^>]*\bclass\s*=\s*(["'])[^"']*\bseats-block\b[^"']*\1[^>]*>/i);
   if (!block) throw malformedSeatMap();
   const blockAttributes = attributes(block[0]);
   const sectionId = requiredSeatMapValue(blockAttributes["data-section-id"]);
@@ -128,8 +129,23 @@ export function parseSeatPage(html) {
   const seqNo = requiredSeatMapValue(blockAttributes["data-seq-no"]);
   if (!sectionName) throw malformedSeatMap();
 
+  const divPattern = /<\/?div\b[^>]*>/gi;
+  divPattern.lastIndex = block.index + block[0].length;
+  let depth = 1;
+  let blockEnd = -1;
+  for (const tag of source.matchAll(divPattern)) {
+    if (/^<\//i.test(tag[0])) depth -= 1;
+    else if (!/\/\s*>$/.test(tag[0])) depth += 1;
+    if (depth === 0) {
+      blockEnd = tag.index;
+      break;
+    }
+  }
+  if (blockEnd < 0) throw malformedSeatMap();
+
   const seats = [];
-  for (const match of String(html).matchAll(/<span\b[^>]*>/gi)) {
+  const seatMarkup = source.slice(block.index + block[0].length, blockEnd);
+  for (const match of seatMarkup.matchAll(/<span\b[^>]*>/gi)) {
     const seatAttributes = attributes(match[0]);
     if (!hasClass(seatAttributes.class, "seat")) continue;
     seats.push({
