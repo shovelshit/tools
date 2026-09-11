@@ -94,6 +94,11 @@ export async function runOneLockRule(env, tokenId, deps = {}) {
   const matching = await saveRule(env, tokenId, rule, {
     state: "matching", attemptStartedAt: new Date(now).toISOString(), seqNo: String(show.seqNo), lastError: null
   }, deps);
+  if (shouldCancel()) return { ok: true, skipped: true };
+  const currentRule = await getRule(env, tokenId);
+  if (shouldCancel() || !currentRule || currentRule.id !== matching.id || currentRule.state !== "matching") {
+    return { ok: true, skipped: true };
+  }
   try {
     const order = await createOrder(session, seatMap, matching.seats.map((seat) => seat.seatNo));
     return await terminal(env, tokenId, matching, "locked", {

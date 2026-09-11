@@ -224,6 +224,42 @@ test("concurrency session removal prevents a delayed run from creating an order 
   assert.equal(sessionPresent, false);
 });
 
+test("concurrency cancellation after matching persistence prevents an order and removes both resources", async () => {
+  let release;
+  let matchingStarted;
+  const delayed = new Promise((resolve) => { release = resolve; });
+  const begun = new Promise((resolve) => { matchingStarted = resolve; });
+  let rulePresent = true;
+  let sessionPresent = true;
+  let orderCalls = 0;
+  const stored = rule();
+  const coordinator = new LockCoordinator(coordinatorState(), runtime(), deps(stored, {
+    getRule: async () => rulePresent ? stored : null,
+    putRule: async (_env, _token, next) => {
+      if (next.state === "matching") {
+        matchingStarted();
+        await delayed;
+      }
+      if (rulePresent) Object.assign(stored, next);
+    },
+    getSessionStatus: async () => ({ uploaded: sessionPresent }),
+    removeRule: async () => { rulePresent = false; },
+    removeSession: async () => { sessionPresent = false; },
+    createOrder: async () => { orderCalls++; return { orderId: "order-1", payLeftSecond: 600 }; }
+  }));
+  const run = coordinator.fetch(coordinatorRequest({ action: "run", tokenId }));
+  await begun;
+  const cancel = coordinator.fetch(coordinatorRequest({ action: "cancel", tokenId }));
+  const removal = coordinator.fetch(coordinatorRequest({ action: "remove-session", tokenId }));
+  release();
+  assert.equal((await cancel).status, 200);
+  assert.equal((await removal).status, 200);
+  await run;
+  assert.equal(orderCalls, 0);
+  assert.equal(rulePresent, false);
+  assert.equal(sessionPresent, false);
+});
+
 test("monitor cron reporting excludes the one-minute lock schedule", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(JSON.stringify({ success: true, result: [
