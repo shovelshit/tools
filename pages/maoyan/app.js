@@ -27,6 +27,7 @@ const els = {
   // 监控设置
   btnCheck: $("btn-check"),
   btnTestPush: $("btn-test-push"),
+  btnLockSeats: $("btn-lock-seats"),
   btnToggleMonitor: $("btn-toggle-monitor"),
   batchTip: $("batch-tip"),
   barkInput: $("bark-input"),
@@ -81,6 +82,16 @@ async function api(path, options = {}) {
     stopTopProgress();
   }
 }
+
+const lockController = window.createMaoyanLockController({
+  api,
+  getContext: () => ({
+    cinemaId: els.cinemaInput.value.trim(),
+    cinemaName: selectedCinema?.name || els.cinemaName.textContent,
+    movies: cinemaMovies.filter((movie) => movie.checked)
+  }),
+  onLog: log
+});
 
 function log(type, text) {
   const div = document.createElement("div");
@@ -160,6 +171,7 @@ async function connect() {
         const lastTxt = st.status.lastCheck ? fmtClock(new Date(st.status.lastCheck).getTime()) : "从未";
         setStatus(statusText("监控中", [`上次检查 ${lastTxt}`, nextBatchText(), openMode && "免令牌模式"]), "running");
         enterMainPage();
+        lockController.syncAvailability();
         log("ok", "云端连接成功");
         await Promise.all([loadCities(), restoreConfig()]);
         refreshChanges();
@@ -189,6 +201,8 @@ els.btnLogout.addEventListener("click", () => {
   els.mainPage.classList.add("hidden");
   els.loginOverlay.classList.remove("hidden");
   els.loginError.classList.add("hidden");
+  lockController.syncAvailability();
+  els.btnLockSeats.disabled = true;
 });
 
 async function restoreConfig() {
@@ -620,6 +634,8 @@ async function loadCinema(cinemaId, prevSelected, { restore = false } = {}) {
         log("error", "加载影院失败: " + e.message);
         els.movieList.innerHTML = '<div class="muted empty-tip">加载失败，请重试</div>';
       }
+    } finally {
+      lockController.syncAvailability();
     }
   });
 }
@@ -704,6 +720,7 @@ function renderShowtimes(m, box) {
 
 function syncCount() {
   els.movieCount.textContent = `共 ${cinemaMovies.length} 部在映影片，已勾选 ${getSelectedIds().length} 部`;
+  lockController.syncAvailability();
 }
 
 els.btnToggleAll.addEventListener("click", () => {

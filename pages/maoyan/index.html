@@ -97,6 +97,9 @@
           </div>
           <div class="row">
             <span class="spacer"></span>
+            <button id="btn-lock-seats" class="btn small ghost" disabled title="配置自动锁座">
+              <span aria-hidden="true">🔒</span><span>锁座 Beta</span>
+            </button>
             <button id="btn-toggle-monitor" class="btn small ghost danger">停止监控</button>
           </div>
           <div class="muted tip-line" id="batch-tip">云端按定时批次自动检查（当前每 10 分钟一批，以服务端为准）。改动会自动保存，无需手动操作</div>
@@ -143,8 +146,73 @@
     </main>
   </div>
 
-  <script src="secure-store.js?v=20260911m"></script>
-  <script src="ui.js?v=20260911m"></script>
-  <script src="app.js?v=20260911m"></script>
+  <div id="lock-overlay" class="lock-overlay hidden" role="presentation">
+    <section class="lock-dialog" role="dialog" aria-modal="true" aria-labelledby="lock-dialog-title">
+      <header class="lock-dialog-header">
+        <div>
+          <h2 id="lock-dialog-title">自动锁座 Beta</h2>
+          <p>仅创建待支付订单，不会调用支付接口</p>
+        </div>
+        <button id="btn-lock-close" class="icon-btn" type="button" aria-label="关闭" title="关闭">×</button>
+      </header>
+
+      <div class="lock-dialog-body">
+        <section class="lock-section">
+          <h3>猫眼会话</h3>
+          <p id="lock-session-status" class="lock-status">尚未上传猫眼会话</p>
+          <div class="lock-upload-row">
+            <input id="lock-session-file" type="file" accept=".json,application/json" />
+            <button id="btn-lock-upload" class="btn small ghost" type="button">上传或替换</button>
+            <button id="btn-lock-remove-session" class="btn small ghost danger hidden" type="button">删除会话</button>
+          </div>
+        </section>
+
+        <section class="lock-section">
+          <h3>场次与日期</h3>
+          <div class="lock-form-grid">
+            <label for="lock-cinema">影院</label>
+            <input id="lock-cinema" type="text" readonly />
+            <label for="lock-movie">影片</label>
+            <select id="lock-movie"></select>
+            <label for="lock-template">座位模板场次</label>
+            <select id="lock-template"></select>
+            <label for="lock-target-date">目标日期</label>
+            <input id="lock-target-date" type="date" />
+          </div>
+        </section>
+
+        <section class="lock-section">
+          <div class="lock-seat-heading">
+            <h3>座位选择</h3>
+            <div class="lock-legend" aria-label="座位图图例"><span class="legend-seat available"></span>可选 <span class="legend-seat selected"></span>已选 <span class="legend-seat unavailable"></span>不可选</div>
+          </div>
+          <div class="lock-screen">银幕方向</div>
+          <div class="lock-seat-scroll"><div id="lock-seat-grid" class="lock-seat-rows"><div class="lock-empty">选择可售场次后加载座位表</div></div></div>
+          <p id="lock-seat-count" class="lock-status">尚未选择座位</p>
+        </section>
+
+        <section class="lock-section lock-risk">
+          <p>Beta：未来场次与座位根据当前场次推断。实际开场时间、影厅、座位布局和售卖状态可能变化，可能导致自动锁座失败。锁座成功后仅生成待支付订单，需要在有效时间内自行支付。</p>
+          <label class="lock-risk-check"><input id="lock-risk-accepted" type="checkbox" /> 我已理解上述风险</label>
+        </section>
+
+        <section class="lock-section">
+          <h3>已保存规则</h3>
+          <p id="lock-rule-status" class="lock-status">暂无已保存的锁座规则</p>
+          <button id="btn-lock-cancel-rule" class="btn small ghost danger hidden" type="button">取消锁座规则</button>
+        </section>
+      </div>
+
+      <footer class="lock-dialog-footer">
+        <button id="btn-lock-cancel" class="btn ghost" type="button">取消</button>
+        <button id="btn-lock-submit" class="btn primary" type="button" disabled>启用自动锁座</button>
+      </footer>
+    </section>
+  </div>
+
+  <script src="secure-store.js?v=20260911n"></script>
+  <script src="ui.js?v=20260911n"></script>
+  <script src="lock.js?v=20260911n"></script>
+  <script src="app.js?v=20260911n"></script>
 </body>
 </html>
