@@ -56,9 +56,10 @@ test("lock utilities shorten displayed seat numbers without altering the full id
 
 test("lock utilities require a selected cinema before enabling lock configuration", () => {
   const { lockUtils } = loadLockModule();
-  assert.equal(lockUtils.isLockAvailable({ connected: true, cinemaId: "25428", cinemaSelected: true }), true);
-  assert.equal(lockUtils.isLockAvailable({ connected: true, cinemaId: "25428", cinemaSelected: false }), false);
-  assert.equal(lockUtils.isLockAvailable({ connected: false, cinemaId: "25428", cinemaSelected: true }), false);
+  assert.equal(lockUtils.isLockAvailable({ connected: true, cinemaId: "25428", cinemaSelected: true, lockServiceEnabled: true }), true);
+  assert.equal(lockUtils.isLockAvailable({ connected: true, cinemaId: "25428", cinemaSelected: true, lockServiceEnabled: false }), false);
+  assert.equal(lockUtils.isLockAvailable({ connected: true, cinemaId: "25428", cinemaSelected: false, lockServiceEnabled: true }), false);
+  assert.equal(lockUtils.isLockAvailable({ connected: false, cinemaId: "25428", cinemaSelected: true, lockServiceEnabled: true }), false);
 });
 
 test("lock utilities allow same-day and future targets within 30 days", () => {
@@ -86,5 +87,46 @@ test("lock utilities block duplicate submission for an active rule", () => {
   };
   assert.equal(lockUtils.isReadyToSubmit({ ...base, rule: { state: "waiting_schedule" } }), false);
   assert.equal(lockUtils.isReadyToSubmit({ ...base, rule: { state: "matching" } }), false);
+  assert.equal(lockUtils.isReadyToSubmit({ ...base, rule: { state: "unknown" } }), false);
   assert.equal(lockUtils.isReadyToSubmit({ ...base, rule: { state: "failed" } }), true);
+});
+
+test("lock utilities distinguish immediate locking from a future rule", () => {
+  const { lockUtils } = loadLockModule();
+  assert.deepEqual(JSON.parse(JSON.stringify(lockUtils.lockAction("target"))), {
+    buttonText: "立即锁座",
+    loadingText: "锁座中...",
+    successText: "已创建待支付订单"
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(lockUtils.lockAction("template"))), {
+    buttonText: "保存自动锁座规则",
+    loadingText: "保存中...",
+    successText: "自动锁座规则已启用"
+  });
+});
+
+test("movie selection rebuilds shows and reloads the selected seat map", async () => {
+  const { lockUtils } = loadLockModule();
+  const calls = [];
+  const state = { movieId: "7", templateSeqNo: "100" };
+  await lockUtils.changeMovieSelection({
+    state,
+    movieId: "8",
+    renderShowOptions: () => calls.push("shows"),
+    loadSeats: async () => calls.push("seats")
+  });
+  assert.deepEqual(state, { movieId: "8", templateSeqNo: "" });
+  assert.deepEqual(calls, ["shows", "seats"]);
+});
+
+test("target-show selection never defaults to a stopped show", () => {
+  const { lockUtils } = loadLockModule();
+  const shows = [
+    { seqNo: "100", disabled: true },
+    { seqNo: "101", disabled: false },
+    { seqNo: "102", disabled: false }
+  ];
+  assert.equal(lockUtils.preferredTargetShow(shows, "102").seqNo, "102");
+  assert.equal(lockUtils.preferredTargetShow(shows, "100").seqNo, "101");
+  assert.equal(lockUtils.preferredTargetShow([{ seqNo: "100", disabled: true }], ""), null);
 });

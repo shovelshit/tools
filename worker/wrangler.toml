@@ -27,7 +27,6 @@ crons = ["*/30 * * * *", "* * * * *"]
 # 需要恢复仓库管理时, 取消下面的注释即可
 # [vars]
 # CF_ACCOUNT_ID = "4872db2724154d6cbee0709216b70a01"
-# LOCK_AUTOMATION_ENABLED = "true"
 # LOCK_SERVICE_ENABLED = "true"
 
 # ============ 可观测性(持久化日志) ============

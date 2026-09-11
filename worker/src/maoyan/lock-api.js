@@ -135,7 +135,9 @@ export async function handleLockApi(request, env, url, tokenId) {
       return response({ rule: await createLockRuleThroughCoordinator(env, tokenId, body) }, 201);
     }
     if (url.pathname === "/api/lock/rule" && request.method === "GET") {
-      return response({ rule: publicLockRule(await getLockRule(env, tokenId), false) });
+      return response({
+        rule: publicLockRule(await getLockRule(env, tokenId), String(env.LOCK_SERVICE_ENABLED) === "true")
+      });
     }
     if (url.pathname === "/api/lock/rule/cancel" && request.method === "POST") {
       await cancelLockRuleThroughCoordinator(env, tokenId);

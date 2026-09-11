@@ -133,6 +133,7 @@ export default {
         return json({
           ok: true,
           authMode: "token",
+          lockServiceEnabled: String(env.LOCK_SERVICE_ENABLED) === "true",
           status,
           changes,
           cronMinutes: minBatchMinutes(cronExprs),

@@ -14,6 +14,7 @@ const now = new Date("2026-09-11T04:00:00.000Z");
 
 function envWithConfig(config = { cinemaId: "25428", selectedMovieIds: ["7"] }) {
   return {
+    LOCK_SERVICE_ENABLED: "true",
     MAOYAN_KV: new MemoryKV({
       [userKey("token-a", "config")]: JSON.stringify(config)
     })
@@ -65,6 +66,7 @@ test("creates a rule from authoritative cinema and seat data", async () => {
   assert.equal(rule.templateSeqNo, "100");
   assert.deepEqual(rule.seats, [{ seatNo: "1-6-18", rowId: "6", columnId: "18", type: "N" }]);
   assert.equal(rule.state, "waiting_schedule");
+  assert.equal(rule.automationEnabled, true);
   assert.equal(rule.lastError, null);
   assert.equal(rule.orderId, null);
   assert.equal(rule.payLeftSecond, null);
@@ -129,14 +131,49 @@ test("seat availability is enforced for real shows but ignored for inferred ones
       ] };
     }
   });
-  await reject(envWithConfig(), validInput({ seatNos: ["1-6-19"] }), /座位/, realDeps);
-  const locked = await createLockRule(envWithConfig(), "token-a", validInput(), {
+  await reject(envWithConfig(), validInput({ templateSeqNo: "200", seatNos: ["1-6-19"] }), /座位/, realDeps);
+  const locked = await createLockRule(envWithConfig(), "token-a", validInput({ templateSeqNo: "200" }), {
     ...realDeps,
     placeOrder: async () => ({ orderId: "order-1", payLeftSecond: 600 })
   });
   assert.equal(locked.state, "locked");
   assert.equal(locked.targetSeqNo, "200");
   assert.equal(locked.orderId, "order-1");
+});
+
+test("a real show uses exactly the sequence selected by the user", async () => {
+  const cinema = { showData: {
+    cinemaName: "测试影院",
+    movies: [{ id: 7, nm: "测试电影", shows: [{ showDate: "2026-09-12", plist: [
+      { seqNo: "200", tm: "20:00", ticketStatus: 0 },
+      { seqNo: "201", tm: "20:00", ticketStatus: 0 }
+    ] }] }]
+  } };
+  let orderedSeqNo = null;
+  const result = await createLockRule(envWithConfig(), "token-a", validInput({ templateSeqNo: "201" }), dependencies({
+    fetchCinema: async () => cinema,
+    fetchSeats: async (_session, request) => ({
+      seqNo: request.seqNo, sectionId: "1", sectionName: "2号厅",
+      seats: [{ seatNo: "1-6-18", rowId: "6", columnId: "18", type: "N", available: true }]
+    }),
+    placeOrder: async (_session, seatMap) => {
+      orderedSeqNo = seatMap.seqNo;
+      return { orderId: "order-201", payLeftSecond: 600 };
+    }
+  }));
+  assert.equal(orderedSeqNo, "201");
+  assert.equal(result.targetSeqNo, "201");
+});
+
+test("a stale template cannot replace a selectable real target show", async () => {
+  const cinema = { showData: {
+    cinemaName: "测试影院",
+    movies: [{ id: 7, nm: "测试电影", shows: [
+      { showDate: "2026-09-11", plist: [{ seqNo: "100", tm: "20:00", ticketStatus: 0 }] },
+      { showDate: "2026-09-12", plist: [{ seqNo: "200", tm: "20:00", ticketStatus: 0 }] }
+    ] }]
+  } };
+  await reject(envWithConfig(), validInput(), /目标日期的实际场次/, dependencies({ fetchCinema: async () => cinema }));
 });
 
 test("requires at least one well-formed selected seat", async () => {
@@ -168,15 +205,15 @@ test("allows only one non-terminal rule for a token", async () => {
   assert.notEqual(rule.id, "finished");
 });
 
-test("replaces every current terminal lock rule but retains active rules", async () => {
-  for (const state of ["locked", "expired", "failed", "unknown"]) {
+test("replaces safe terminal lock rules but retains active and uncertain rules", async () => {
+  for (const state of ["locked", "expired", "failed"]) {
     const env = envWithConfig();
     await putLockRule(env, "token-a", { id: `old-${state}`, state });
     const replacement = await createLockRule(env, "token-a", validInput(), dependencies());
     assert.notEqual(replacement.id, `old-${state}`);
     assert.equal(replacement.state, "waiting_schedule");
   }
-  for (const state of ["waiting_schedule", "matching"]) {
+  for (const state of ["waiting_schedule", "matching", "unknown"]) {
     const env = envWithConfig();
     await putLockRule(env, "token-a", { id: `active-${state}`, state });
     await reject(env, validInput(), /进行中/);

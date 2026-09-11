@@ -52,7 +52,7 @@
   }
 
   function isActiveLockRule(rule) {
-    return rule?.state === "waiting_schedule" || rule?.state === "matching";
+    return rule?.state === "waiting_schedule" || rule?.state === "matching" || rule?.state === "unknown";
   }
 
   function isReadyToSubmit({ session, templateSeqNo, selectedSeatNos, targetDate, riskAccepted, dateBounds, rule }) {
@@ -60,8 +60,27 @@
     return Boolean(session?.uploaded && templateSeqNo && selectedSeatNos?.size && /^\d{4}-\d{2}-\d{2}$/.test(targetDate) && riskAccepted && boundsValid && !isActiveLockRule(rule));
   }
 
-  function isLockAvailable({ connected, cinemaId, cinemaSelected }) {
-    return Boolean(connected && cinemaId && cinemaSelected);
+  function isLockAvailable({ connected, cinemaId, cinemaSelected, lockServiceEnabled }) {
+    return Boolean(connected && cinemaId && cinemaSelected && lockServiceEnabled);
+  }
+
+  function lockAction(showMode) {
+    return showMode === "target"
+      ? { buttonText: "立即锁座", loadingText: "锁座中...", successText: "已创建待支付订单" }
+      : { buttonText: "保存自动锁座规则", loadingText: "保存中...", successText: "自动锁座规则已启用" };
+  }
+
+  async function changeMovieSelection({ state, movieId, renderShowOptions, loadSeats }) {
+    state.movieId = movieId;
+    state.templateSeqNo = "";
+    renderShowOptions();
+    await loadSeats();
+  }
+
+  function preferredTargetShow(shows, selectedSeqNo) {
+    return shows.find((item) => item.seqNo === selectedSeqNo && !item.disabled)
+      || shows.find((item) => !item.disabled)
+      || null;
   }
 
   function createMaoyanLockController({ api, getContext, onLog }) {
@@ -160,6 +179,7 @@
       }
       const reason = submitBlockReason();
       if (els.submit) {
+        els.submit.textContent = lockAction(state.showMode).buttonText;
         els.submit.disabled = Boolean(reason);
         els.submit.title = reason;
       }
@@ -189,7 +209,11 @@
       }
       const seats = (rule.seats || []).map((seat) => seat.seatNo || seat).join("、");
       const status = RULE_LABELS[rule.state] || "规则状态未知";
-      const suffix = rule.automationEnabled ? "" : " · 规则已保存，等待服务验证，当前不会自动建单";
+      const suffix = rule.state === "unknown"
+        ? " · 可能已经创建订单，请先检查猫眼订单，确认前不可再次提交"
+        : rule.state === "waiting_schedule" && !rule.automationEnabled
+          ? " · 锁座服务当前已停用"
+          : "";
       els.ruleStatus.textContent = `${rule.cinemaName || "影院"} · ${rule.movieName || "影片"} · ${rule.targetDate || ""} ${rule.templateTime || ""} · ${seats} · ${status}${suffix}`;
       setHidden(els.cancelRule, false);
       renderSelection();
@@ -235,10 +259,12 @@
         els.template.disabled = targetShows.every((item) => item.disabled);
         for (const item of targetShows) {
           const details = [item.tm, item.lang, item.tp, item.th].filter(Boolean).join(" · ");
-          els.template.append(new Option(details, item.seqNo));
+          const option = new Option(item.disabled ? `${details}（停售）` : details, item.seqNo);
+          option.disabled = item.disabled;
+          els.template.append(option);
         }
-        const current = targetShows.find((item) => item.seqNo === state.templateSeqNo) || targetShows[0];
-        state.templateSeqNo = current.seqNo;
+        const current = preferredTargetShow(targetShows, state.templateSeqNo);
+        state.templateSeqNo = current?.seqNo || "";
         state.seatMapIsTemplate = false;
         state.seatMapSource = `展示目标场次 ${targetDateStr} 的真实座位图`;
       } else {
@@ -461,22 +487,48 @@
     }
 
     async function createRule() {
+      const action = lockAction(state.showMode);
+      if (state.showMode === "target") {
+        const template = templateForCurrent();
+        const labels = seatLabelMap();
+        const seats = [...state.selectedSeatNos].map((seatNo) => labels.get(seatNo) || seatNo).join("、");
+        const details = [
+          state.context.cinemaName || `影院 ${state.context.cinemaId}`,
+          template?.movieName || "影片",
+          `${els.date.value} ${template?.tm || ""}`.trim(),
+          template?.th,
+          `座位：${seats}`
+        ].filter(Boolean).join(" · ");
+        const confirmed = await root.showConfirm(
+          `${details}。确认后将立即创建待支付订单，但不会支付。`,
+          { title: "确认立即锁座", okText: "立即锁座", danger: true }
+        );
+        if (!confirmed) return;
+      }
       const payload = {
         cinemaId: state.context.cinemaId, movieId: state.movieId, templateSeqNo: state.templateSeqNo,
         targetDate: els.date.value, seatNos: [...state.selectedSeatNos], riskAccepted: els.risk.checked
       };
-      await buttonLoading(els.submit, "提交中...", async () => {
-        try {
-          const { rule } = await api("/api/lock/rule", { method: "POST", body: JSON.stringify(payload) });
-          state.rule = rule || null;
-          state.automationEnabled = Boolean(rule?.automationEnabled);
-          renderRule();
-          show(state.automationEnabled ? "自动锁座规则已启用" : "规则已保存，等待服务验证", "success");
-          onLog?.("ok", "锁座（Beta）规则已保存");
-        } catch (error) {
-          show(error.message || "保存锁座规则失败", "error");
-        }
-      });
+      try {
+        await buttonLoading(els.submit, action.loadingText, async () => {
+          try {
+            const { rule } = await api("/api/lock/rule", { method: "POST", body: JSON.stringify(payload) });
+            state.rule = rule || null;
+            state.automationEnabled = Boolean(rule?.automationEnabled);
+            renderRule();
+            if (rule?.state === "unknown") {
+              show("订单结果不确定，请先检查猫眼订单，确认前不可再次提交", "warn");
+            } else {
+              show(action.successText, "success");
+            }
+            onLog?.("ok", state.showMode === "target" ? "锁座（Beta）已提交" : "锁座（Beta）规则已保存");
+          } catch (error) {
+            show(error.message || "保存锁座规则失败", "error");
+          }
+        });
+      } finally {
+        renderSelection();
+      }
     }
 
     async function cancelRule() {
@@ -506,7 +558,11 @@
       const context = getContext();
       const available = isLockAvailable(context || {});
       els.button.disabled = !available;
-      els.button.title = available ? "配置自动锁座" : "请先在影院设置中选择影院";
+      els.button.title = available
+        ? "配置锁座"
+        : context?.lockServiceEnabled === false
+          ? "锁座服务暂不可用"
+          : "请先在影院设置中选择影院";
       return available;
     }
 
@@ -526,7 +582,9 @@
     els.close.addEventListener("click", close);
     els.cancel.addEventListener("click", close);
     els.overlay.addEventListener("click", (event) => { if (event.target === els.overlay) close(); });
-    els.movie.addEventListener("change", () => { state.movieId = els.movie.value; state.templateSeqNo = ""; renderShowOptions(); });
+    els.movie.addEventListener("change", async () => {
+      await changeMovieSelection({ state, movieId: els.movie.value, renderShowOptions, loadSeats });
+    });
     els.date.addEventListener("change", () => { renderShowOptions(); loadSeats(); });
     els.template.addEventListener("change", async () => { state.templateSeqNo = els.template.value; await loadSeats(); });
     els.risk.addEventListener("change", renderSelection);
@@ -571,7 +629,13 @@
     return { syncAvailability, open, refreshTemplates: renderTemplates, close };
   }
 
-  const exported = { createMaoyanLockController, lockUtils: { templatesFromMovies, chinaDateBounds, lockDateBounds, seatLabel, isReadyToSubmit, isLockAvailable } };
+  const exported = {
+    createMaoyanLockController,
+    lockUtils: {
+      templatesFromMovies, chinaDateBounds, lockDateBounds, seatLabel, isReadyToSubmit,
+      isLockAvailable, lockAction, changeMovieSelection, preferredTargetShow
+    }
+  };
   if (typeof module !== "undefined" && module.exports) module.exports = exported;
   if (root?.document) root.createMaoyanLockController = createMaoyanLockController;
 })(typeof window !== "undefined" ? window : globalThis);

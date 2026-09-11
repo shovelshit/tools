@@ -60,10 +60,12 @@ function lastErrorText(changes) {
 }
 
 export async function runOneLockRule(env, tokenId, deps = {}) {
-  if (String(env.LOCK_AUTOMATION_ENABLED) !== "true") return { ok: true, skipped: true, disabled: true };
+  if (String(env.LOCK_SERVICE_ENABLED) !== "true") return { ok: true, skipped: true, disabled: true };
   const getRule = deps.getRule || getLockRule;
   const rule = await getRule(env, tokenId);
-  if (!rule || rule.state === "matching" || isLockRuleTerminal(rule.state)) return { ok: true, skipped: true };
+  if (!rule || rule.state === "matching" || rule.state === "unknown" || isLockRuleTerminal(rule.state)) {
+    return { ok: true, skipped: true };
+  }
 
   const now = (deps.now || (() => new Date()))();
   if (rule.targetDate < chinaDate(now)) return await terminal(env, tokenId, rule, "expired", { lastError: "目标场次已过期" }, deps);
@@ -237,7 +239,7 @@ export async function removeLockSessionThroughCoordinator(env, tokenId) {
 }
 
 export async function runScheduledLocks(env) {
-  if (String(env.LOCK_AUTOMATION_ENABLED) !== "true") return;
+  if (String(env.LOCK_SERVICE_ENABLED) !== "true") return;
   for (const token of await getManagedTokens(env)) {
     try {
       const stub = env.LOCK_COORDINATOR.get(env.LOCK_COORDINATOR.idFromName(token.id));

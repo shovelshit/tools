@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { MemoryKV } from "./helpers.js";
 import { OrderAttemptError } from "../src/maoyan/lock-client.js";
-import { LockCoordinator, runOneLockRule } from "../src/maoyan/lock-runner.js";
+import { LockCoordinator, runOneLockRule, runScheduledLocks } from "../src/maoyan/lock-runner.js";
 import { LOCK_CRON_EXPRESSION, resolveCronExprs } from "../src/maoyan/cron.js";
 
 const tokenId = "11111111-1111-4111-8111-111111111111";
@@ -24,7 +24,7 @@ function rule(overrides = {}) {
 }
 
 function runtime(overrides = {}) {
-  return { MAOYAN_KV: new MemoryKV(), LOCK_AUTOMATION_ENABLED: "true", ...overrides };
+  return { MAOYAN_KV: new MemoryKV(), LOCK_SERVICE_ENABLED: "true", ...overrides };
 }
 
 function deps(stored, overrides = {}) {
@@ -48,9 +48,27 @@ function deps(stored, overrides = {}) {
 
 test("automation disabled leaves a waiting rule unchanged", async () => {
   const stored = rule();
-  const result = await runOneLockRule(runtime({ LOCK_AUTOMATION_ENABLED: "false" }), tokenId, deps(stored));
+  const result = await runOneLockRule(runtime({ LOCK_SERVICE_ENABLED: "false" }), tokenId, deps(stored));
   assert.deepEqual(result, { ok: true, skipped: true, disabled: true });
   assert.equal(stored.state, "waiting_schedule");
+});
+
+test("the service switch also controls scheduled lock scans", async () => {
+  let calls = 0;
+  const scheduledRuntime = (enabled) => ({
+    ...runtime({ LOCK_SERVICE_ENABLED: enabled }),
+    MAOYAN_KV: new MemoryKV({
+      "meta:tokens": JSON.stringify([{ id: tokenId, token: "access-token" }])
+    }),
+    LOCK_COORDINATOR: {
+      idFromName: (id) => id,
+      get: () => ({ fetch: async () => { calls++; return Response.json({ ok: true }); } })
+    }
+  });
+  await runScheduledLocks(scheduledRuntime("false"));
+  assert.equal(calls, 0);
+  await runScheduledLocks(scheduledRuntime("true"));
+  assert.equal(calls, 1);
 });
 
 test("automation exact HH:mm locks only selectable matching seats", async () => {

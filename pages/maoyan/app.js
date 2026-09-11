@@ -47,6 +47,7 @@ const els = {
 
 let cinemaMovies = []; // [{id, nm, showCount, checked}]
 let connected = false;
+let lockServiceEnabled = false;
 let monitorEnabled = false; // 默认停止, 需显式「开始监控」
 let monitorDdl = null; // 监控截止时间(ISO), 每次开始监控刷新 30 天
 let pushSaved = false; // 云端已存有当前渠道的推送配置(接口不回显时, 保存时避免误覆盖)
@@ -91,6 +92,7 @@ const lockController = window.createMaoyanLockController({
     cinemaId: els.cinemaInput.value.trim(),
     cinemaName: selectedCinema?.name || els.cinemaName.textContent,
     cinemaSelected,
+    lockServiceEnabled,
     cinemaLoaded: cinemaMovies.length > 0,
     movies: cinemaMovies.filter((movie) => movie.checked)
   }),
@@ -167,6 +169,7 @@ async function connect() {
       try {
         const st = await api("/api/status");
         connected = true;
+        lockServiceEnabled = st.lockServiceEnabled === true;
         const openMode = st.authMode === "open";
         document.body.classList.toggle("open-mode", openMode);
         // 免令牌模式下没有令牌可存, 记一个标记供刷新后自动重连
@@ -198,11 +201,14 @@ els.token.addEventListener("keydown", (e) => {
   if (e.key === "Enter") connect();
 });
 
-// 切换连接: 回到登录层, 保留上次填写的地址/令牌便于修改
-els.btnLogout.addEventListener("click", () => {
+// 切换连接: 仅清除当前工具的连接信息，不影响同域管理页等其他本地数据
+els.btnLogout.addEventListener("click", async () => {
   connected = false;
+  lockServiceEnabled = false;
   cinemaSelected = false;
-  localStorage.clear(); // 切换连接: 清空本机保存的令牌与配置
+  localStorage.removeItem("workerUrl");
+  localStorage.removeItem("authMode");
+  await secureSet("token", "");
   els.workerUrl.value = "";
   els.token.value = "";
   els.cinemaName.classList.add("hidden");
@@ -800,6 +806,8 @@ async function refreshChanges(showLoading = false) {
     if (showLoading) setPanelLoading(els.logPanel, "正在加载变化记录...");
     const data = await api("/api/status");
     const { status, changes } = data;
+    lockServiceEnabled = data.lockServiceEnabled === true;
+    lockController.syncAvailability();
     syncCronInfo(data); // 批次描述保持与服务端一致
     if (status.monitorDdl !== void 0) monitorDdl = status.monitorDdl;
     const stopped = status.enabled === false;

@@ -14,7 +14,9 @@ export function randomToken() {
 
 function maskToken(token) {
   const value = String(token || "");
-  return value.length <= 10 ? value : `${value.slice(0, 4)} **** ${value.slice(-4)}`;
+  if (!value) return "";
+  const edge = value.length <= 10 ? 2 : 4;
+  return `${value.slice(0, edge)} **** ${value.slice(-edge)}`;
 }
 
 export async function getManagedTokens(env) {

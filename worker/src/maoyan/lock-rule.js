@@ -10,9 +10,10 @@ export const RULE_KNOWN_ERRORS = [
   "影片未在当前影院监控配置中选择", "模板场次不属于当前影院影片", "目标日期需在今天起 30 天内",
   "猫眼场次数据无效", "猫眼座位图场次无效", "猫眼会话不完整", "猫眼拒绝创建订单：座位可能已被抢占",
   "猫眼拒绝当前请求，会话或签名可能已过期，请重新登录并上传会话",
-  "目标日期存在多个相同时间场次", "所选未来座位不可用或影厅布局已变化", "锁座服务尚未配置加密密钥"
+  "目标日期存在多个相同时间场次", "所选未来座位不可用或影厅布局已变化", "锁座服务尚未配置加密密钥",
+  "请选择目标日期的实际场次", "所选目标场次不可售"
 ];
-export const LOCK_RULE_TERMINAL_STATES = new Set(["locked", "expired", "failed", "unknown", "completed", "cancelled"]);
+export const LOCK_RULE_TERMINAL_STATES = new Set(["locked", "expired", "failed", "completed", "cancelled"]);
 const PUBLIC_FIELDS = [
   "id", "cinemaId", "cinemaName", "movieId", "movieName", "targetDate",
   "templateDate", "templateTime", "templateSeqNo", "targetSeqNo", "seats", "state",
@@ -91,7 +92,14 @@ function scheduleForTemplate(data, movieId, seqNo) {
     for (const show of day.plist || []) {
       if (String(show.seqNo) === seqNo) {
         if (!dayNumber(date) || !/^\d{2}:\d{2}$/.test(String(show.tm || ""))) throw new Error("猫眼场次数据无效");
-        return { cinemaName: String(data?.showData?.cinemaName || ""), movieName: String(movie.nm || ""), date, time: String(show.tm) };
+        return {
+          cinemaName: String(data?.showData?.cinemaName || ""),
+          movieName: String(movie.nm || ""),
+          date,
+          time: String(show.tm),
+          seqNo: String(show.seqNo),
+          ticketStatus: Number(show.ticketStatus)
+        };
       }
     }
   }
@@ -162,9 +170,11 @@ export async function createLockRule(env, tokenId, input, options = {}) {
   const template = scheduleForTemplate(cinema, values.movieId, values.templateSeqNo);
   if (!template.cinemaName || !template.movieName) throw new Error("猫眼场次数据无效");
   assertTargetDate(values.targetDate, now);
-  // 目标日期已有排期: 直接使用目标场次的真实座位图; 否则用模板座位图(尚未开售, 座位全部可锁)
+  // 真实场次只能使用用户明确选择的 seqNo；已有目标场次时禁止把旧模板静默替换过去。
   const targetShows = findExactShows(cinema, { movieId: values.movieId, targetDate: values.targetDate, templateTime: template.time });
-  const targetShow = targetShows.find((show) => Number(show.ticketStatus) === 0) || targetShows[0] || null;
+  const targetShow = template.date === values.targetDate ? template : null;
+  if (targetShow && targetShow.ticketStatus !== 0) throw new Error("所选目标场次不可售");
+  if (!targetShow && targetShows.length) throw new Error("请选择目标日期的实际场次");
   const seatSeqNo = targetShow ? String(targetShow.seqNo) : values.templateSeqNo;
   const seatMap = await fetchSeats(session, {
     cinemaId: values.cinemaId,
@@ -208,7 +218,7 @@ export async function createLockRule(env, tokenId, input, options = {}) {
         lockedAt: timestamp
       });
       await putLockRule(env, tokenId, rule);
-      return publicLockRule(rule, false);
+      return publicLockRule(rule, String(env.LOCK_SERVICE_ENABLED) === "true");
     } catch (error) {
       if (error instanceof OrderAttemptError && !error.uncertain) {
         console.error("[lock] 立即锁座被拒绝:", error.message);
@@ -218,11 +228,11 @@ export async function createLockRule(env, tokenId, input, options = {}) {
       console.error("[lock] 立即锁座结果不确定");
       const rule = buildRule("unknown", { lastError: "创建订单结果不确定，请到猫眼订单中确认" });
       await putLockRule(env, tokenId, rule);
-      return publicLockRule(rule, false);
+      return publicLockRule(rule, String(env.LOCK_SERVICE_ENABLED) === "true");
     }
   }
   console.log("[lock] 目标日期暂无排期, 保存等待规则");
   const rule = buildRule("waiting_schedule");
   await putLockRule(env, tokenId, rule);
-  return publicLockRule(rule, false);
+  return publicLockRule(rule, String(env.LOCK_SERVICE_ENABLED) === "true");
 }
