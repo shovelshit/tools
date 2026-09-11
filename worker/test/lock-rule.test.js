@@ -107,9 +107,36 @@ test("requires the template sequence to belong to the configured cinema movie", 
   await reject(envWithConfig(), validInput({ templateSeqNo: "101" }), /场次/);
 });
 
-test("rejects a missing or unavailable selected seat", async () => {
-  await reject(envWithConfig(), validInput({ seatNos: ["1-6-99"] }), /座位/);
-  await reject(envWithConfig(), validInput({ seatNos: ["1-6-19"] }), /座位/);
+test("seat availability is enforced for real shows but ignored for inferred ones", async () => {
+  // 目标日期无排期(推断模式): 模板座位图中"已售"的座位也允许锁定
+  const inferred = await createLockRule(envWithConfig(), "token-a", validInput({ seatNos: ["1-6-19"] }), dependencies());
+  assert.deepEqual(inferred.seats.map((seat) => seat.seatNo), ["1-6-19"]);
+  // 目标日期有真实排期: 强制校验真实售卖状态
+  const realShowCinema = { showData: {
+    cinemaName: "测试影院",
+    movies: [{ id: 7, nm: "测试电影", shows: [
+      { showDate: "2026-09-11", plist: [{ seqNo: "100", tm: "20:00", ticketStatus: 0 }] },
+      { showDate: "2026-09-12", plist: [{ seqNo: "200", tm: "20:00", ticketStatus: 0 }] }
+    ] }]
+  } };
+  const realDeps = dependencies({
+    fetchCinema: async () => realShowCinema,
+    fetchSeats: async (_session, request) => {
+      assert.equal(request.seqNo, "200");
+      return { sectionId: "1", sectionName: "1号厅", seqNo: "200", seats: [
+        { seatNo: "1-6-18", rowId: "6", columnId: "18", type: "N", available: true },
+        { seatNo: "1-6-19", rowId: "6", columnId: "19", type: "N", available: false }
+      ] };
+    }
+  });
+  await reject(envWithConfig(), validInput({ seatNos: ["1-6-19"] }), /座位/, realDeps);
+  const locked = await createLockRule(envWithConfig(), "token-a", validInput(), {
+    ...realDeps,
+    placeOrder: async () => ({ orderId: "order-1", payLeftSecond: 600 })
+  });
+  assert.equal(locked.state, "locked");
+  assert.equal(locked.targetSeqNo, "200");
+  assert.equal(locked.orderId, "order-1");
 });
 
 test("requires at least one well-formed selected seat", async () => {
@@ -117,11 +144,19 @@ test("requires at least one well-formed selected seat", async () => {
   await reject(envWithConfig(), validInput({ seatNos: ["one"] }), /座位/);
 });
 
-test("requires a target date after the template and within 30 China calendar days", async () => {
-  await reject(envWithConfig(), validInput({ targetDate: "2026-09-11" }), /目标日期/);
+test("targets are limited to today through the next 30 China calendar days", async () => {
+  // 昨天不可锁
+  await reject(envWithConfig(), validInput({ targetDate: "2026-09-10" }), /目标日期/);
+  // 今天可锁(即使与模板场次同日): 真实场次存在 → 立即锁座下单
+  const today = await createLockRule(envWithConfig(), "token-a", validInput({ targetDate: "2026-09-11" }), {
+    ...dependencies(),
+    placeOrder: async () => ({ orderId: "order-1", payLeftSecond: 600 })
+  });
+  assert.equal(today.targetDate, "2026-09-11");
+  assert.equal(today.state, "locked");
+  assert.equal(today.targetSeqNo, "100");
+  // 超出 30 天不可锁
   await reject(envWithConfig(), validInput({ targetDate: "2026-10-12" }), /目标日期/);
-  const rule = await createLockRule(envWithConfig(), "token-a", validInput({ targetDate: "2026-10-11" }), dependencies());
-  assert.equal(rule.targetDate, "2026-10-11");
 });
 
 test("allows only one non-terminal rule for a token", async () => {

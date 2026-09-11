@@ -1,6 +1,7 @@
 import { userKey } from "./user.js";
 
 const QUERY_KEYS = ["yodaReady", "csecplatform", "csecversion"];
+const SAFE_QUERY_VALUE = /^[A-Za-z0-9._:-]{1,64}$/;
 const SESSION_NAME = "maoyan-session";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -75,10 +76,11 @@ export function normalizeSession(raw) {
   const sourceQuery = raw.create_order_query && typeof raw.create_order_query === "object"
     ? raw.create_order_query
     : {};
+  // 仅保留白名单键, 且值须为安全字符(防止注入任意查询参数)
   const createOrderQuery = Object.fromEntries(
     QUERY_KEYS
       .map((key) => [key, String(sourceQuery[key] || "")])
-      .filter(([, value]) => value)
+      .filter(([, value]) => value && SAFE_QUERY_VALUE.test(value))
   );
 
   return {

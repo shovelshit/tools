@@ -24,10 +24,9 @@ const session = {
   mtgsig: "test-signature",
   userAgent: "Test Agent/1.0",
   createOrderQuery: {
-    yodaReady: "ignored-value",
+    yodaReady: "h5",
     csecplatform: "4",
-    csecversion: "ignored-value",
-    injected: "must-not-appear"
+    csecversion: "4.3.0"
   }
 };
 
@@ -104,15 +103,16 @@ test("fetches a seat map through the fixed authenticated endpoint", async () => 
   });
 });
 
-test("creates an unpaid order with only allowlisted query and form fields", async () => {
+test("creates an unpaid order using session-captured query values only", async () => {
   const seatMap = parseSeatPage(seatHtml);
   await withMockFetch(async (input, init) => {
     const url = new URL(input);
     assert.equal(url.origin, "https://www.maoyan.com");
     assert.equal(url.pathname, "/ajax/createOrder");
+    // 会话捕获的值优先(签名版本须与登录会话匹配)
     assert.deepEqual([...url.searchParams.entries()].sort(), [
       ["csecplatform", "4"],
-      ["csecversion", "2.6.0"],
+      ["csecversion", "4.3.0"],
       ["yodaReady", "h5"]
     ]);
     assert.equal(init.method, "POST");

@@ -27,7 +27,9 @@
   }
 
   function lockDateBounds(now = new Date()) {
-    return { min: addChinaDays(now, 0), max: addChinaDays(now, 30) };
+    const min = addChinaDays(now, 0);
+    const max = addChinaDays(now, 30);
+    return { min, max, valid: min <= max };
   }
 
   function templatesFromMovies(movies) {

@@ -61,23 +61,19 @@ test("lock utilities require a selected cinema before enabling lock configuratio
   assert.equal(lockUtils.isLockAvailable({ connected: false, cinemaId: "25428", cinemaSelected: true }), false);
 });
 
-test("lock utilities allow same-day and template-date targets", () => {
+test("lock utilities allow same-day and future targets within 30 days", () => {
   const { lockUtils } = loadLockModule();
   const now = new Date("2026-09-11T01:00:00.000Z");
-  // 模板场次在 09-20: 目标日期不早于模板场次
-  const bounds = lockUtils.lockDateBounds("2026-09-20", now);
-  assert.deepEqual(JSON.parse(JSON.stringify(bounds)), { min: "2026-09-20", max: "2026-10-11", valid: true });
+  // 日期边界只与今天相关(今天起 30 天内), 不再受模板场次约束
+  const bounds = lockUtils.lockDateBounds(now);
+  assert.deepEqual(JSON.parse(JSON.stringify(bounds)), { min: "2026-09-11", max: "2026-10-11", valid: true });
+  assert.equal(lockUtils.isReadyToSubmit({
+    session: { uploaded: true }, templateSeqNo: "100", selectedSeatNos: new Set(["1-6-18"]),
+    targetDate: "2026-09-11", riskAccepted: true, dateBounds: bounds
+  }), true);
   assert.equal(lockUtils.isReadyToSubmit({
     session: { uploaded: true }, templateSeqNo: "100", selectedSeatNos: new Set(["1-6-18"]),
     targetDate: "2026-09-20", riskAccepted: true, dateBounds: bounds
-  }), true);
-
-  // 模板场次是今天: 目标日期允许当天
-  const todayBounds = lockUtils.lockDateBounds("2026-09-11", now);
-  assert.deepEqual(JSON.parse(JSON.stringify(todayBounds)), { min: "2026-09-11", max: "2026-10-11", valid: true });
-  assert.equal(lockUtils.isReadyToSubmit({
-    session: { uploaded: true }, templateSeqNo: "100", selectedSeatNos: new Set(["1-6-18"]),
-    targetDate: "2026-09-11", riskAccepted: true, dateBounds: todayBounds
   }), true);
 });
 

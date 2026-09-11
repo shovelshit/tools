@@ -155,6 +155,7 @@ export async function createLockRule(env, tokenId, input, options = {}) {
   const fetchCinema = options.fetchCinema || fetchCinemaDetail;
   const loadSession = options.loadSession || loadLockSession;
   const fetchSeats = options.fetchSeats || fetchSeatMap;
+  const placeOrder = options.placeOrder || createUnpaidOrder;
   const now = options.now || new Date();
   const [session, cinema] = await Promise.all([loadSession(env, tokenId), fetchCinema(values.cinemaId)]);
   const template = scheduleForTemplate(cinema, values.movieId, values.templateSeqNo);
@@ -198,7 +199,7 @@ export async function createLockRule(env, tokenId, input, options = {}) {
   if (targetShow) {
     // 目标场次真实存在: 跳过等待, 立即尝试锁座下单
     try {
-      const order = await createUnpaidOrder(session, seatMap, seats.map((seat) => seat.seatNo));
+      const order = await placeOrder(session, seatMap, seats.map((seat) => seat.seatNo));
       console.log("[lock] 立即锁座成功 orderId=", order.orderId);
       const rule = buildRule("locked", {
         orderId: String(order.orderId),
