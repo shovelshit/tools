@@ -62,8 +62,8 @@
     return Boolean(session?.uploaded && templateSeqNo && selectedSeatNos?.size && /^\d{4}-\d{2}-\d{2}$/.test(targetDate) && riskAccepted && boundsValid && !isActiveLockRule(rule));
   }
 
-  function isLockAvailable({ connected, cinemaId, cinemaLoaded }) {
-    return Boolean(connected && cinemaId && cinemaLoaded);
+  function isLockAvailable({ connected, cinemaId, cinemaSelected }) {
+    return Boolean(connected && cinemaId && cinemaSelected);
   }
 
   function createMaoyanLockController({ api, getContext, onLog }) {
@@ -418,7 +418,7 @@
       const context = getContext();
       const available = isLockAvailable(context || {});
       els.button.disabled = !available;
-      els.button.title = available ? "配置自动锁座" : "请先在影院设置中点击「加载」";
+      els.button.title = available ? "配置自动锁座" : "请先在影院设置中选择影院";
       return available;
     }
 
@@ -455,7 +455,7 @@
     els.zoomReset.addEventListener("click", resetZoom);
     resetSeats();
 
-    return { syncAvailability, open };
+    return { syncAvailability, open, refreshTemplates: renderTemplates, close };
   }
 
   const exported = { createMaoyanLockController, lockUtils: { templatesFromMovies, chinaDateBounds, lockDateBounds, seatLabel, isReadyToSubmit, isLockAvailable } };

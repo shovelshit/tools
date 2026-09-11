@@ -55,6 +55,7 @@ let pushSaved = false; // 云端已存有当前渠道的推送配置(接口不�
 let allCities = [];        // [{id, name, pinyin}]
 let selectedCity = null;   // {id, name}
 let selectedCinema = null; // {id, name}
+let cinemaSelected = false; // 影院已在影院设置中选择或加载(锁座入口门槛)
 let cinemaSearchTimer = null;
 
 // 同域部署下 Worker 地址可留空(直接请求当前域名); 其他托管环境给出默认后端
@@ -199,10 +200,18 @@ els.token.addEventListener("keydown", (e) => {
 // 切换连接: 回到登录层, 保留上次填写的地址/令牌便于修改
 els.btnLogout.addEventListener("click", () => {
   connected = false;
+  cinemaSelected = false;
+  localStorage.clear(); // 切换连接: 清空本机保存的令牌与配置
+  els.workerUrl.value = "";
+  els.token.value = "";
+  els.cinemaName.classList.add("hidden");
+  els.cinemaName.textContent = "";
+  cinemaMovies = [];
   setStatus("未连接");
   els.mainPage.classList.add("hidden");
   els.loginOverlay.classList.remove("hidden");
   els.loginError.classList.add("hidden");
+  lockController.close?.();
   lockController.syncAvailability();
   els.btnLockSeats.disabled = true;
 });
@@ -453,6 +462,8 @@ function chooseCity(c) {
   els.cityDropdown.classList.add("hidden");
   // 切换城市后重置影院搜索
   selectedCinema = null;
+  cinemaSelected = false;
+  lockController.syncAvailability();
   els.cinemaSearch.value = "";
   els.cinemaSearch.disabled = false;
   els.btnSearchCinema.disabled = false;
@@ -536,6 +547,7 @@ function renderCinemaResults(list) {
     item.addEventListener("mousedown", (e) => {
       e.preventDefault();
       selectedCinema = { id, name };
+      cinemaSelected = true;
       els.cinemaSearch.value = name;
       els.cinemaDropdown.classList.add("hidden");
       loadCinema(id);
@@ -547,6 +559,8 @@ function renderCinemaResults(list) {
 
 els.cinemaSearch.addEventListener("input", () => {
   selectedCinema = null;
+  cinemaSelected = false;
+  lockController.syncAvailability();
   scheduleCinemaSearch();
 });
 els.cinemaSearch.addEventListener("keydown", (e) => {
@@ -588,6 +602,7 @@ els.btnLoadCinema.addEventListener("click", () => {
   try {
     const id = parseCinemaInput(els.cinemaInput.value);
     els.cinemaInput.value = id;
+    cinemaSelected = true;
     loadCinema(id);
   } catch (e) {
     showToast(e.message, "error");
@@ -622,6 +637,10 @@ async function loadCinema(cinemaId, prevSelected, { restore = false } = {}) {
       cinemaMovies = res.movies.map((m) => ({ ...m, checked: sel.has(String(m.id)) }));
       renderMovies();
       log("ok", `加载影院成功: ${res.cinemaName}，在映影片 ${res.movies.length} 部`);
+      // 锁座弹窗打开时同步影片列表
+      if (!document.getElementById("lock-overlay")?.classList.contains("hidden")) {
+        lockController.refreshTemplates?.();
+      }
       autoSaveConfig(
         { cinemaId: String(res.cinemaId), selectedMovieIds: getSelectedIds() },
         { msg: `影院已保存到云端：${res.cinemaName}` }

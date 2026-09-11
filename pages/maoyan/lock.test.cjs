@@ -54,11 +54,11 @@ test("lock utilities shorten displayed seat numbers without altering the full id
   assert.equal(lockUtils.seatLabel("unexpected"), "unexpected");
 });
 
-test("lock utilities require a loaded cinema before enabling lock configuration", () => {
+test("lock utilities require a selected cinema before enabling lock configuration", () => {
   const { lockUtils } = loadLockModule();
-  assert.equal(lockUtils.isLockAvailable({ connected: true, cinemaId: "25428", cinemaLoaded: true }), true);
-  assert.equal(lockUtils.isLockAvailable({ connected: true, cinemaId: "25428", cinemaLoaded: false }), false);
-  assert.equal(lockUtils.isLockAvailable({ connected: false, cinemaId: "25428", cinemaLoaded: true }), false);
+  assert.equal(lockUtils.isLockAvailable({ connected: true, cinemaId: "25428", cinemaSelected: true }), true);
+  assert.equal(lockUtils.isLockAvailable({ connected: true, cinemaId: "25428", cinemaSelected: false }), false);
+  assert.equal(lockUtils.isLockAvailable({ connected: false, cinemaId: "25428", cinemaSelected: true }), false);
 });
 
 test("lock utilities allow same-day and template-date targets", () => {
