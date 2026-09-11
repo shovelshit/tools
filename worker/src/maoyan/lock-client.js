@@ -212,7 +212,9 @@ function selectedSeats(seatMap, seats) {
 export async function createUnpaidOrder(session, seatMap, seats) {
   const selected = selectedSeats(seatMap, seats);
   const url = new URL(`${ORIGIN}/ajax/createOrder`);
-  for (const [key, value] of Object.entries(DEFAULT_ORDER_QUERY)) url.searchParams.set(key, value);
+  // 会话捕获的下单参数优先(签名版本等必须与登录会话匹配), 缺省时用默认值
+  const query = { ...DEFAULT_ORDER_QUERY, ...(session.createOrderQuery || {}) };
+  for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);
   const body = new URLSearchParams({
     sectionId: seatMap.sectionId,
     sectionName: seatMap.sectionName,
