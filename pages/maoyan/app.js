@@ -86,6 +86,7 @@ async function api(path, options = {}) {
 const lockController = window.createMaoyanLockController({
   api,
   getContext: () => ({
+    connected,
     cinemaId: els.cinemaInput.value.trim(),
     cinemaName: selectedCinema?.name || els.cinemaName.textContent,
     movies: cinemaMovies.filter((movie) => movie.checked)

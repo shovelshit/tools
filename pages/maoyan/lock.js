@@ -49,6 +49,10 @@
     return Boolean(session?.uploaded && templateSeqNo && selectedSeatNos?.size && /^\d{4}-\d{2}-\d{2}$/.test(targetDate) && riskAccepted);
   }
 
+  function isLockAvailable({ connected, cinemaId, movies }) {
+    return Boolean(connected && cinemaId && movies?.length);
+  }
+
   function createMaoyanLockController({ api, getContext, onLog }) {
     const $ = (id) => document.getElementById(id);
     const els = {
@@ -323,7 +327,7 @@
 
     function syncAvailability() {
       const context = getContext();
-      const available = Boolean(context?.cinemaId && context.movies?.length);
+      const available = isLockAvailable(context || {});
       els.button.disabled = !available;
       els.button.title = available ? "配置自动锁座" : "请先加载影院并勾选至少一部影片";
       return available;
@@ -366,7 +370,7 @@
     return { syncAvailability, open };
   }
 
-  const exported = { createMaoyanLockController, lockUtils: { templatesFromMovies, chinaDateBounds, seatLabel, isReadyToSubmit } };
+  const exported = { createMaoyanLockController, lockUtils: { templatesFromMovies, chinaDateBounds, seatLabel, isReadyToSubmit, isLockAvailable } };
   if (typeof module !== "undefined" && module.exports) module.exports = exported;
   if (root?.document) root.createMaoyanLockController = createMaoyanLockController;
 })(typeof window !== "undefined" ? window : globalThis);

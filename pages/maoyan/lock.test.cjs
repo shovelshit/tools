@@ -53,3 +53,9 @@ test("lock utilities shorten displayed seat numbers without altering the full id
   assert.equal(lockUtils.seatLabel("1-6-18"), "18");
   assert.equal(lockUtils.seatLabel("unexpected"), "unexpected");
 });
+
+test("lock utilities require an active connection before enabling lock configuration", () => {
+  const { lockUtils } = loadLockModule();
+  assert.equal(lockUtils.isLockAvailable({ connected: true, cinemaId: "25428", movies: [{ checked: true }] }), true);
+  assert.equal(lockUtils.isLockAvailable({ connected: false, cinemaId: "25428", movies: [{ checked: true }] }), false);
+});
