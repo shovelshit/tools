@@ -41,6 +41,10 @@ function ruleInputError(error) {
 
 function safeError(error) {
   if (error?.kind === "input") return response({ error: error.message }, 400);
+  if (/^猫眼会话(格式错误|不完整)/.test(String(error?.message || ""))) {
+    return response({ error: error.message }, 400);
+  }
+  if (error?.message === "锁座服务尚未配置加密密钥") return response({ error: error.message }, 500);
   if (ruleInputError(error)) return response({ error: error.message }, 400);
   if (error?.kind === "missing" || /未上传猫眼会话|未找到锁座规则|未找到锁座资源/.test(String(error?.message || ""))) {
     return response({ error: "未找到锁座资源" }, 404);
