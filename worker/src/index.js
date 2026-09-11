@@ -3,7 +3,7 @@
 import { CORS, json } from "./common/http.js";
 import { NOTIFY_CHANNELS, pushBark } from "./common/notify.js";
 import { userKey, getUserConfig } from "./maoyan/user.js";
-import { CITY_LIST, fetchCinemaDetail, searchCinemasByKw, runCheck, pushNotify, currentChannel, minBatchMinutes, describeCrons, isMinuteStepCrons, resolveCronExprs, ddlFromNow, checkAuthFull, syncCronTokens, handleAdminTokens, runScheduledChecks } from "./maoyan/index.js";
+import { CITY_LIST, fetchCinemaDetail, publicCinemaShows, searchCinemasByKw, runCheck, pushNotify, currentChannel, minBatchMinutes, describeCrons, isMinuteStepCrons, resolveCronExprs, ddlFromNow, checkAuthFull, syncCronTokens, handleAdminTokens, handleLockApi, runScheduledChecks } from "./maoyan/index.js";
 import { handleStoreApi, handleStoreFile } from "./store/proxy.js";
 
 export default {
@@ -27,6 +27,8 @@ export default {
     if (token === null) return json({ error: "访问令牌错误" }, 401);
     await syncCronTokens(env);
     try {
+      const lockResponse = await handleLockApi(request, env, url, token);
+      if (lockResponse) return lockResponse;
       // ---- 城市列表 ----
       if (url.pathname === "/api/cities") {
         return json({ ok: true, cities: CITY_LIST });
@@ -45,28 +47,7 @@ export default {
         const cinemaId = (url.searchParams.get("cinemaId") || "").trim() || cfg.cinemaId;
         if (!cinemaId) return json({ ok: false, error: "缺少 cinemaId" });
         const data = await fetchCinemaDetail(cinemaId);
-        return json({
-          ok: true,
-          cinemaId,
-          cinemaName: data.showData.cinemaName,
-          movies: (data.showData.movies || []).map((m) => ({
-            id: m.id,
-            nm: m.nm,
-            showCount: m.showCount,
-            shows: (m.shows || []).map((d) => ({
-              showDate: d.showDate || d.dt || "",
-              plist: (d.plist || []).map((p) => ({
-                tm: p.tm,
-                lang: p.lang,
-                tp: p.tp,
-                th: p.th,
-                vipPrice: p.vipPrice,
-                vipPriceSuffix: p.vipPriceSuffix,
-                ticketStatus: p.ticketStatus
-              }))
-            }))
-          }))
-        });
+        return json({ ok: true, cinemaId, ...publicCinemaShows(data) });
       }
       if (url.pathname === "/api/config" && request.method === "GET") {
         const cfg = await getUserConfig(env, token);

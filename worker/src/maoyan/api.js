@@ -40,6 +40,31 @@ async function fetchWithJar(url, jar) {
   throw new Error("重定向超过 5 次");
 }
 
+export function publicCinemaShows(data) {
+  const showData = data?.showData || {};
+  return {
+    cinemaName: String(showData.cinemaName || ""),
+    movies: (showData.movies || []).map((movie) => ({
+      id: movie.id,
+      nm: movie.nm,
+      showCount: movie.showCount,
+      shows: (movie.shows || []).map((day) => ({
+        showDate: day.showDate || day.dt || "",
+        plist: (day.plist || []).map((show) => ({
+          seqNo: String(show.seqNo || ""),
+          tm: show.tm,
+          lang: show.lang,
+          tp: show.tp,
+          th: show.th,
+          vipPrice: show.vipPrice,
+          vipPriceSuffix: show.vipPriceSuffix,
+          ticketStatus: show.ticketStatus
+        }))
+      }))
+    }))
+  };
+}
+
 // 影院详情(当日排片)
 export async function fetchCinemaDetail(cinemaId) {
   const jar = [];
