@@ -90,6 +90,7 @@ const lockController = window.createMaoyanLockController({
     connected,
     cinemaId: els.cinemaInput.value.trim(),
     cinemaName: selectedCinema?.name || els.cinemaName.textContent,
+    cinemaSelected,
     cinemaLoaded: cinemaMovies.length > 0,
     movies: cinemaMovies.filter((movie) => movie.checked)
   }),
