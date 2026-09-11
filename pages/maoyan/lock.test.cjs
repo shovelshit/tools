@@ -59,3 +59,27 @@ test("lock utilities require an active connection before enabling lock configura
   assert.equal(lockUtils.isLockAvailable({ connected: true, cinemaId: "25428", movies: [{ checked: true }] }), true);
   assert.equal(lockUtils.isLockAvailable({ connected: false, cinemaId: "25428", movies: [{ checked: true }] }), false);
 });
+
+test("lock utilities constrain targets to the day after a future template", () => {
+  const { lockUtils } = loadLockModule();
+  const now = new Date("2026-09-11T01:00:00.000Z");
+  const bounds = lockUtils.lockDateBounds("2026-09-20", now);
+  assert.deepEqual(JSON.parse(JSON.stringify(bounds)), { min: "2026-09-21", max: "2026-10-11", valid: true });
+
+  assert.equal(lockUtils.isReadyToSubmit({
+    session: { uploaded: true }, templateSeqNo: "100", selectedSeatNos: new Set(["1-6-18"]),
+    targetDate: "2026-09-20", riskAccepted: true, dateBounds: bounds
+  }), false);
+});
+
+test("lock utilities block duplicate submission for an active rule", () => {
+  const { lockUtils } = loadLockModule();
+  const base = {
+    session: { uploaded: true }, templateSeqNo: "100", selectedSeatNos: new Set(["1-6-18"]),
+    targetDate: "2026-09-13", riskAccepted: true,
+    dateBounds: { min: "2026-09-12", max: "2026-10-11", valid: true }
+  };
+  assert.equal(lockUtils.isReadyToSubmit({ ...base, rule: { state: "waiting_schedule" } }), false);
+  assert.equal(lockUtils.isReadyToSubmit({ ...base, rule: { state: "matching" } }), false);
+  assert.equal(lockUtils.isReadyToSubmit({ ...base, rule: { state: "failed" } }), true);
+});

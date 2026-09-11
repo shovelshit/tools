@@ -26,6 +26,21 @@
     return { min: addChinaDays(now, 1), max: addChinaDays(now, 30) };
   }
 
+  function addCalendarDays(dateString, days) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateString || "")) return "";
+    const date = new Date(`${dateString}T00:00:00.000Z`);
+    if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== dateString) return "";
+    date.setUTCDate(date.getUTCDate() + days);
+    return date.toISOString().slice(0, 10);
+  }
+
+  function lockDateBounds(templateDate, now = new Date()) {
+    const generalBounds = chinaDateBounds(now);
+    const afterTemplate = addCalendarDays(templateDate, 1);
+    const min = afterTemplate && afterTemplate > generalBounds.min ? afterTemplate : generalBounds.min;
+    return { min, max: generalBounds.max, valid: min <= generalBounds.max };
+  }
+
   function templatesFromMovies(movies) {
     return (movies || []).filter((movie) => movie.checked).flatMap((movie) =>
       (movie.shows || []).flatMap((day) => (day.plist || []).filter(Boolean).flatMap((show) => {
@@ -45,8 +60,13 @@
     return parts.at(-1) || String(seatNo || "");
   }
 
-  function isReadyToSubmit({ session, templateSeqNo, selectedSeatNos, targetDate, riskAccepted }) {
-    return Boolean(session?.uploaded && templateSeqNo && selectedSeatNos?.size && /^\d{4}-\d{2}-\d{2}$/.test(targetDate) && riskAccepted);
+  function isActiveLockRule(rule) {
+    return rule?.state === "waiting_schedule" || rule?.state === "matching";
+  }
+
+  function isReadyToSubmit({ session, templateSeqNo, selectedSeatNos, targetDate, riskAccepted, dateBounds, rule }) {
+    const boundsValid = !dateBounds || (dateBounds.valid && targetDate >= dateBounds.min && targetDate <= dateBounds.max);
+    return Boolean(session?.uploaded && templateSeqNo && selectedSeatNos?.size && /^\d{4}-\d{2}-\d{2}$/.test(targetDate) && riskAccepted && boundsValid && !isActiveLockRule(rule));
   }
 
   function isLockAvailable({ connected, cinemaId, movies }) {
@@ -65,7 +85,7 @@
     };
     const state = {
       context: null, session: { uploaded: false }, movieId: "", templateSeqNo: "", seatMap: null,
-      selectedSeatNos: new Set(), rule: null, automationEnabled: false, templates: []
+      selectedSeatNos: new Set(), rule: null, automationEnabled: false, templates: [], dateBounds: lockDateBounds()
     };
 
     function show(message, type = "info") {
@@ -90,7 +110,7 @@
       if (els.seatCount) els.seatCount.textContent = seats.length ? `已选 ${seats.length} 座：${seats.join("、")}` : "尚未选择座位";
       if (els.submit) els.submit.disabled = !isReadyToSubmit({
         session: state.session, templateSeqNo: state.templateSeqNo, selectedSeatNos: state.selectedSeatNos,
-        targetDate: els.date?.value || "", riskAccepted: els.risk?.checked
+        targetDate: els.date?.value || "", riskAccepted: els.risk?.checked, dateBounds: state.dateBounds, rule: state.rule
       });
     }
 
@@ -113,6 +133,7 @@
       if (!rule) {
         els.ruleStatus.textContent = "暂无已保存的锁座规则";
         setHidden(els.cancelRule, true);
+        renderSelection();
         return;
       }
       const seats = (rule.seats || []).map((seat) => seat.seatNo || seat).join("、");
@@ -120,6 +141,7 @@
       const suffix = rule.automationEnabled ? "" : " · 规则已保存，等待服务验证，当前不会自动建单";
       els.ruleStatus.textContent = `${rule.cinemaName || "影院"} · ${rule.movieName || "影片"} · ${rule.targetDate || ""} ${rule.templateTime || ""} · ${seats} · ${status}${suffix}`;
       setHidden(els.cancelRule, false);
+      renderSelection();
     }
 
     function renderTemplates() {
@@ -167,6 +189,7 @@
         state.templateSeqNo = current ? current.seqNo : "";
       }
       els.template.value = state.templateSeqNo;
+      updateTargetDateBounds();
       resetSeats();
     }
 
@@ -232,6 +255,18 @@
         state.seatMap = null;
         els.seatGrid.innerHTML = '<div class="lock-empty">座位表加载失败，请确认猫眼会话后重试</div>';
         show(error.message || "座位表加载失败", "error");
+      }
+    }
+
+    function updateTargetDateBounds() {
+      state.dateBounds = lockDateBounds(templateForCurrent()?.showDate);
+      els.date.min = state.dateBounds.min;
+      els.date.max = state.dateBounds.max;
+      els.date.disabled = !state.dateBounds.valid;
+      if (!state.dateBounds.valid) {
+        els.date.value = "";
+      } else if (!els.date.value || els.date.value < state.dateBounds.min || els.date.value > state.dateBounds.max) {
+        els.date.value = state.dateBounds.min;
       }
     }
 
@@ -337,10 +372,6 @@
       if (!syncAvailability()) return show("请先加载影院并勾选至少一部影片", "warn");
       state.context = getContext();
       els.cinema.value = state.context.cinemaName || `影院 ${state.context.cinemaId}`;
-      const bounds = chinaDateBounds();
-      els.date.min = bounds.min;
-      els.date.max = bounds.max;
-      if (!els.date.value || els.date.value < bounds.min || els.date.value > bounds.max) els.date.value = bounds.min;
       els.risk.checked = false;
       renderTemplates();
       renderSelection();
@@ -358,7 +389,7 @@
     els.cancel.addEventListener("click", close);
     els.overlay.addEventListener("click", (event) => { if (event.target === els.overlay) close(); });
     els.movie.addEventListener("change", () => { state.movieId = els.movie.value; state.templateSeqNo = ""; renderTemplateOptions(); });
-    els.template.addEventListener("change", async () => { state.templateSeqNo = els.template.value; await loadSeats(); });
+    els.template.addEventListener("change", async () => { state.templateSeqNo = els.template.value; updateTargetDateBounds(); await loadSeats(); });
     els.date.addEventListener("change", renderSelection);
     els.risk.addEventListener("change", renderSelection);
     els.upload.addEventListener("click", uploadSession);
@@ -370,7 +401,7 @@
     return { syncAvailability, open };
   }
 
-  const exported = { createMaoyanLockController, lockUtils: { templatesFromMovies, chinaDateBounds, seatLabel, isReadyToSubmit, isLockAvailable } };
+  const exported = { createMaoyanLockController, lockUtils: { templatesFromMovies, chinaDateBounds, lockDateBounds, seatLabel, isReadyToSubmit, isLockAvailable } };
   if (typeof module !== "undefined" && module.exports) module.exports = exported;
   if (root?.document) root.createMaoyanLockController = createMaoyanLockController;
 })(typeof window !== "undefined" ? window : globalThis);
