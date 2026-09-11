@@ -135,7 +135,11 @@ export async function createLockRule(env, tokenId, input, options = {}) {
   const template = scheduleForTemplate(cinema, values.movieId, values.templateSeqNo);
   if (!template.cinemaName || !template.movieName) throw new Error("猫眼场次数据无效");
   assertTargetDate(values.targetDate, template.date, now);
-  const seatMap = await fetchSeats(session, values);
+  const seatMap = await fetchSeats(session, {
+    cinemaId: values.cinemaId,
+    movieId: values.movieId,
+    seqNo: values.templateSeqNo
+  });
   if (String(seatMap?.seqNo) !== values.templateSeqNo) throw new Error("猫眼座位图场次无效");
   const seats = selectedSeats(seatMap, values.seatNos);
   const timestamp = new Date(now).toISOString();

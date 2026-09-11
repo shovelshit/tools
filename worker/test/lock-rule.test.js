@@ -72,6 +72,21 @@ test("creates a rule from authoritative cinema and seat data", async () => {
   assert.equal((await getLockRule(env, "token-a")).id, rule.id);
 });
 
+test("maps the template sequence to the authenticated seat-map request", async () => {
+  const env = envWithConfig();
+  await createLockRule(env, "token-a", validInput(), dependencies({
+    fetchSeats: async (_session, request) => {
+      assert.deepEqual(request, { cinemaId: "25428", movieId: "7", seqNo: "100" });
+      return {
+        sectionId: "1",
+        sectionName: "1号厅",
+        seqNo: "100",
+        seats: [{ seatNo: "1-6-18", rowId: "6", columnId: "18", type: "N", available: true }]
+      };
+    }
+  }));
+});
+
 test("requires explicit risk acceptance", async () => {
   await reject(envWithConfig(), validInput({ riskAccepted: "true" }), /风险/);
 });
