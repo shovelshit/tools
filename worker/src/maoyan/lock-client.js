@@ -262,6 +262,11 @@ export async function createUnpaidOrder(session, seatMap, seats) {
       payLeftSecond: Number.isFinite(payLeftSecond) ? payLeftSecond : null
     };
   }
+  // 猫眼网关错误(error 对象, 如 NetError/Bad Request): 多为会话或 mtgsig 签名过期
+  if (payload?.error && typeof payload.error === "object") {
+    console.error("[lock] createOrder 后端错误:", snippet(text, 300));
+    throw new OrderAttemptError("猫眼拒绝当前请求，会话或签名可能已过期，请重新登录并上传会话", false);
+  }
   if (explicitProviderRejection(payload)) {
     console.error("[lock] createOrder 被拒绝:", snippet(text, 200));
     throw new OrderAttemptError("猫眼拒绝创建订单", false);

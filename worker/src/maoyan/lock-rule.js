@@ -9,6 +9,7 @@ export const RULE_KNOWN_ERRORS = [
   "锁座参数无效", "请确认锁座风险提示", "所选座位无效", "所选座位不可用", "情侣座需成对选择",
   "影片未在当前影院监控配置中选择", "模板场次不属于当前影院影片", "目标日期需在今天起 30 天内",
   "猫眼场次数据无效", "猫眼座位图场次无效", "猫眼会话不完整", "猫眼拒绝创建订单：座位可能已被抢占",
+  "猫眼拒绝当前请求，会话或签名可能已过期，请重新登录并上传会话",
   "目标日期存在多个相同时间场次", "所选未来座位不可用或影厅布局已变化", "锁座服务尚未配置加密密钥"
 ];
 export const LOCK_RULE_TERMINAL_STATES = new Set(["locked", "expired", "failed", "unknown", "completed", "cancelled"]);
@@ -210,8 +211,8 @@ export async function createLockRule(env, tokenId, input, options = {}) {
       return publicLockRule(rule, false);
     } catch (error) {
       if (error instanceof OrderAttemptError && !error.uncertain) {
-        console.error("[lock] 立即锁座被拒绝");
-        throw new Error("猫眼拒绝创建订单：座位可能已被抢占");
+        console.error("[lock] 立即锁座被拒绝:", error.message);
+        throw new Error(error.message === "猫眼拒绝创建订单" ? "猫眼拒绝创建订单：座位可能已被抢占" : error.message);
       }
       // 结果不确定(网络异常等): 保存为待人工确认, 避免重复下单
       console.error("[lock] 立即锁座结果不确定");
