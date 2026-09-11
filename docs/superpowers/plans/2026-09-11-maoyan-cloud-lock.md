@@ -627,6 +627,7 @@ git commit -m "feat: expose maoyan lock APIs"
 - Consumes: `getManagedTokens`, `fetchCinemaDetail`, `findExactShows`, `fetchSeatMap`, `createUnpaidOrder`, session/rule persistence, and `pushNotify`
 - Produces: `runOneLockRule(env, tokenId, deps = {}) -> RunResult`, where tests may replace time, cinema, seat, order, session, and notification functions
 - Produces: `runScheduledLocks(env) -> void`
+- Produces: `createLockRuleThroughCoordinator(env, tokenId, input) -> PublicRule`
 - Produces: `LockCoordinator` Durable Object class
 - Produces: `LOCK_CRON_EXPRESSION = "* * * * *"`
 
@@ -647,6 +648,8 @@ state locked/failed/expired/unknown     -> skipped forever
 ```
 
 Add a concurrency test where two `LockCoordinator.fetch()` calls target the same object. The injected order function waits on a promise; assert it is called exactly once and the second response reports `skipped: true`.
+
+Add a second concurrency test for rule creation. Send two `action: "create"` requests for the same token and a valid input while the injected `createRule` function is delayed. Assert only one creation function call occurs; the second response is HTTP 409. This is the enforcement point for the one-active-rule contract: KV alone does not provide a compare-and-set operation.
 
 - [ ] **Step 2: Run runner tests and verify they fail**
 
@@ -699,7 +702,12 @@ export class LockCoordinator {
     if (this.running) return Response.json({ ok: true, skipped: true }, { status: 202 });
     this.running = true;
     try {
-      const { tokenId } = await request.json();
+      const { action, tokenId, input } = await request.json();
+      if (action === "create") {
+        const rule = await createLockRule(this.env, tokenId, input, this.deps);
+        return Response.json({ ok: true, rule }, { status: 201 });
+      }
+      if (action !== "run") return Response.json({ error: "Bad Request" }, { status: 400 });
       const rule = await getLockRule(this.env, tokenId);
       const terminalRuleId = await this.state.storage.get("terminalRuleId");
       if (rule && terminalRuleId === rule.id) return Response.json({ ok: true, skipped: true });
@@ -717,6 +725,8 @@ export class LockCoordinator {
 ```
 
 Validate `tokenId` against `^[0-9a-f-]{36}$` inside the object. `runScheduledLocks` returns immediately while disabled; otherwise it loops `getManagedTokens()`, creates `env.LOCK_COORDINATOR.idFromName(token.id)`, and POSTs `{ tokenId: token.id }` to the stub. One token failure must not stop the remaining tokens.
+
+Implement `createLockRuleThroughCoordinator(env, tokenId, input)` by resolving that same token's Durable Object name and POSTing `{ action: "create", tokenId, input }`. Parse only `{ ok, rule, error }`; turn non-201 responses into fixed API-safe errors. `runScheduledLocks` must POST `{ action: "run", tokenId }`.
 
 - [ ] **Step 5: Separate lock cron from monitor cron reporting**
 
@@ -745,6 +755,10 @@ Export the class at module scope:
 ```js
 export { LockCoordinator } from "./maoyan/lock-runner.js";
 ```
+
+- [ ] **Step 5a: Route interactive rule creation through the same coordinator**
+
+Modify `worker/src/maoyan/lock-api.js` after Task 4 has created it. Replace its direct `createLockRule` call for `POST /api/lock/rule` with `createLockRuleThroughCoordinator(env, tokenId, body)`. Preserve its existing 400/409 response mapping and public response shape. Add an API-level test that issues two concurrent rule-creation requests with the same token and verifies one `201` and one `409`; neither request may reach a direct KV write outside the Durable Object.
 
 - [ ] **Step 6: Add safe Worker configuration**
 
