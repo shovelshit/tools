@@ -706,6 +706,14 @@ input[type="password"]:focus { border-color: var(--primary); }
 .lock-section { min-width: 0; }
 .lock-section h3 { font-size: 13px; margin-bottom: 6px; }
 .lock-status { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.lock-seat-source { font-size: 12px; margin: 4px 0; color: var(--muted); }
+.lock-seat-source.warn {
+  color: #b07f00;
+  background: #fff8e6;
+  border: 1px solid #f0dcb0;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
 .lock-upload-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .lock-upload-row input[type="file"] { min-width: 0; max-width: 100%; font-size: 12px; }
 

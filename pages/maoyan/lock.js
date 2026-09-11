@@ -74,6 +74,7 @@
       file: $("lock-session-file"), upload: $("btn-lock-upload"), removeSession: $("btn-lock-remove-session"),
       sessionStatus: $("lock-session-status"), seatGrid: $("lock-seat-grid"), seatCount: $("lock-seat-count"),
       risk: $("lock-risk-accepted"), ruleStatus: $("lock-rule-status"), cancelRule: $("btn-lock-cancel-rule"),
+      seatSource: $("lock-seat-source"),
       cancel: $("btn-lock-cancel"), submit: $("btn-lock-submit"),
       zoomIn: $("btn-lock-zoom-in"), zoomOut: $("btn-lock-zoom-out"), zoomReset: $("btn-lock-zoom-reset"), zoomLabel: $("lock-zoom-label")
     };
@@ -105,8 +106,22 @@
     function resetSeats() {
       state.seatMap = null;
       state.selectedSeatNos.clear();
+      state.seatMapSource = "";
+      renderSeatSource();
       if (els.seatGrid) els.seatGrid.innerHTML = '<div class="lock-empty">选择可售场次后加载座位表</div>';
       renderSelection();
+    }
+
+    // 座位图来源提示: 目标场次真实座位图 / 无场次时的未来推断提醒
+    function renderSeatSource() {
+      if (!els.seatSource) return;
+      if (!state.seatMapSource) {
+        els.seatSource.classList.add("hidden");
+        return;
+      }
+      els.seatSource.textContent = state.seatMapSource;
+      els.seatSource.classList.toggle("warn", state.seatMapIsTemplate === true);
+      els.seatSource.classList.remove("hidden");
     }
 
     function seatDisplayLabel(seat) {
@@ -334,8 +349,9 @@
         const seqNo = targetShow ? String(targetShow.seqNo) : state.templateSeqNo;
         state.seatMapIsTemplate = !targetShow;
         state.seatMapSource = targetShow
-          ? `目标场次 ${targetDateStr} ${targetShow.tm || template.tm}（真实售卖状态）`
-          : `模板座位图 ${template.showDate} ${template.tm}（未开售，全部可选）`;
+          ? `展示目标场次 ${targetDateStr} ${targetShow.tm || template.tm} 的真实座位图`
+          : `${targetDateStr} 暂无场次，以下为模板场次的未来推断座位（全部可选，开售后按实际售卖为准）`;
+        renderSeatSource();
         const params = new URLSearchParams({ cinemaId: state.context.cinemaId, movieId: state.movieId, seqNo });
         const { seatMap } = await api(`/api/lock/template-seats?${params}`);
         if (state.seatMapIsTemplate && seatMap?.seats) {
@@ -492,7 +508,7 @@
     els.overlay.addEventListener("click", (event) => { if (event.target === els.overlay) close(); });
     els.movie.addEventListener("change", () => { state.movieId = els.movie.value; state.templateSeqNo = ""; renderTemplateOptions(); });
     els.template.addEventListener("change", async () => { state.templateSeqNo = els.template.value; updateTargetDateBounds(); await loadSeats(); });
-    els.date.addEventListener("change", () => { renderSeatMap(); renderSelection(); });
+    els.date.addEventListener("change", () => { loadSeats(); });
     els.risk.addEventListener("change", renderSelection);
     els.upload.addEventListener("click", uploadSession);
     els.removeSession.addEventListener("click", removeSession);
