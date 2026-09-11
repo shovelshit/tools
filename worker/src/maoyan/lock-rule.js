@@ -4,7 +4,7 @@ import { loadLockSession } from "./lock-session.js";
 import { getUserConfig, userKey } from "./user.js";
 
 const RULE_NAME = "maoyan-lock-rule";
-const TERMINAL_STATES = new Set(["completed", "failed", "cancelled"]);
+export const LOCK_RULE_TERMINAL_STATES = new Set(["locked", "expired", "failed", "unknown", "completed", "cancelled"]);
 const PUBLIC_FIELDS = [
   "id", "cinemaId", "cinemaName", "movieId", "movieName", "targetDate",
   "templateDate", "templateTime", "templateSeqNo", "seats", "state",
@@ -41,6 +41,10 @@ function assertExactInput(input) {
 
 export function validateLockRuleInput(input) {
   return assertExactInput(input);
+}
+
+export function isLockRuleTerminal(state) {
+  return LOCK_RULE_TERMINAL_STATES.has(String(state || ""));
 }
 
 function chinaDate(value) {
@@ -124,7 +128,7 @@ export function publicLockRule(rule, automationEnabled) {
 export async function createLockRule(env, tokenId, input, options = {}) {
   const values = validateLockRuleInput(input);
   const existing = await getLockRule(env, tokenId);
-  if (existing && !TERMINAL_STATES.has(existing.state)) throw new Error("已有进行中的锁座规则");
+  if (existing && !isLockRuleTerminal(existing.state)) throw new Error("已有进行中的锁座规则");
 
   const config = await getUserConfig(env, tokenId);
   if (String(config.cinemaId || "") !== values.cinemaId || !(config.selectedMovieIds || []).map(String).includes(values.movieId)) {

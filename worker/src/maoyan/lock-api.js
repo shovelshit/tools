@@ -3,16 +3,14 @@ import { fetchSeatMap } from "./lock-client.js";
 import {
   getLockSessionStatus,
   loadLockSession,
-  removeLockSession,
   saveLockSession
 } from "./lock-session.js";
 import {
   getLockRule,
   publicLockRule,
-  removeLockRule,
   validateLockRuleInput
 } from "./lock-rule.js";
-import { createLockRuleThroughCoordinator } from "./lock-runner.js";
+import { cancelLockRuleThroughCoordinator, createLockRuleThroughCoordinator, removeLockSessionThroughCoordinator } from "./lock-runner.js";
 
 const MAX_UPLOAD_BYTES = 256 * 1024;
 const DECIMAL = /^\d+$/;
@@ -44,7 +42,7 @@ function ruleInputError(error) {
 function safeError(error) {
   if (error?.kind === "input") return response({ error: error.message }, 400);
   if (ruleInputError(error)) return response({ error: error.message }, 400);
-  if (error?.kind === "missing" || /未上传猫眼会话/.test(String(error?.message || ""))) {
+  if (error?.kind === "missing" || /未上传猫眼会话|未找到锁座规则|未找到锁座资源/.test(String(error?.message || ""))) {
     return response({ error: "未找到锁座资源" }, 404);
   }
   if (/已有进行中的锁座规则/.test(String(error?.message || ""))) {
@@ -106,9 +104,7 @@ export async function handleLockApi(request, env, url, tokenId) {
       return response({ session: await getLockSessionStatus(env, tokenId) });
     }
     if (url.pathname === "/api/lock/session/remove" && request.method === "POST") {
-      const status = await getLockSessionStatus(env, tokenId);
-      if (!status.uploaded) throw missingError("未上传猫眼会话");
-      await Promise.all([removeLockSession(env, tokenId), removeLockRule(env, tokenId)]);
+      await removeLockSessionThroughCoordinator(env, tokenId);
       return response({ removed: true });
     }
     if (url.pathname === "/api/lock/template-seats" && request.method === "GET") {
@@ -132,9 +128,7 @@ export async function handleLockApi(request, env, url, tokenId) {
       return response({ rule: publicLockRule(await getLockRule(env, tokenId), false) });
     }
     if (url.pathname === "/api/lock/rule/cancel" && request.method === "POST") {
-      const rule = await getLockRule(env, tokenId);
-      if (!rule) throw missingError("未找到锁座规则");
-      await removeLockRule(env, tokenId);
+      await cancelLockRuleThroughCoordinator(env, tokenId);
       return response({ removed: true });
     }
     return response({ error: "Unknown API" }, 404);

@@ -133,6 +133,21 @@ test("allows only one non-terminal rule for a token", async () => {
   assert.notEqual(rule.id, "finished");
 });
 
+test("replaces every current terminal lock rule but retains active rules", async () => {
+  for (const state of ["locked", "expired", "failed", "unknown"]) {
+    const env = envWithConfig();
+    await putLockRule(env, "token-a", { id: `old-${state}`, state });
+    const replacement = await createLockRule(env, "token-a", validInput(), dependencies());
+    assert.notEqual(replacement.id, `old-${state}`);
+    assert.equal(replacement.state, "waiting_schedule");
+  }
+  for (const state of ["waiting_schedule", "matching"]) {
+    const env = envWithConfig();
+    await putLockRule(env, "token-a", { id: `active-${state}`, state });
+    await reject(env, validInput(), /进行中/);
+  }
+});
+
 test("projects only public rule fields and removes token-scoped rule", async () => {
   const env = envWithConfig();
   const rule = await createLockRule(env, "token-a", validInput(), dependencies());

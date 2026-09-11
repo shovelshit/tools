@@ -1,14 +1,12 @@
 import { fetchCinemaDetail } from "./api.js";
 import { findExactShows, fetchSeatMap, createUnpaidOrder, OrderAttemptError } from "./lock-client.js";
-import { loadLockSession } from "./lock-session.js";
-import { createLockRule, getLockRule, putLockRule, publicLockRule } from "./lock-rule.js";
+import { getLockSessionStatus, loadLockSession, removeLockSession } from "./lock-session.js";
+import { createLockRule, getLockRule, isLockRuleTerminal, putLockRule, removeLockRule } from "./lock-rule.js";
 import { getManagedTokens } from "./tokens.js";
 import { getUserConfig } from "./user.js";
 import { pushNotify } from "./notify.js";
 
 const TOKEN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const SKIPPED_STATES = new Set(["locked", "failed", "expired", "unknown", "matching"]);
-const TERMINAL_STATES = new Set(["locked", "failed", "expired", "unknown"]);
 
 function chinaDate(now) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -60,7 +58,7 @@ export async function runOneLockRule(env, tokenId, deps = {}) {
   if (String(env.LOCK_AUTOMATION_ENABLED) !== "true") return { ok: true, skipped: true, disabled: true };
   const getRule = deps.getRule || getLockRule;
   const rule = await getRule(env, tokenId);
-  if (!rule || SKIPPED_STATES.has(rule.state)) return { ok: true, skipped: true };
+  if (!rule || rule.state === "matching" || isLockRuleTerminal(rule.state)) return { ok: true, skipped: true };
 
   const now = (deps.now || (() => new Date()))();
   if (rule.targetDate < chinaDate(now)) return await terminal(env, tokenId, rule, "expired", { lastError: "目标场次已过期" }, deps);
@@ -73,14 +71,18 @@ export async function runOneLockRule(env, tokenId, deps = {}) {
   let show;
   let session;
   let seatMap;
+  const shouldCancel = deps.shouldCancel || (() => false);
   try {
     const cinema = await fetchCinema(rule.cinemaId);
+    if (shouldCancel()) return { ok: true, skipped: true };
     const matches = exactShows(cinema, rule);
     if (!matches.length) return { ok: true, waiting: true };
     if (matches.length !== 1) return await terminal(env, tokenId, rule, "failed", { lastError: "目标日期存在多个相同时间场次" }, deps);
     show = matches[0];
     session = await loadSession(env, tokenId);
+    if (shouldCancel()) return { ok: true, skipped: true };
     seatMap = await fetchSeats(session, { cinemaId: rule.cinemaId, movieId: rule.movieId, seqNo: String(show.seqNo) });
+    if (shouldCancel()) return { ok: true, skipped: true };
     if (String(seatMap?.seqNo) !== String(show.seqNo) || !seatsMatch(rule, seatMap)) {
       return await terminal(env, tokenId, rule, "failed", { lastError: "所选未来座位不可用或影厅布局已变化" }, deps);
     }
@@ -114,17 +116,36 @@ export class LockCoordinator {
     this.env = env;
     this.deps = deps;
     this.running = false;
+    this.cancelRequested = false;
+    this.current = null;
   }
 
   async fetch(request) {
     if (request.method !== "POST") return Response.json({ error: "Method Not Allowed" }, { status: 405 });
     if (this.running) {
+      if (["cancel", "remove-session"].includes(request.headers.get("X-Lock-Action"))) {
+        this.cancelRequested = true;
+        await this.current;
+        return await this.fetch(request);
+      }
       if (request.headers.get("X-Lock-Action") === "create") {
         return Response.json({ ok: false, error: "已有进行中的锁座规则" }, { status: 409 });
       }
       return Response.json({ ok: true, skipped: true }, { status: 202 });
     }
     this.running = true;
+    this.cancelRequested = false;
+    const operation = this.handle(request);
+    this.current = operation;
+    try {
+      return await operation;
+    } finally {
+      this.current = null;
+      this.running = false;
+    }
+  }
+
+  async handle(request) {
     try {
       const { action, tokenId, input } = await request.json();
       checkedTokenId(tokenId);
@@ -133,20 +154,31 @@ export class LockCoordinator {
         const rule = await createRule(this.env, tokenId, input, this.deps);
         return Response.json({ ok: true, rule }, { status: 201 });
       }
+      if (action === "cancel") {
+        const getRule = this.deps.getRule || getLockRule;
+        if (!await getRule(this.env, tokenId)) return Response.json({ ok: false, error: "未找到锁座规则" }, { status: 404 });
+        await (this.deps.removeRule || removeLockRule)(this.env, tokenId);
+        return Response.json({ ok: true, removed: true });
+      }
+      if (action === "remove-session") {
+        const sessionStatus = await (this.deps.getSessionStatus || getLockSessionStatus)(this.env, tokenId);
+        if (!sessionStatus?.uploaded) return Response.json({ ok: false, error: "未找到锁座资源" }, { status: 404 });
+        await (this.deps.removeSession || removeLockSession)(this.env, tokenId);
+        await (this.deps.removeRule || removeLockRule)(this.env, tokenId);
+        return Response.json({ ok: true, removed: true });
+      }
       if (action !== "run") return Response.json({ error: "Bad Request" }, { status: 400 });
       const getRule = this.deps.getRule || getLockRule;
       const rule = await getRule(this.env, tokenId);
       if (rule && await this.state.storage.get("terminalRuleId") === rule.id) return Response.json({ ok: true, skipped: true });
-      const result = await runOneLockRule(this.env, tokenId, this.deps);
+      const result = await runOneLockRule(this.env, tokenId, { ...this.deps, shouldCancel: () => this.cancelRequested });
       const latest = await getRule(this.env, tokenId);
-      if (latest && TERMINAL_STATES.has(latest.state)) await this.state.storage.put("terminalRuleId", latest.id);
+      if (latest && isLockRuleTerminal(latest.state)) await this.state.storage.put("terminalRuleId", latest.id);
       return Response.json(result);
     } catch (error) {
       return Response.json({ ok: false, error: error.message === "已有进行中的锁座规则" ? error.message : "Bad Request" }, {
         status: error.message === "已有进行中的锁座规则" ? 409 : 400
       });
-    } finally {
-      this.running = false;
     }
   }
 }
@@ -167,6 +199,24 @@ export async function createLockRuleThroughCoordinator(env, tokenId, input) {
   if (response.status === 409) throw new Error("已有进行中的锁座规则");
   if (response.status === 400) throw new Error("锁座参数无效");
   throw new Error("锁座服务暂时不可用");
+}
+
+async function removeThroughCoordinator(env, tokenId, action, missingMessage) {
+  checkedTokenId(tokenId);
+  const stub = env.LOCK_COORDINATOR.get(env.LOCK_COORDINATOR.idFromName(tokenId));
+  const response = await stub.fetch(lockRequest(action, tokenId));
+  const body = await response.json().catch(() => ({}));
+  if (response.status === 200 && body?.ok === true && body.removed === true) return true;
+  if (response.status === 404) throw new Error(missingMessage);
+  throw new Error("锁座服务暂时不可用");
+}
+
+export async function cancelLockRuleThroughCoordinator(env, tokenId) {
+  return await removeThroughCoordinator(env, tokenId, "cancel", "未找到锁座规则");
+}
+
+export async function removeLockSessionThroughCoordinator(env, tokenId) {
+  return await removeThroughCoordinator(env, tokenId, "remove-session", "未找到锁座资源");
 }
 
 export async function runScheduledLocks(env) {

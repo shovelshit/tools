@@ -170,6 +170,60 @@ test("concurrency serializes rule creation and rejects the second active rule", 
   assert.equal(creates, 1);
 });
 
+test("concurrency cancellation prevents a delayed run from creating an order or restoring its rule", async () => {
+  let release;
+  let started;
+  const delayed = new Promise((resolve) => { release = resolve; });
+  const begun = new Promise((resolve) => { started = resolve; });
+  let rulePresent = true;
+  let orderCalls = 0;
+  const stored = rule();
+  const coordinator = new LockCoordinator(coordinatorState(), runtime(), deps(stored, {
+    getRule: async () => rulePresent ? stored : null,
+    putRule: async (_env, _token, next) => { if (rulePresent) Object.assign(stored, next); },
+    removeRule: async () => { rulePresent = false; },
+    fetchCinema: async () => { started(); await delayed; return { showData: { movies: [{ id: "7", shows: [{ showDate: "2026-09-12", plist: [{ seqNo: "200", tm: "20:00" }] }] }] } }; },
+    createOrder: async () => { orderCalls++; return { orderId: "order-1", payLeftSecond: 600 }; }
+  }));
+  const run = coordinator.fetch(coordinatorRequest({ action: "run", tokenId }));
+  await begun;
+  const cancel = coordinator.fetch(coordinatorRequest({ action: "cancel", tokenId }));
+  release();
+  assert.equal((await cancel).status, 200);
+  await run;
+  assert.equal(orderCalls, 0);
+  assert.equal(rulePresent, false);
+});
+
+test("concurrency session removal prevents a delayed run from creating an order or restoring session data", async () => {
+  let release;
+  let started;
+  const delayed = new Promise((resolve) => { release = resolve; });
+  const begun = new Promise((resolve) => { started = resolve; });
+  let rulePresent = true;
+  let sessionPresent = true;
+  let orderCalls = 0;
+  const stored = rule();
+  const coordinator = new LockCoordinator(coordinatorState(), runtime(), deps(stored, {
+    getRule: async () => rulePresent ? stored : null,
+    putRule: async (_env, _token, next) => { if (rulePresent) Object.assign(stored, next); },
+    getSessionStatus: async () => ({ uploaded: sessionPresent }),
+    removeRule: async () => { rulePresent = false; },
+    removeSession: async () => { sessionPresent = false; },
+    fetchCinema: async () => { started(); await delayed; return { showData: { movies: [{ id: "7", shows: [{ showDate: "2026-09-12", plist: [{ seqNo: "200", tm: "20:00" }] }] }] } }; },
+    createOrder: async () => { orderCalls++; return { orderId: "order-1", payLeftSecond: 600 }; }
+  }));
+  const run = coordinator.fetch(coordinatorRequest({ action: "run", tokenId }));
+  await begun;
+  const removal = coordinator.fetch(coordinatorRequest({ action: "remove-session", tokenId }));
+  release();
+  assert.equal((await removal).status, 200);
+  await run;
+  assert.equal(orderCalls, 0);
+  assert.equal(rulePresent, false);
+  assert.equal(sessionPresent, false);
+});
+
 test("monitor cron reporting excludes the one-minute lock schedule", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(JSON.stringify({ success: true, result: [
