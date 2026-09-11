@@ -1,0 +1,185 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { MemoryKV } from "./helpers.js";
+import { OrderAttemptError } from "../src/maoyan/lock-client.js";
+import { LockCoordinator, runOneLockRule } from "../src/maoyan/lock-runner.js";
+import { LOCK_CRON_EXPRESSION, resolveCronExprs } from "../src/maoyan/cron.js";
+
+const tokenId = "11111111-1111-4111-8111-111111111111";
+const now = new Date("2026-09-11T04:00:00.000Z");
+
+function rule(overrides = {}) {
+  return {
+    id: "rule-a",
+    cinemaId: "25428",
+    cinemaName: "测试影院",
+    movieId: "7",
+    movieName: "测试电影",
+    targetDate: "2026-09-12",
+    templateTime: "20:00",
+    seats: [{ seatNo: "1-6-18", rowId: "6", columnId: "18", type: "N" }],
+    state: "waiting_schedule",
+    ...overrides
+  };
+}
+
+function runtime(overrides = {}) {
+  return { MAOYAN_KV: new MemoryKV(), LOCK_AUTOMATION_ENABLED: "true", ...overrides };
+}
+
+function deps(stored, overrides = {}) {
+  const saved = [];
+  return {
+    now: () => now,
+    getRule: async () => stored,
+    putRule: async (_env, _token, value) => { Object.assign(stored, value); saved.push(structuredClone(value)); },
+    fetchCinema: async () => ({ showData: { movies: [{ id: "7", shows: [{ showDate: "2026-09-12", plist: [{ seqNo: "200", tm: "20:00" }] }] }] } }),
+    findShows: (cinema, input) => cinema.showData.movies[0].shows[0].plist
+      .filter((show) => show.tm === input.templateTime)
+      .map((show) => ({ ...show, showDate: input.targetDate })),
+    loadSession: async () => ({ session: true }),
+    fetchSeats: async () => ({ seqNo: "200", sectionId: "1", sectionName: "1号厅", seats: [{ seatNo: "1-6-18", rowId: "6", columnId: "18", available: true }] }),
+    createOrder: async () => ({ orderId: "order-1", payLeftSecond: 600 }),
+    notify: async () => {},
+    saved,
+    ...overrides
+  };
+}
+
+test("automation disabled leaves a waiting rule unchanged", async () => {
+  const stored = rule();
+  const result = await runOneLockRule(runtime({ LOCK_AUTOMATION_ENABLED: "false" }), tokenId, deps(stored));
+  assert.deepEqual(result, { ok: true, skipped: true, disabled: true });
+  assert.equal(stored.state, "waiting_schedule");
+});
+
+test("automation exact HH:mm locks only selectable matching seats", async () => {
+  const stored = rule();
+  const result = await runOneLockRule(runtime(), tokenId, deps(stored));
+  assert.equal(result.ok, true);
+  assert.equal(stored.state, "locked");
+  assert.equal(stored.orderId, "order-1");
+  assert.equal(stored.payLeftSecond, 600);
+  assert.equal(stored.seqNo, "200");
+});
+
+test("automation marks a past China target date expired before provider calls", async () => {
+  const stored = rule({ targetDate: "2026-09-10" });
+  let cinemaCalls = 0;
+  await runOneLockRule(runtime(), tokenId, deps(stored, { fetchCinema: async () => { cinemaCalls++; return {}; } }));
+  assert.equal(stored.state, "expired");
+  assert.equal(cinemaCalls, 0);
+});
+
+test("automation keeps no exact HH:mm match waiting without seat request", async () => {
+  const stored = rule();
+  let seatsCalls = 0;
+  await runOneLockRule(runtime(), tokenId, deps(stored, {
+    findShows: () => [],
+    fetchSeats: async () => { seatsCalls++; return {}; }
+  }));
+  assert.equal(stored.state, "waiting_schedule");
+  assert.equal(seatsCalls, 0);
+});
+
+test("automation fails ambiguous exact HH:mm schedules without an order", async () => {
+  const stored = rule();
+  let orderCalls = 0;
+  await runOneLockRule(runtime(), tokenId, deps(stored, {
+    findShows: () => [{ seqNo: "200" }, { seqNo: "201" }],
+    createOrder: async () => { orderCalls++; return {}; }
+  }));
+  assert.equal(stored.state, "failed");
+  assert.equal(orderCalls, 0);
+});
+
+test("automation fails when a selected future seat is unavailable", async () => {
+  const stored = rule();
+  let orderCalls = 0;
+  await runOneLockRule(runtime(), tokenId, deps(stored, {
+    fetchSeats: async () => ({ seqNo: "200", seats: [{ seatNo: "1-6-18", rowId: "6", columnId: "18", available: false }] }),
+    createOrder: async () => { orderCalls++; return {}; }
+  }));
+  assert.equal(stored.state, "failed");
+  assert.equal(orderCalls, 0);
+});
+
+test("automation records certain provider rejection as failed and ambiguous order as unknown", async () => {
+  const rejected = rule();
+  await runOneLockRule(runtime(), tokenId, deps(rejected, {
+    createOrder: async () => { throw new OrderAttemptError("rejected", false); }
+  }));
+  assert.equal(rejected.state, "failed");
+
+  const unknown = rule();
+  await runOneLockRule(runtime(), tokenId, deps(unknown, {
+    createOrder: async () => { throw new OrderAttemptError("ambiguous", true); }
+  }));
+  assert.equal(unknown.state, "unknown");
+});
+
+test("automation skips terminal and matching rules forever", async () => {
+  for (const state of ["locked", "failed", "expired", "unknown", "matching"]) {
+    const stored = rule({ state });
+    let called = false;
+    const result = await runOneLockRule(runtime(), tokenId, deps(stored, { fetchCinema: async () => { called = true; return {}; } }));
+    assert.equal(result.skipped, true);
+    assert.equal(called, false);
+  }
+});
+
+function coordinatorState() {
+  const data = new Map();
+  return { storage: { get: async (key) => data.get(key), put: async (key, value) => data.set(key, value) } };
+}
+
+function coordinatorRequest(body) {
+  return new Request("https://lock-coordinator/", {
+    method: "POST", headers: { "X-Lock-Action": body.action }, body: JSON.stringify(body)
+  });
+}
+
+test("concurrency serializes a run and skips the second request", async () => {
+  let release;
+  const wait = new Promise((resolve) => { release = resolve; });
+  let calls = 0;
+  const stored = rule();
+  const coordinator = new LockCoordinator(coordinatorState(), runtime(), deps(stored, {
+    createOrder: async () => { calls++; await wait; return { orderId: "order-1", payLeftSecond: 600 }; }
+  }));
+  const first = coordinator.fetch(coordinatorRequest({ action: "run", tokenId }));
+  const second = await coordinator.fetch(coordinatorRequest({ action: "run", tokenId }));
+  assert.deepEqual(await second.json(), { ok: true, skipped: true });
+  release();
+  await first;
+  assert.equal(calls, 1);
+});
+
+test("concurrency serializes rule creation and rejects the second active rule", async () => {
+  let release;
+  const wait = new Promise((resolve) => { release = resolve; });
+  let creates = 0;
+  const coordinator = new LockCoordinator(coordinatorState(), runtime(), {
+    createRule: async () => { creates++; await wait; return { id: "rule-a" }; }
+  });
+  const first = coordinator.fetch(coordinatorRequest({ action: "create", tokenId, input: {} }));
+  const second = await coordinator.fetch(coordinatorRequest({ action: "create", tokenId, input: {} }));
+  assert.equal(second.status, 409);
+  release();
+  assert.equal((await first).status, 201);
+  assert.equal(creates, 1);
+});
+
+test("monitor cron reporting excludes the one-minute lock schedule", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ success: true, result: [
+    { cron: "*/30 * * * *" }, { cron: "* * * * *" }
+  ] }));
+  try {
+    const monitorCrons = await resolveCronExprs({ CF_API_TOKEN: "test", CF_ACCOUNT_ID: "account" });
+    assert.equal(LOCK_CRON_EXPRESSION, "* * * * *");
+    assert.deepEqual(monitorCrons, ["*/30 * * * *"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

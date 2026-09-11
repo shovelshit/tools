@@ -4,7 +4,11 @@ import { CORS, json } from "./common/http.js";
 import { NOTIFY_CHANNELS, pushBark } from "./common/notify.js";
 import { userKey, getUserConfig } from "./maoyan/user.js";
 import { CITY_LIST, fetchCinemaDetail, publicCinemaShows, searchCinemasByKw, runCheck, pushNotify, currentChannel, minBatchMinutes, describeCrons, isMinuteStepCrons, resolveCronExprs, ddlFromNow, checkAuthFull, syncCronTokens, handleAdminTokens, handleLockApi, runScheduledChecks } from "./maoyan/index.js";
+import { LOCK_CRON_EXPRESSION } from "./maoyan/cron.js";
+import { runScheduledLocks } from "./maoyan/lock-runner.js";
 import { handleStoreApi, handleStoreFile } from "./store/proxy.js";
+
+export { LockCoordinator } from "./maoyan/lock-runner.js";
 
 export default {
   async fetch(request, env) {
@@ -134,6 +138,10 @@ export default {
   },
 
   async scheduled(event, env) {
+    if (event.cron === LOCK_CRON_EXPRESSION) {
+      await runScheduledLocks(env);
+      return;
+    }
     await runScheduledChecks(env);
   }
 };

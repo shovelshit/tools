@@ -5,6 +5,8 @@ export { fetchCinemaDetail, publicCinemaShows, searchCinemasByKw } from "./api.j
 export { handleLockApi } from "./lock-api.js";
 export { runCheck } from "./check.js";
 export { currentChannel, pushNotify } from "./notify.js";
+export { runScheduledLocks, createLockRuleThroughCoordinator } from "./lock-runner.js";
+export { LOCK_CRON_EXPRESSION } from "./cron.js";
 export { parseBatchMinutes, describeCron, isMinuteStepCron, resolveCronExprs, minBatchMinutes, describeCrons, isMinuteStepCrons, CRON_EXPRESSION } from "./cron.js";
 export { MONITOR_DDL_DAYS, ddlFromNow, isExpired } from "./ddl.js";
 export { checkAuthFull, syncCronTokens, handleAdminTokens, runScheduledChecks } from "./tokens.js";

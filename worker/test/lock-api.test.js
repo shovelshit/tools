@@ -4,6 +4,7 @@ import { MemoryKV, testEncryptionKey, validSession } from "./helpers.js";
 import { publicCinemaShows } from "../src/maoyan/api.js";
 import { handleLockApi } from "../src/maoyan/lock-api.js";
 import { userKey } from "../src/maoyan/user.js";
+import { LockCoordinator } from "../src/maoyan/lock-runner.js";
 
 const secretValues = ["cookie-secret", "signature-secret", "csrf-value", "123456789"];
 
@@ -111,6 +112,26 @@ test("API response secrecy: malformed lock rules are client errors", async () =>
   }), runtime, new URL("https://worker.example/api/lock/rule"), "token-a");
   assert.equal(response.status, 400);
   await body(response);
+});
+
+test("API serializes concurrent lock rule creation through the token coordinator", async () => {
+  const runtime = env();
+  let release;
+  const delayed = new Promise((resolve) => { release = resolve; });
+  let created = 0;
+  const state = { storage: { get: async () => null, put: async () => {} } };
+  const tokenId = "11111111-1111-4111-8111-111111111111";
+  const coordinator = new LockCoordinator(state, runtime, {
+    createRule: async () => { created++; await delayed; return { id: "rule-a", state: "waiting_schedule" }; }
+  });
+  runtime.LOCK_COORDINATOR = { idFromName: (id) => id, get: () => coordinator };
+  const input = { cinemaId: "25428", movieId: "7", templateSeqNo: "100", targetDate: "2026-09-12", seatNos: ["1-6-18"], riskAccepted: true };
+  const first = handleLockApi(request("/api/lock/rule", { method: "POST", body: JSON.stringify(input) }), runtime, new URL("https://worker.example/api/lock/rule"), tokenId);
+  const second = await handleLockApi(request("/api/lock/rule", { method: "POST", body: JSON.stringify(input) }), runtime, new URL("https://worker.example/api/lock/rule"), tokenId);
+  assert.equal(second.status, 409);
+  release();
+  assert.equal((await first).status, 201);
+  assert.equal(created, 1);
 });
 
 test("API response secrecy: provider redirects are upstream errors", async () => {

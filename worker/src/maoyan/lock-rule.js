@@ -39,6 +39,10 @@ function assertExactInput(input) {
   };
 }
 
+export function validateLockRuleInput(input) {
+  return assertExactInput(input);
+}
+
 function chinaDate(value) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Shanghai",
@@ -118,7 +122,7 @@ export function publicLockRule(rule, automationEnabled) {
 }
 
 export async function createLockRule(env, tokenId, input, options = {}) {
-  const values = assertExactInput(input);
+  const values = validateLockRuleInput(input);
   const existing = await getLockRule(env, tokenId);
   if (existing && !TERMINAL_STATES.has(existing.state)) throw new Error("已有进行中的锁座规则");
 

@@ -4,6 +4,7 @@
 // 查询真实调度(支持多个 cron), Dashboard 里改 cron 也能自动同步, 常量仅作回落
 
 export const CRON_EXPRESSION = "*/30 * * * *";
+export const LOCK_CRON_EXPRESSION = "* * * * *";
 const SCRIPT_NAME = "tools-api";
 let cronCache = null; // { exprs, ts }
 
@@ -22,11 +23,12 @@ export async function resolveCronExprs(env) {
       const list = data && data.success && Array.isArray(data.result)
         ? data.result.map((s) => s && s.cron).filter(Boolean)
         : [];
-      if (list.length) exprs = list;
+      if (list.length) exprs = list.filter((expression) => expression !== LOCK_CRON_EXPRESSION);
     }
   } catch (e) {
     // 查询失败: 沿用常量
   }
+  if (!exprs.length) exprs = [CRON_EXPRESSION];
   cronCache = { exprs, ts: now };
   return exprs;
 }

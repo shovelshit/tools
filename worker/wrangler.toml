@@ -18,16 +18,25 @@ routes = [
 # 注意: 修改 crons 时需同步修改 src/maoyan/cron.js 里的 CRON_EXPRESSION
 # (监控页的批次提示与检查频率都依赖它)
 [triggers]
-crons = ["*/30 * * * *"]
+crons = ["*/30 * * * *", "* * * * *"]
 
 # ============ 环境变量 ============
 # CF_ACCOUNT_ID: 供运行时查询本 Worker 的真实 cron 调度(配合 CF_API_TOKEN secret)
 [vars]
 CF_ACCOUNT_ID = "4872db2724154d6cbee0709216b70a01"
+LOCK_AUTOMATION_ENABLED = "false"
 
 # ============ KV 绑定(令牌/用户数据/影院缓存) ============
 [[kv_namespaces]]
 binding = "MAOYAN_KV"
 id = "2027a99d8e934025b3b82ef203c4acff"
+
+[[durable_objects.bindings]]
+name = "LOCK_COORDINATOR"
+class_name = "LockCoordinator"
+
+[[migrations]]
+tag = "v1-maoyan-lock"
+new_sqlite_classes = ["LockCoordinator"]
 
 # ADMIN_TOKEN 为 secret(保护 admin 页), 控制台设置或 wrangler secret put 注入

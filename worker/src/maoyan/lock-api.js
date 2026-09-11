@@ -7,11 +7,12 @@ import {
   saveLockSession
 } from "./lock-session.js";
 import {
-  createLockRule,
   getLockRule,
   publicLockRule,
-  removeLockRule
+  removeLockRule,
+  validateLockRuleInput
 } from "./lock-rule.js";
+import { createLockRuleThroughCoordinator } from "./lock-runner.js";
 
 const MAX_UPLOAD_BYTES = 256 * 1024;
 const DECIMAL = /^\d+$/;
@@ -124,7 +125,8 @@ export async function handleLockApi(request, env, url, tokenId) {
       } catch {
         throw inputError("锁座参数无效");
       }
-      return response({ rule: await createLockRule(env, tokenId, body) }, 201);
+      validateLockRuleInput(body);
+      return response({ rule: await createLockRuleThroughCoordinator(env, tokenId, body) }, 201);
     }
     if (url.pathname === "/api/lock/rule" && request.method === "GET") {
       return response({ rule: publicLockRule(await getLockRule(env, tokenId), false) });
