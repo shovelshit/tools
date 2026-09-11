@@ -71,8 +71,8 @@ function assertTargetDate(targetDate, templateDate, now) {
   const targetDay = dayNumber(targetDate);
   const templateDay = dayNumber(templateDate);
   const today = dayNumber(chinaDate(now));
-  if (targetDay === null || templateDay === null || targetDay <= templateDay || targetDay - today > 30) {
-    throw new Error("目标日期必须晚于模板场次且在未来 30 天内");
+  if (targetDay === null || templateDay === null || targetDay < today || targetDay < templateDay || targetDay - today > 30) {
+    throw new Error("目标日期需在今天起 30 天内，且不早于模板场次日期");
   }
 }
 
@@ -91,10 +91,10 @@ function scheduleForTemplate(data, movieId, seqNo) {
   throw new Error("模板场次不属于当前影院影片");
 }
 
-function selectedSeats(seatMap, seatNos) {
+function selectedSeats(seatMap, seatNos, { ignoreAvailability = false } = {}) {
   const byNumber = new Map((seatMap?.seats || []).map((seat) => [String(seat.seatNo), seat]));
   const selected = seatNos.map((number) => byNumber.get(number));
-  if (selected.some((seat) => !seat || !seat.available)) throw new Error("所选座位不可用");
+  if (selected.some((seat) => !seat || (!seat.available && !ignoreAvailability))) throw new Error("所选座位不可用");
   return selected.map((seat) => ({
     seatNo: String(seat.seatNo),
     rowId: String(seat.rowId),
@@ -149,7 +149,9 @@ export async function createLockRule(env, tokenId, input, options = {}) {
     seqNo: values.templateSeqNo
   });
   if (String(seatMap?.seqNo) !== values.templateSeqNo) throw new Error("猫眼座位图场次无效");
-  const seats = selectedSeats(seatMap, values.seatNos);
+  // 模板座位图的售卖状态只对当天同场次有意义; 未来日期尚未开售, 座位全部视为可锁
+  const ignoreAvailability = dayNumber(values.targetDate) > dayNumber(template.date);
+  const seats = selectedSeats(seatMap, values.seatNos, { ignoreAvailability });
   const timestamp = new Date(now).toISOString();
   const rule = {
     id: crypto.randomUUID(),

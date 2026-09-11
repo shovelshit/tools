@@ -36,7 +36,7 @@ function providerError(error) {
 }
 
 function ruleInputError(error) {
-  return /^(锁座参数无效|请确认锁座风险提示|所选座位(?:无效|不可用)|影片未在当前影院监控配置中选择|模板场次不属于当前影院影片|目标日期必须晚于模板场次且在未来 30 天内|猫眼场次数据无效|猫眼座位图场次无效)$/.test(String(error?.message || ""));
+  return /^(锁座参数无效|请确认锁座风险提示|所选座位(?:无效|不可用)|影片未在当前影院监控配置中选择|模板场次不属于当前影院影片|目标日期需在今天起 30 天内，且不早于模板场次日期|猫眼场次数据无效|猫眼座位图场次无效)$/.test(String(error?.message || ""));
 }
 
 function safeError(error) {

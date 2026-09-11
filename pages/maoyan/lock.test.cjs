@@ -36,15 +36,15 @@ test("lock utilities expose selectable current-show templates only", () => {
 test("lock utilities derive China date bounds and submit readiness", () => {
   const { lockUtils } = loadLockModule();
   const bounds = lockUtils.chinaDateBounds(new Date("2026-09-11T16:30:00.000Z"));
-  assert.deepEqual(JSON.parse(JSON.stringify(bounds)), { min: "2026-09-13", max: "2026-10-12" });
+  assert.deepEqual(JSON.parse(JSON.stringify(bounds)), { min: "2026-09-12", max: "2026-10-12" });
 
   assert.equal(lockUtils.isReadyToSubmit({
     session: { uploaded: true }, templateSeqNo: "100", selectedSeatNos: new Set(["1-6-18"]),
-    targetDate: "2026-09-13", riskAccepted: true
+    targetDate: "2026-09-12", riskAccepted: true
   }), true);
   assert.equal(lockUtils.isReadyToSubmit({
     session: { uploaded: true }, templateSeqNo: "100", selectedSeatNos: new Set(),
-    targetDate: "2026-09-13", riskAccepted: true
+    targetDate: "2026-09-12", riskAccepted: true
   }), false);
 });
 
@@ -54,22 +54,31 @@ test("lock utilities shorten displayed seat numbers without altering the full id
   assert.equal(lockUtils.seatLabel("unexpected"), "unexpected");
 });
 
-test("lock utilities require an active connection before enabling lock configuration", () => {
+test("lock utilities require a loaded cinema before enabling lock configuration", () => {
   const { lockUtils } = loadLockModule();
-  assert.equal(lockUtils.isLockAvailable({ connected: true, cinemaId: "25428", movies: [{ checked: true }] }), true);
-  assert.equal(lockUtils.isLockAvailable({ connected: false, cinemaId: "25428", movies: [{ checked: true }] }), false);
+  assert.equal(lockUtils.isLockAvailable({ connected: true, cinemaId: "25428", cinemaLoaded: true }), true);
+  assert.equal(lockUtils.isLockAvailable({ connected: true, cinemaId: "25428", cinemaLoaded: false }), false);
+  assert.equal(lockUtils.isLockAvailable({ connected: false, cinemaId: "25428", cinemaLoaded: true }), false);
 });
 
-test("lock utilities constrain targets to the day after a future template", () => {
+test("lock utilities allow same-day and template-date targets", () => {
   const { lockUtils } = loadLockModule();
   const now = new Date("2026-09-11T01:00:00.000Z");
+  // 模板场次在 09-20: 目标日期不早于模板场次
   const bounds = lockUtils.lockDateBounds("2026-09-20", now);
-  assert.deepEqual(JSON.parse(JSON.stringify(bounds)), { min: "2026-09-21", max: "2026-10-11", valid: true });
-
+  assert.deepEqual(JSON.parse(JSON.stringify(bounds)), { min: "2026-09-20", max: "2026-10-11", valid: true });
   assert.equal(lockUtils.isReadyToSubmit({
     session: { uploaded: true }, templateSeqNo: "100", selectedSeatNos: new Set(["1-6-18"]),
     targetDate: "2026-09-20", riskAccepted: true, dateBounds: bounds
-  }), false);
+  }), true);
+
+  // 模板场次是今天: 目标日期允许当天
+  const todayBounds = lockUtils.lockDateBounds("2026-09-11", now);
+  assert.deepEqual(JSON.parse(JSON.stringify(todayBounds)), { min: "2026-09-11", max: "2026-10-11", valid: true });
+  assert.equal(lockUtils.isReadyToSubmit({
+    session: { uploaded: true }, templateSeqNo: "100", selectedSeatNos: new Set(["1-6-18"]),
+    targetDate: "2026-09-11", riskAccepted: true, dateBounds: todayBounds
+  }), true);
 });
 
 test("lock utilities block duplicate submission for an active rule", () => {

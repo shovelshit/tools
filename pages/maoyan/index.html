@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>猫眼影院场次监控 - 云端版</title>
-  <link rel="stylesheet" href="style.css?v=20260911n" />
+  <link rel="stylesheet" href="style.css?v=20260911o" />
 </head>
 <body>
   <!-- 登录层: 首次进入 / 切换连接时显示 -->
@@ -98,7 +98,7 @@
           <div class="row">
             <span class="spacer"></span>
             <button id="btn-lock-seats" class="btn small ghost" disabled title="配置自动锁座">
-              <span aria-hidden="true">🔒</span><span>锁座 Beta</span>
+              <span aria-hidden="true">🔒</span><span>锁座（Beta）</span>
             </button>
             <button id="btn-toggle-monitor" class="btn small ghost danger">停止监控</button>
           </div>
@@ -150,7 +150,7 @@
     <section class="lock-dialog" role="dialog" aria-modal="true" aria-labelledby="lock-dialog-title">
       <header class="lock-dialog-header">
         <div>
-          <h2 id="lock-dialog-title">自动锁座 Beta</h2>
+          <h2 id="lock-dialog-title">锁座（Beta）</h2>
           <p>仅创建待支付订单，不会调用支付接口</p>
         </div>
         <button id="btn-lock-close" class="icon-btn" type="button" aria-label="关闭" title="关闭">×</button>
@@ -186,6 +186,13 @@
             <h3>座位选择</h3>
             <div class="lock-legend" aria-label="座位图图例"><span class="legend-seat available"></span>可选 <span class="legend-seat selected"></span>已选 <span class="legend-seat unavailable"></span>不可选</div>
           </div>
+          <div class="lock-zoom-bar">
+            <span class="muted">缩放</span>
+            <button id="btn-lock-zoom-out" class="btn small ghost" type="button" aria-label="缩小">－</button>
+            <span id="lock-zoom-label">100%</span>
+            <button id="btn-lock-zoom-in" class="btn small ghost" type="button" aria-label="放大">＋</button>
+            <button id="btn-lock-zoom-reset" class="btn small ghost" type="button">重置</button>
+          </div>
           <div class="lock-screen">银幕方向</div>
           <div class="lock-seat-scroll"><div id="lock-seat-grid" class="lock-seat-rows"><div class="lock-empty">选择可售场次后加载座位表</div></div></div>
           <p id="lock-seat-count" class="lock-status">尚未选择座位</p>
@@ -210,9 +217,9 @@
     </section>
   </div>
 
-  <script src="secure-store.js?v=20260911n"></script>
-  <script src="ui.js?v=20260911n"></script>
-  <script src="lock.js?v=20260911n"></script>
-  <script src="app.js?v=20260911n"></script>
+  <script src="secure-store.js?v=20260911o"></script>
+  <script src="ui.js?v=20260911o"></script>
+  <script src="lock.js?v=20260911o"></script>
+  <script src="app.js?v=20260911o"></script>
 </body>
 </html>

@@ -23,22 +23,15 @@
   }
 
   function chinaDateBounds(now = new Date()) {
-    return { min: addChinaDays(now, 1), max: addChinaDays(now, 30) };
-  }
-
-  function addCalendarDays(dateString, days) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateString || "")) return "";
-    const date = new Date(`${dateString}T00:00:00.000Z`);
-    if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== dateString) return "";
-    date.setUTCDate(date.getUTCDate() + days);
-    return date.toISOString().slice(0, 10);
+    return { min: addChinaDays(now, 0), max: addChinaDays(now, 30) };
   }
 
   function lockDateBounds(templateDate, now = new Date()) {
-    const generalBounds = chinaDateBounds(now);
-    const afterTemplate = addCalendarDays(templateDate, 1);
-    const min = afterTemplate && afterTemplate > generalBounds.min ? afterTemplate : generalBounds.min;
-    return { min, max: generalBounds.max, valid: min <= generalBounds.max };
+    const today = chinaDate(now);
+    const max = addChinaDays(now, 30);
+    // 目标日期允许当天: 不早于今天, 且不早于模板场次日期
+    const min = templateDate && templateDate > today ? templateDate : today;
+    return { min, max, valid: min <= max };
   }
 
   function templatesFromMovies(movies) {
@@ -69,8 +62,8 @@
     return Boolean(session?.uploaded && templateSeqNo && selectedSeatNos?.size && /^\d{4}-\d{2}-\d{2}$/.test(targetDate) && riskAccepted && boundsValid && !isActiveLockRule(rule));
   }
 
-  function isLockAvailable({ connected, cinemaId, movies }) {
-    return Boolean(connected && cinemaId && movies?.length);
+  function isLockAvailable({ connected, cinemaId, cinemaLoaded }) {
+    return Boolean(connected && cinemaId && cinemaLoaded);
   }
 
   function createMaoyanLockController({ api, getContext, onLog }) {
@@ -81,15 +74,26 @@
       file: $("lock-session-file"), upload: $("btn-lock-upload"), removeSession: $("btn-lock-remove-session"),
       sessionStatus: $("lock-session-status"), seatGrid: $("lock-seat-grid"), seatCount: $("lock-seat-count"),
       risk: $("lock-risk-accepted"), ruleStatus: $("lock-rule-status"), cancelRule: $("btn-lock-cancel-rule"),
-      cancel: $("btn-lock-cancel"), submit: $("btn-lock-submit")
+      cancel: $("btn-lock-cancel"), submit: $("btn-lock-submit"),
+      zoomIn: $("btn-lock-zoom-in"), zoomOut: $("btn-lock-zoom-out"), zoomReset: $("btn-lock-zoom-reset"), zoomLabel: $("lock-zoom-label")
     };
     const state = {
       context: null, session: { uploaded: false }, movieId: "", templateSeqNo: "", seatMap: null,
-      selectedSeatNos: new Set(), rule: null, automationEnabled: false, templates: [], dateBounds: lockDateBounds()
+      selectedSeatNos: new Set(), rule: null, automationEnabled: false, templates: [], dateBounds: lockDateBounds(),
+      zoom: 1
     };
 
     function show(message, type = "info") {
       if (typeof root.showToast === "function") root.showToast(message, type);
+    }
+
+    function buttonLoading(btn, text, task) {
+      if (typeof root.withButtonLoading === "function") return root.withButtonLoading(btn, text, task);
+      return task();
+    }
+
+    function loadingHtml(text) {
+      return `<span class="spinner"></span>${text}`;
     }
 
     function setHidden(el, hidden) { el?.classList.toggle("hidden", hidden); }
@@ -105,12 +109,34 @@
       renderSelection();
     }
 
+    function seatDisplayLabel(seat) {
+      return `${seat.rowId}排${seat.columnId}座`;
+    }
+
+    function seatLabelMap() {
+      const map = new Map();
+      for (const seat of state.seatMap?.seats || []) {
+        map.set(String(seat.seatNo), seatDisplayLabel(seat));
+      }
+      return map;
+    }
+
+    // 未来日期的场次尚未开售, 模板座位图的"已售"状态没有参考意义: 全部视为可选
+    function targetDate() {
+      return els.date?.value || "";
+    }
+
+    function isFutureTarget() {
+      return Boolean(targetDate()) && targetDate() > chinaDate(new Date());
+    }
+
     function renderSelection() {
-      const seats = [...state.selectedSeatNos];
+      const labels = seatLabelMap();
+      const seats = [...state.selectedSeatNos].map((seatNo) => labels.get(seatNo) || seatNo);
       if (els.seatCount) els.seatCount.textContent = seats.length ? `已选 ${seats.length} 座：${seats.join("、")}` : "尚未选择座位";
       if (els.submit) els.submit.disabled = !isReadyToSubmit({
         session: state.session, templateSeqNo: state.templateSeqNo, selectedSeatNos: state.selectedSeatNos,
-        targetDate: els.date?.value || "", riskAccepted: els.risk?.checked, dateBounds: state.dateBounds, rule: state.rule
+        targetDate: targetDate(), riskAccepted: els.risk?.checked, dateBounds: state.dateBounds, rule: state.rule
       });
     }
 
@@ -200,6 +226,8 @@
         els.seatGrid.innerHTML = '<div class="lock-empty">该场次暂无可用座位图</div>';
         return;
       }
+      // 未来日期: 座位尚未开售, 全部视为可选; 当天场次按真实售卖状态展示
+      const treatAllAvailable = isFutureTarget();
       const rows = new Map();
       for (const seat of seats) {
         if (!/^\d+$/.test(String(seat.rowId)) || !/^\d+$/.test(String(seat.columnId))) continue;
@@ -218,13 +246,14 @@
         for (const seat of rowSeats) {
           const button = document.createElement("button");
           button.type = "button";
-          button.className = `lock-seat${seat.available ? " available" : " unavailable"}`;
+          const available = treatAllAvailable || seat.available;
+          button.className = `lock-seat${available ? " available" : " unavailable"}`;
           button.style.gridColumn = String(Number(seat.columnId));
-          button.textContent = seatLabel(seat.seatNo);
-          button.title = String(seat.seatNo);
-          button.disabled = !seat.available;
+          button.textContent = String(seat.columnId);
+          button.title = seatDisplayLabel(seat) + (available ? "" : "（当前不可选）");
+          button.disabled = !available;
           button.classList.toggle("selected", state.selectedSeatNos.has(String(seat.seatNo)));
-          if (seat.available) {
+          if (available) {
             button.addEventListener("click", () => {
               const key = String(seat.seatNo);
               if (state.selectedSeatNos.has(key)) state.selectedSeatNos.delete(key);
@@ -241,11 +270,26 @@
       renderSelection();
     }
 
+    function applyZoom() {
+      if (els.seatGrid) els.seatGrid.style.transform = `scale(${state.zoom})`;
+      if (els.zoomLabel) els.zoomLabel.textContent = `${Math.round(state.zoom * 100)}%`;
+    }
+
+    function changeZoom(delta) {
+      state.zoom = Math.min(2, Math.max(0.4, Math.round((state.zoom + delta) * 10) / 10));
+      applyZoom();
+    }
+
+    function resetZoom() {
+      state.zoom = 1;
+      applyZoom();
+    }
+
     async function loadSeats() {
       const template = templateForCurrent();
       resetSeats();
       if (!template || template.disabled || !state.context?.cinemaId) return;
-      els.seatGrid.innerHTML = '<div class="lock-empty">正在加载座位表...</div>';
+      els.seatGrid.innerHTML = loadingHtml("正在加载座位表...");
       try {
         const params = new URLSearchParams({ cinemaId: state.context.cinemaId, movieId: state.movieId, seqNo: state.templateSeqNo });
         const { seatMap } = await api(`/api/lock/template-seats?${params}`);
@@ -271,6 +315,8 @@
     }
 
     async function refreshRemoteState() {
+      if (els.sessionStatus) els.sessionStatus.innerHTML = loadingHtml("正在加载锁座状态...");
+      if (els.ruleStatus) els.ruleStatus.innerHTML = loadingHtml("正在加载锁座状态...");
       const [sessionResult, ruleResult] = await Promise.allSettled([
         api("/api/lock/session/status"), api("/api/lock/rule")
       ]);
@@ -288,38 +334,42 @@
         els.file.value = "";
         return show("会话文件不能超过 256KiB", "error");
       }
-      let sessionText = "";
-      try {
-        sessionText = await file.text();
-        const { session } = await api("/api/lock/session", { method: "POST", body: sessionText });
-        state.session = session || { uploaded: false };
-        renderSession();
-        renderSelection();
-        show("猫眼会话已加密保存", "success");
-        onLog?.("ok", "猫眼会话已上传，用于锁座 Beta");
-      } catch (error) {
-        show(error.message || "上传失败", "error");
-      } finally {
-        sessionText = "";
-        els.file.value = "";
-      }
+      await buttonLoading(els.upload, "上传中...", async () => {
+        let sessionText = "";
+        try {
+          sessionText = await file.text();
+          const { session } = await api("/api/lock/session", { method: "POST", body: sessionText });
+          state.session = session || { uploaded: false };
+          renderSession();
+          renderSelection();
+          show("猫眼会话已加密保存", "success");
+          onLog?.("ok", "猫眼会话已上传，用于锁座（Beta）");
+        } catch (error) {
+          show(error.message || "上传失败", "error");
+        } finally {
+          sessionText = "";
+          els.file.value = "";
+        }
+      });
     }
 
     async function removeSession() {
       const confirmed = await root.showConfirm("删除后将不能查询座位或自动锁座，是否继续？", { title: "删除猫眼会话", okText: "删除", danger: true });
       if (!confirmed) return;
-      try {
-        await api("/api/lock/session/remove", { method: "POST" });
-        state.session = { uploaded: false };
-        state.rule = null;
-        state.automationEnabled = false;
-        resetSeats();
-        renderSession();
-        renderRule();
-        show("猫眼会话已删除", "success");
-      } catch (error) {
-        show(error.message || "删除失败", "error");
-      }
+      await buttonLoading(els.removeSession, "删除中...", async () => {
+        try {
+          await api("/api/lock/session/remove", { method: "POST" });
+          state.session = { uploaded: false };
+          state.rule = null;
+          state.automationEnabled = false;
+          resetSeats();
+          renderSession();
+          renderRule();
+          show("猫眼会话已删除", "success");
+        } catch (error) {
+          show(error.message || "删除失败", "error");
+        }
+      });
     }
 
     async function createRule() {
@@ -327,30 +377,34 @@
         cinemaId: state.context.cinemaId, movieId: state.movieId, templateSeqNo: state.templateSeqNo,
         targetDate: els.date.value, seatNos: [...state.selectedSeatNos], riskAccepted: els.risk.checked
       };
-      try {
-        const { rule } = await api("/api/lock/rule", { method: "POST", body: JSON.stringify(payload) });
-        state.rule = rule || null;
-        state.automationEnabled = Boolean(rule?.automationEnabled);
-        renderRule();
-        show(state.automationEnabled ? "自动锁座规则已启用" : "规则已保存，等待服务验证", "success");
-        onLog?.("ok", "自动锁座 Beta 规则已保存");
-      } catch (error) {
-        show(error.message || "保存锁座规则失败", "error");
-      }
+      await buttonLoading(els.submit, "提交中...", async () => {
+        try {
+          const { rule } = await api("/api/lock/rule", { method: "POST", body: JSON.stringify(payload) });
+          state.rule = rule || null;
+          state.automationEnabled = Boolean(rule?.automationEnabled);
+          renderRule();
+          show(state.automationEnabled ? "自动锁座规则已启用" : "规则已保存，等待服务验证", "success");
+          onLog?.("ok", "锁座（Beta）规则已保存");
+        } catch (error) {
+          show(error.message || "保存锁座规则失败", "error");
+        }
+      });
     }
 
     async function cancelRule() {
       const confirmed = await root.showConfirm("取消后不会影响已上传的猫眼会话，是否继续？", { title: "取消锁座规则", okText: "取消规则", danger: true });
       if (!confirmed) return;
-      try {
-        await api("/api/lock/rule/cancel", { method: "POST" });
-        state.rule = null;
-        state.automationEnabled = false;
-        renderRule();
-        show("锁座规则已取消", "success");
-      } catch (error) {
-        show(error.message || "取消失败", "error");
-      }
+      await buttonLoading(els.cancelRule, "取消中...", async () => {
+        try {
+          await api("/api/lock/rule/cancel", { method: "POST" });
+          state.rule = null;
+          state.automationEnabled = false;
+          renderRule();
+          show("锁座规则已取消", "success");
+        } catch (error) {
+          show(error.message || "取消失败", "error");
+        }
+      });
     }
 
     function close() {
@@ -364,7 +418,7 @@
       const context = getContext();
       const available = isLockAvailable(context || {});
       els.button.disabled = !available;
-      els.button.title = available ? "配置自动锁座" : "请先加载影院并勾选至少一部影片";
+      els.button.title = available ? "配置自动锁座" : "请先在影院设置中点击「加载」";
       return available;
     }
 
@@ -390,12 +444,15 @@
     els.overlay.addEventListener("click", (event) => { if (event.target === els.overlay) close(); });
     els.movie.addEventListener("change", () => { state.movieId = els.movie.value; state.templateSeqNo = ""; renderTemplateOptions(); });
     els.template.addEventListener("change", async () => { state.templateSeqNo = els.template.value; updateTargetDateBounds(); await loadSeats(); });
-    els.date.addEventListener("change", renderSelection);
+    els.date.addEventListener("change", () => { renderSeatMap(); renderSelection(); });
     els.risk.addEventListener("change", renderSelection);
     els.upload.addEventListener("click", uploadSession);
     els.removeSession.addEventListener("click", removeSession);
     els.submit.addEventListener("click", createRule);
     els.cancelRule.addEventListener("click", cancelRule);
+    els.zoomIn.addEventListener("click", () => changeZoom(0.2));
+    els.zoomOut.addEventListener("click", () => changeZoom(-0.2));
+    els.zoomReset.addEventListener("click", resetZoom);
     resetSeats();
 
     return { syncAvailability, open };
