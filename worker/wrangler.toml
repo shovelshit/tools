@@ -25,6 +25,7 @@ crons = ["*/30 * * * *", "* * * * *"]
 [vars]
 CF_ACCOUNT_ID = "4872db2724154d6cbee0709216b70a01"
 LOCK_AUTOMATION_ENABLED = "false"
+LOCK_SERVICE_ENABLED = "false"
 
 # ============ KV 绑定(令牌/用户数据/影院缓存) ============
 [[kv_namespaces]]

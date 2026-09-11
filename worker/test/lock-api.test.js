@@ -13,7 +13,8 @@ function env() {
     MAOYAN_KV: new MemoryKV({
       [userKey("token-a", "config")]: JSON.stringify({ cinemaId: "25428", selectedMovieIds: ["7"] })
     }),
-    SESSION_ENCRYPTION_KEY: testEncryptionKey()
+    SESSION_ENCRYPTION_KEY: testEncryptionKey(),
+    LOCK_SERVICE_ENABLED: "true"
   };
 }
 
@@ -47,6 +48,18 @@ test("projection includes only public show identifiers", () => {
       }] }]
     }]
   });
+});
+
+test("lock API is unavailable while the service switch is disabled", async () => {
+  const runtime = { ...env(), LOCK_SERVICE_ENABLED: "false" };
+  const response = await handleLockApi(
+    request("/api/lock/session/status"),
+    runtime,
+    new URL("https://worker.example/api/lock/session/status"),
+    "token-a"
+  );
+  assert.equal(response.status, 503);
+  assert.deepEqual(await body(response), { ok: false, error: "锁座服务暂时不可用" });
 });
 
 test("API response secrecy: session routes expose only masked session status", async () => {

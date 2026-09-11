@@ -96,6 +96,9 @@ async function requireSession(env, tokenId) {
 
 export async function handleLockApi(request, env, url, tokenId) {
   if (!url.pathname.startsWith("/api/lock/")) return null;
+  if (env.LOCK_SERVICE_ENABLED !== "true") {
+    return response({ error: "锁座服务暂时不可用" }, 503);
+  }
   try {
     if (url.pathname === "/api/lock/session" && request.method === "POST") {
       return response({ session: await saveLockSession(env, tokenId, await uploadBody(request)) });
