@@ -121,22 +121,18 @@
       return map;
     }
 
-    // 未来日期的场次尚未开售, 模板座位图的"已售"状态没有参考意义: 全部视为可选
-    function targetDate() {
-      return els.date?.value || "";
-    }
-
-    function isFutureTarget() {
-      return Boolean(targetDate()) && targetDate() > chinaDate(new Date());
-    }
-
     function renderSelection() {
       const labels = seatLabelMap();
       const seats = [...state.selectedSeatNos].map((seatNo) => labels.get(seatNo) || seatNo);
-      if (els.seatCount) els.seatCount.textContent = seats.length ? `已选 ${seats.length} 座：${seats.join("、")}` : "尚未选择座位";
+      if (els.seatCount) {
+        const source = state.seatMapSource ? `${state.seatMapSource} · ` : "";
+        els.seatCount.textContent = seats.length
+          ? `${source}已选 ${seats.length} 座：${seats.join("、")}`
+          : `${source}尚未选择座位`;
+      }
       if (els.submit) els.submit.disabled = !isReadyToSubmit({
         session: state.session, templateSeqNo: state.templateSeqNo, selectedSeatNos: state.selectedSeatNos,
-        targetDate: targetDate(), riskAccepted: els.risk?.checked, dateBounds: state.dateBounds, rule: state.rule
+        targetDate: els.date?.value || "", riskAccepted: els.risk?.checked, dateBounds: state.dateBounds, rule: state.rule
       });
     }
 
@@ -219,6 +215,14 @@
       resetSeats();
     }
 
+    function couplePartner(seat) {
+      if (seat.type !== "L" && seat.type !== "R") return null;
+      const opposite = seat.type === "L" ? "R" : "L";
+      return (state.seatMap?.seats || []).find((candidate) =>
+        candidate.type === opposite && String(candidate.rowId) === String(seat.rowId) &&
+        Math.abs(Number(candidate.columnId) - Number(seat.columnId)) === 1) || null;
+    }
+
     function renderSeatMap() {
       els.seatGrid.innerHTML = "";
       const seats = state.seatMap?.seats || [];
@@ -226,8 +230,6 @@
         els.seatGrid.innerHTML = '<div class="lock-empty">该场次暂无可用座位图</div>';
         return;
       }
-      // 未来日期: 座位尚未开售, 全部视为可选; 当天场次按真实售卖状态展示
-      const treatAllAvailable = isFutureTarget();
       const rows = new Map();
       for (const seat of seats) {
         if (!/^\d+$/.test(String(seat.rowId)) || !/^\d+$/.test(String(seat.columnId))) continue;
@@ -235,7 +237,27 @@
         if (!rows.has(key)) rows.set(key, []);
         rows.get(key).push(seat);
       }
-      for (const [rowId, rowSeats] of [...rows.entries()].sort((a, b) => Number(a[0]) - Number(b[0]))) {
+      const orderedRows = [...rows.entries()].sort((a, b) => Number(a[0]) - Number(b[0]));
+      // 列号表头(与猫眼一致)
+      const allCols = seats.map((seat) => Number(seat.columnId)).filter(Number.isFinite);
+      if (allCols.length) {
+        const header = document.createElement("div");
+        header.className = "lock-seat-row";
+        const headerLabel = document.createElement("span");
+        headerLabel.className = "lock-row-label";
+        const headerGrid = document.createElement("div");
+        headerGrid.className = "lock-seat-grid";
+        for (let col = Math.min(...allCols); col <= Math.max(...allCols); col++) {
+          const cell = document.createElement("span");
+          cell.className = "lock-col-label";
+          cell.style.gridColumn = String(col);
+          cell.textContent = String(col);
+          headerGrid.append(cell);
+        }
+        header.append(headerLabel, headerGrid);
+        els.seatGrid.append(header);
+      }
+      for (const [rowId, rowSeats] of orderedRows) {
         const row = document.createElement("div");
         row.className = "lock-seat-row";
         const label = document.createElement("span");
@@ -246,19 +268,29 @@
         for (const seat of rowSeats) {
           const button = document.createElement("button");
           button.type = "button";
-          const available = treatAllAvailable || seat.available;
-          button.className = `lock-seat${available ? " available" : " unavailable"}`;
+          const available = seat.available;
+          const loverClass = seat.type === "L" ? " lover-left" : seat.type === "R" ? " lover-right" : "";
+          button.className = `lock-seat${available ? " available" : " unavailable"}${loverClass}`;
           button.style.gridColumn = String(Number(seat.columnId));
           button.textContent = String(seat.columnId);
-          button.title = seatDisplayLabel(seat) + (available ? "" : "（当前不可选）");
+          button.title = `${seatDisplayLabel(seat)}${loverClass ? " · 情侣座需成对选择" : ""}${available ? "" : "（不可选）"}`;
           button.disabled = !available;
+          button.dataset.seatNo = String(seat.seatNo);
           button.classList.toggle("selected", state.selectedSeatNos.has(String(seat.seatNo)));
           if (available) {
             button.addEventListener("click", () => {
-              const key = String(seat.seatNo);
-              if (state.selectedSeatNos.has(key)) state.selectedSeatNos.delete(key);
-              else state.selectedSeatNos.add(key);
-              button.classList.toggle("selected", state.selectedSeatNos.has(key));
+              // 情侣座成对选择: 点一个自动带上相邻的另一半
+              const keys = [String(seat.seatNo)];
+              const partner = couplePartner(seat);
+              if (partner) keys.push(String(partner.seatNo));
+              const allSelected = keys.every((key) => state.selectedSeatNos.has(key));
+              for (const key of keys) {
+                if (allSelected) state.selectedSeatNos.delete(key);
+                else state.selectedSeatNos.add(key);
+              }
+              for (const el of grid.children) {
+                if (el.dataset.seatNo) el.classList.toggle("selected", state.selectedSeatNos.has(el.dataset.seatNo));
+              }
               renderSelection();
             });
           }
@@ -291,8 +323,24 @@
       if (!template || template.disabled || !state.context?.cinemaId) return;
       els.seatGrid.innerHTML = loadingHtml("正在加载座位表...");
       try {
-        const params = new URLSearchParams({ cinemaId: state.context.cinemaId, movieId: state.movieId, seqNo: state.templateSeqNo });
+        // 目标日期已有排期: 直接展示目标场次的真实座位图; 否则用模板座位图(未开售, 全部可选)
+        const targetDateStr = els.date?.value || "";
+        const targetShows = (state.context.movies || [])
+          .filter((movie) => String(movie.id) === state.movieId)
+          .flatMap((movie) => (movie.shows || []).filter((day) => String(day.showDate || day.dt || "") === targetDateStr))
+          .flatMap((day) => (day.plist || []).filter(Boolean))
+          .filter((show) => /^\d+$/.test(String(show.seqNo || "")));
+        const targetShow = targetShows.find((show) => Number(show.ticketStatus) === 0) || targetShows[0] || null;
+        const seqNo = targetShow ? String(targetShow.seqNo) : state.templateSeqNo;
+        state.seatMapIsTemplate = !targetShow;
+        state.seatMapSource = targetShow
+          ? `目标场次 ${targetDateStr} ${targetShow.tm || template.tm}（真实售卖状态）`
+          : `模板座位图 ${template.showDate} ${template.tm}（未开售，全部可选）`;
+        const params = new URLSearchParams({ cinemaId: state.context.cinemaId, movieId: state.movieId, seqNo });
         const { seatMap } = await api(`/api/lock/template-seats?${params}`);
+        if (state.seatMapIsTemplate && seatMap?.seats) {
+          seatMap.seats = seatMap.seats.map((seat) => ({ ...seat, available: true }));
+        }
         state.seatMap = seatMap;
         renderSeatMap();
       } catch (error) {
@@ -453,6 +501,35 @@
     els.zoomIn.addEventListener("click", () => changeZoom(0.2));
     els.zoomOut.addEventListener("click", () => changeZoom(-0.2));
     els.zoomReset.addEventListener("click", resetZoom);
+    // Ctrl/Cmd+滚轮缩放, 双指捏合缩放; 普通滚轮保持滚动
+    const scrollEl = els.seatGrid.closest(".lock-seat-scroll");
+    if (scrollEl) {
+      scrollEl.addEventListener("wheel", (event) => {
+        if (!(event.ctrlKey || event.metaKey)) return;
+        event.preventDefault();
+        changeZoom(event.deltaY < 0 ? 0.1 : -0.1);
+      }, { passive: false });
+      let pinch = null;
+      scrollEl.addEventListener("touchstart", (event) => {
+        if (event.touches.length === 2) {
+          pinch = {
+            dist: Math.hypot(event.touches[0].clientX - event.touches[1].clientX, event.touches[0].clientY - event.touches[1].clientY),
+            zoom: state.zoom
+          };
+          event.preventDefault();
+        }
+      }, { passive: false });
+      scrollEl.addEventListener("touchmove", (event) => {
+        if (!pinch || event.touches.length !== 2) return;
+        event.preventDefault();
+        const dist = Math.hypot(event.touches[0].clientX - event.touches[1].clientX, event.touches[0].clientY - event.touches[1].clientY);
+        if (pinch.dist > 0) {
+          state.zoom = Math.min(2, Math.max(0.4, Math.round((pinch.zoom * dist) / pinch.dist * 10) / 10));
+          applyZoom();
+        }
+      }, { passive: false });
+      scrollEl.addEventListener("touchend", () => { pinch = null; });
+    }
     resetSeats();
 
     return { syncAvailability, open, refreshTemplates: renderTemplates, close };

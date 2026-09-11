@@ -1,5 +1,5 @@
 import { fetchCinemaDetail } from "./api.js";
-import { fetchSeatMap } from "./lock-client.js";
+import { fetchSeatMap, findExactShows } from "./lock-client.js";
 import { loadLockSession } from "./lock-session.js";
 import { getUserConfig, userKey } from "./user.js";
 
@@ -7,7 +7,7 @@ const RULE_NAME = "maoyan-lock-rule";
 export const LOCK_RULE_TERMINAL_STATES = new Set(["locked", "expired", "failed", "unknown", "completed", "cancelled"]);
 const PUBLIC_FIELDS = [
   "id", "cinemaId", "cinemaName", "movieId", "movieName", "targetDate",
-  "templateDate", "templateTime", "templateSeqNo", "seats", "state",
+  "templateDate", "templateTime", "templateSeqNo", "targetSeqNo", "seats", "state",
   "createdAt", "updatedAt", "lastError", "orderId", "payLeftSecond"
 ];
 
@@ -93,8 +93,19 @@ function scheduleForTemplate(data, movieId, seqNo) {
 
 function selectedSeats(seatMap, seatNos, { ignoreAvailability = false } = {}) {
   const byNumber = new Map((seatMap?.seats || []).map((seat) => [String(seat.seatNo), seat]));
+  const isCouple = (seat) => seat && (seat.type === "L" || seat.type === "R");
+  const partnerOf = (seat) => {
+    if (!isCouple(seat)) return null;
+    const opposite = seat.type === "L" ? "R" : "L";
+    return (seatMap?.seats || []).find((candidate) => candidate !== seat && candidate.type === opposite &&
+      String(candidate.rowId) === String(seat.rowId) &&
+      Math.abs(Number(candidate.columnId) - Number(seat.columnId)) === 1) || null;
+  };
   const selected = seatNos.map((number) => byNumber.get(number));
   if (selected.some((seat) => !seat || (!seat.available && !ignoreAvailability))) throw new Error("所选座位不可用");
+  if (selected.some((seat) => isCouple(seat) && !seatNos.map(String).includes(partnerOf(seat)?.seatNo || ""))) {
+    throw new Error("情侣座需成对选择");
+  }
   return selected.map((seat) => ({
     seatNo: String(seat.seatNo),
     rowId: String(seat.rowId),
@@ -143,14 +154,17 @@ export async function createLockRule(env, tokenId, input, options = {}) {
   const template = scheduleForTemplate(cinema, values.movieId, values.templateSeqNo);
   if (!template.cinemaName || !template.movieName) throw new Error("猫眼场次数据无效");
   assertTargetDate(values.targetDate, template.date, now);
+  // 目标日期已有排期: 直接使用目标场次的真实座位图; 否则用模板座位图(尚未开售, 座位全部可锁)
+  const targetShows = findExactShows(cinema, { movieId: values.movieId, targetDate: values.targetDate, templateTime: template.time });
+  const targetShow = targetShows.find((show) => Number(show.ticketStatus) === 0) || targetShows[0] || null;
+  const seatSeqNo = targetShow ? String(targetShow.seqNo) : values.templateSeqNo;
   const seatMap = await fetchSeats(session, {
     cinemaId: values.cinemaId,
     movieId: values.movieId,
-    seqNo: values.templateSeqNo
+    seqNo: seatSeqNo
   });
-  if (String(seatMap?.seqNo) !== values.templateSeqNo) throw new Error("猫眼座位图场次无效");
-  // 模板座位图的售卖状态只对当天同场次有意义; 未来日期尚未开售, 座位全部视为可锁
-  const ignoreAvailability = dayNumber(values.targetDate) > dayNumber(template.date);
+  if (String(seatMap?.seqNo) !== seatSeqNo) throw new Error("猫眼座位图场次无效");
+  const ignoreAvailability = !targetShow;
   const seats = selectedSeats(seatMap, values.seatNos, { ignoreAvailability });
   const timestamp = new Date(now).toISOString();
   const rule = {
@@ -163,6 +177,7 @@ export async function createLockRule(env, tokenId, input, options = {}) {
     templateDate: template.date,
     templateTime: template.time,
     templateSeqNo: values.templateSeqNo,
+    targetSeqNo: seatSeqNo,
     seats,
     state: "waiting_schedule",
     createdAt: timestamp,

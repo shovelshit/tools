@@ -746,6 +746,10 @@ input[type="password"]:focus { border-color: var(--primary); }
 .lock-seat-grid { display: grid; grid-auto-columns: 28px; gap: 4px; min-width: max-content; }
 .lock-seat { width: 28px; height: 28px; padding: 0; border: 1px solid; border-radius: 4px; font-size: 10px; line-height: 1; }
 .lock-seat.available { background: #eff9f4; border-color: #8ed0af; color: #167047; cursor: pointer; }
+.lock-seat.lover-left, .lock-seat.lover-right { background: #fdeef2; border-color: #f0a7bb; color: #b3536e; }
+.lock-seat.lover-left.available, .lock-seat.lover-right.available { background: #fdeef2; border-color: #e98aa8; color: #a34463; }
+.lock-seat.lover-left.unavailable, .lock-seat.lover-right.unavailable { background: #f5e6ea; border-color: #e5ccd3; color: #c49aa6; }
+.lock-col-label { font-size: 9px; color: var(--muted); text-align: center; width: 28px; }
 .lock-seat.available:hover { border-color: var(--success); }
 .lock-seat.selected { background: var(--primary); border-color: var(--primary); color: #fff; }
 .lock-seat.unavailable { background: #eceff3; border-color: #d7dce3; color: #a4acb8; cursor: not-allowed; }
