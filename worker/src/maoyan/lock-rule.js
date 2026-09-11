@@ -67,12 +67,11 @@ function dayNumber(value) {
   return stamp / 86400000;
 }
 
-function assertTargetDate(targetDate, templateDate, now) {
+function assertTargetDate(targetDate, now) {
   const targetDay = dayNumber(targetDate);
-  const templateDay = dayNumber(templateDate);
   const today = dayNumber(chinaDate(now));
-  if (targetDay === null || templateDay === null || targetDay < today || targetDay < templateDay || targetDay - today > 30) {
-    throw new Error("目标日期需在今天起 30 天内，且不早于模板场次日期");
+  if (targetDay === null || targetDay < today || targetDay - today > 30) {
+    throw new Error("目标日期需在今天起 30 天内");
   }
 }
 
@@ -153,7 +152,7 @@ export async function createLockRule(env, tokenId, input, options = {}) {
   const [session, cinema] = await Promise.all([loadSession(env, tokenId), fetchCinema(values.cinemaId)]);
   const template = scheduleForTemplate(cinema, values.movieId, values.templateSeqNo);
   if (!template.cinemaName || !template.movieName) throw new Error("猫眼场次数据无效");
-  assertTargetDate(values.targetDate, template.date, now);
+  assertTargetDate(values.targetDate, now);
   // 目标日期已有排期: 直接使用目标场次的真实座位图; 否则用模板座位图(尚未开售, 座位全部可锁)
   const targetShows = findExactShows(cinema, { movieId: values.movieId, targetDate: values.targetDate, templateTime: template.time });
   const targetShow = targetShows.find((show) => Number(show.ticketStatus) === 0) || targetShows[0] || null;

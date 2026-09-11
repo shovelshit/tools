@@ -74,6 +74,7 @@
       file: $("lock-session-file"), upload: $("btn-lock-upload"), removeSession: $("btn-lock-remove-session"),
       sessionStatus: $("lock-session-status"), seatGrid: $("lock-seat-grid"), seatCount: $("lock-seat-count"),
       risk: $("lock-risk-accepted"), ruleStatus: $("lock-rule-status"), cancelRule: $("btn-lock-cancel-rule"),
+      templateLabel: $("lock-template-label"),
       seatSource: $("lock-seat-source"),
       cancel: $("btn-lock-cancel"), submit: $("btn-lock-submit"),
       zoomIn: $("btn-lock-zoom-in"), zoomOut: $("btn-lock-zoom-out"), zoomReset: $("btn-lock-zoom-reset"), zoomLabel: $("lock-zoom-label")
@@ -191,6 +192,7 @@
         els.template.innerHTML = "";
         els.template.append(new Option("暂无可用场次", ""));
         els.template.disabled = true;
+        els.templateLabel.textContent = "场次";
         state.movieId = "";
         state.templateSeqNo = "";
         resetSeats();
@@ -203,30 +205,50 @@
       }
       if (!movieIds.includes(state.movieId)) state.movieId = movieIds[0];
       els.movie.value = state.movieId;
-      renderTemplateOptions();
+      if (!els.date.value) updateTargetDateBounds();
+      renderShowOptions();
     }
 
-    function renderTemplateOptions() {
+    // 目标日期有排期 → 第三项为「目标场次」(真实座位图); 无排期 → 「座位模板场次」(推断布局)
+    function renderShowOptions() {
+      const targetDateStr = els.date?.value || "";
+      const movieTemplates = state.templates.filter((item) => item.movieId === state.movieId);
+      const targetShows = movieTemplates.filter((item) => item.showDate === targetDateStr);
       els.template.innerHTML = "";
-      const templates = state.templates.filter((item) => item.movieId === state.movieId);
-      if (!templates.length) {
-        els.template.append(new Option("暂无场次", ""));
-        els.template.disabled = true;
-        state.templateSeqNo = "";
-      } else {
-        els.template.disabled = false;
-        els.template.append(new Option("选择当前场次作为座位模板", ""));
-        for (const item of templates) {
-          const details = [item.showDate, item.tm, item.lang, item.tp, item.th].filter(Boolean).join(" · ");
-          const option = new Option(item.disabled ? `${details}（停售）` : details, item.seqNo);
-          option.disabled = item.disabled;
-          els.template.append(option);
+      if (targetShows.length) {
+        state.showMode = "target";
+        els.templateLabel.textContent = "目标场次";
+        els.template.disabled = targetShows.every((item) => item.disabled);
+        for (const item of targetShows) {
+          const details = [item.tm, item.lang, item.tp, item.th].filter(Boolean).join(" · ");
+          els.template.append(new Option(details, item.seqNo));
         }
-        const current = templates.find((item) => item.seqNo === state.templateSeqNo && !item.disabled);
-        state.templateSeqNo = current ? current.seqNo : "";
+        const current = targetShows.find((item) => item.seqNo === state.templateSeqNo) || targetShows[0];
+        state.templateSeqNo = current.seqNo;
+        state.seatMapIsTemplate = false;
+        state.seatMapSource = `展示目标场次 ${targetDateStr} 的真实座位图`;
+      } else {
+        state.showMode = "template";
+        els.templateLabel.textContent = "座位模板场次（推断布局）";
+        state.seatMapSource = `${targetDateStr || "该日期"} 暂无场次，以下为模板场次的未来推断座位（全部可选，开售后按实际售卖为准）`;
+        if (!movieTemplates.length) {
+          els.template.append(new Option("暂无场次", ""));
+          els.template.disabled = true;
+          state.templateSeqNo = "";
+        } else {
+          els.template.disabled = false;
+          for (const item of movieTemplates) {
+            const details = [item.showDate, item.tm, item.lang, item.tp, item.th].filter(Boolean).join(" · ");
+            const option = new Option(item.disabled ? `${details}（停售）` : details, item.seqNo);
+            option.disabled = item.disabled;
+            els.template.append(option);
+          }
+          const current = movieTemplates.find((item) => item.seqNo === state.templateSeqNo && !item.disabled);
+          state.templateSeqNo = current ? current.seqNo : "";
+        }
       }
       els.template.value = state.templateSeqNo;
-      updateTargetDateBounds();
+      renderSeatSource();
       resetSeats();
     }
 
@@ -333,28 +355,15 @@
     }
 
     async function loadSeats() {
-      const template = templateForCurrent();
       resetSeats();
-      if (!template || template.disabled || !state.context?.cinemaId) return;
+      if (!state.templateSeqNo || !state.context?.cinemaId) return;
       els.seatGrid.innerHTML = loadingHtml("正在加载座位表...");
       try {
-        // 目标日期已有排期: 直接展示目标场次的真实座位图; 否则用模板座位图(未开售, 全部可选)
-        const targetDateStr = els.date?.value || "";
-        const targetShows = (state.context.movies || [])
-          .filter((movie) => String(movie.id) === state.movieId)
-          .flatMap((movie) => (movie.shows || []).filter((day) => String(day.showDate || day.dt || "") === targetDateStr))
-          .flatMap((day) => (day.plist || []).filter(Boolean))
-          .filter((show) => /^\d+$/.test(String(show.seqNo || "")));
-        const targetShow = targetShows.find((show) => Number(show.ticketStatus) === 0) || targetShows[0] || null;
-        const seqNo = targetShow ? String(targetShow.seqNo) : state.templateSeqNo;
-        state.seatMapIsTemplate = !targetShow;
-        state.seatMapSource = targetShow
-          ? `展示目标场次 ${targetDateStr} ${targetShow.tm || template.tm} 的真实座位图`
-          : `${targetDateStr} 暂无场次，以下为模板场次的未来推断座位（全部可选，开售后按实际售卖为准）`;
         renderSeatSource();
-        const params = new URLSearchParams({ cinemaId: state.context.cinemaId, movieId: state.movieId, seqNo });
+        const params = new URLSearchParams({ cinemaId: state.context.cinemaId, movieId: state.movieId, seqNo: state.templateSeqNo });
         const { seatMap } = await api(`/api/lock/template-seats?${params}`);
         if (state.seatMapIsTemplate && seatMap?.seats) {
+          // 未来推断: 尚未开售, 模板座位全部视为可选
           seatMap.seats = seatMap.seats.map((seat) => ({ ...seat, available: true }));
         }
         state.seatMap = seatMap;
@@ -367,13 +376,10 @@
     }
 
     function updateTargetDateBounds() {
-      state.dateBounds = lockDateBounds(templateForCurrent()?.showDate);
+      state.dateBounds = chinaDateBounds();
       els.date.min = state.dateBounds.min;
       els.date.max = state.dateBounds.max;
-      els.date.disabled = !state.dateBounds.valid;
-      if (!state.dateBounds.valid) {
-        els.date.value = "";
-      } else if (!els.date.value || els.date.value < state.dateBounds.min || els.date.value > state.dateBounds.max) {
+      if (!els.date.value || els.date.value < state.dateBounds.min || els.date.value > state.dateBounds.max) {
         els.date.value = state.dateBounds.min;
       }
     }
@@ -487,7 +493,7 @@
     }
 
     async function open() {
-      if (!syncAvailability()) return show("请先加载影院并勾选至少一部影片", "warn");
+      if (!syncAvailability()) return show("请先在影院设置中选择影院", "warn");
       state.context = getContext();
       els.cinema.value = state.context.cinemaName || `影院 ${state.context.cinemaId}`;
       els.risk.checked = false;
@@ -495,20 +501,16 @@
       renderSelection();
       els.overlay.classList.remove("hidden");
       document.addEventListener("keydown", onKeydown);
-      try {
-        await refreshRemoteState();
-      } catch {
-        show("锁座状态加载失败，请稍后重试", "error");
-      }
+      await Promise.allSettled([refreshRemoteState(), loadSeats()]);
     }
 
     els.button.addEventListener("click", open);
     els.close.addEventListener("click", close);
     els.cancel.addEventListener("click", close);
     els.overlay.addEventListener("click", (event) => { if (event.target === els.overlay) close(); });
-    els.movie.addEventListener("change", () => { state.movieId = els.movie.value; state.templateSeqNo = ""; renderTemplateOptions(); });
-    els.template.addEventListener("change", async () => { state.templateSeqNo = els.template.value; updateTargetDateBounds(); await loadSeats(); });
-    els.date.addEventListener("change", () => { loadSeats(); });
+    els.movie.addEventListener("change", () => { state.movieId = els.movie.value; state.templateSeqNo = ""; renderShowOptions(); });
+    els.date.addEventListener("change", () => { renderShowOptions(); loadSeats(); });
+    els.template.addEventListener("change", async () => { state.templateSeqNo = els.template.value; await loadSeats(); });
     els.risk.addEventListener("change", renderSelection);
     els.upload.addEventListener("click", uploadSession);
     els.removeSession.addEventListener("click", removeSession);
