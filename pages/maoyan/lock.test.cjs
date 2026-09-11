@@ -130,3 +130,22 @@ test("target-show selection never defaults to a stopped show", () => {
   assert.equal(lockUtils.preferredTargetShow(shows, "100").seqNo, "101");
   assert.equal(lockUtils.preferredTargetShow([{ seqNo: "100", disabled: true }], ""), null);
 });
+
+test("seat resets preserve source warnings unless explicitly cleared", () => {
+  const { lockUtils } = loadLockModule();
+  const state = {
+    seatMap: { seats: [] },
+    selectedSeatNos: new Set(["1-6-18"]),
+    seatMapSource: "未来推断座位",
+    seatMapIsTemplate: true
+  };
+  lockUtils.clearSeatSelection(state);
+  assert.equal(state.seatMap, null);
+  assert.equal(state.selectedSeatNos.size, 0);
+  assert.equal(state.seatMapSource, "未来推断座位");
+  assert.equal(state.seatMapIsTemplate, true);
+
+  lockUtils.clearSeatSelection(state, { clearSource: true });
+  assert.equal(state.seatMapSource, "");
+  assert.equal(state.seatMapIsTemplate, false);
+});

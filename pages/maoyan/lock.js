@@ -83,6 +83,15 @@
       || null;
   }
 
+  function clearSeatSelection(state, { clearSource = false } = {}) {
+    state.seatMap = null;
+    state.selectedSeatNos.clear();
+    if (clearSource) {
+      state.seatMapSource = "";
+      state.seatMapIsTemplate = false;
+    }
+  }
+
   function createMaoyanLockController({ api, getContext, onLog }) {
     const $ = (id) => document.getElementById(id);
     const els = {
@@ -121,10 +130,8 @@
       return state.templates.find((item) => item.seqNo === state.templateSeqNo && item.movieId === state.movieId) || null;
     }
 
-    function resetSeats() {
-      state.seatMap = null;
-      state.selectedSeatNos.clear();
-      state.seatMapSource = "";
+    function resetSeats(options) {
+      clearSeatSelection(state, options);
       renderSeatSource();
       if (els.seatGrid) els.seatGrid.innerHTML = '<div class="lock-empty">选择可售场次后加载座位表</div>';
       renderSelection();
@@ -232,7 +239,7 @@
         els.templateLabel.textContent = "场次";
         state.movieId = "";
         state.templateSeqNo = "";
-        resetSeats();
+        resetSeats({ clearSource: true });
         return;
       }
       els.movie.disabled = false;
@@ -476,7 +483,7 @@
           state.session = { uploaded: false };
           state.rule = null;
           state.automationEnabled = false;
-          resetSeats();
+          resetSeats({ clearSource: true });
           renderSession();
           renderRule();
           show("猫眼会话已删除", "success");
@@ -624,7 +631,7 @@
       }, { passive: false });
       scrollEl.addEventListener("touchend", () => { pinch = null; });
     }
-    resetSeats();
+    resetSeats({ clearSource: true });
 
     return { syncAvailability, open, refreshTemplates: renderTemplates, close };
   }
@@ -633,7 +640,7 @@
     createMaoyanLockController,
     lockUtils: {
       templatesFromMovies, chinaDateBounds, lockDateBounds, seatLabel, isReadyToSubmit,
-      isLockAvailable, lockAction, changeMovieSelection, preferredTargetShow
+      isLockAvailable, lockAction, changeMovieSelection, preferredTargetShow, clearSeatSelection
     }
   };
   if (typeof module !== "undefined" && module.exports) module.exports = exported;
