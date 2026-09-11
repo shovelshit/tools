@@ -228,7 +228,11 @@ async function restoreConfig() {
     syncCronInfo(config);
     applyPushConfig(config);
     const prevSelected = new Set((config.selectedMovieIds || []).map(String));
-    if (config.cinemaId) await loadCinema(config.cinemaId, prevSelected, { restore: true });
+    if (config.cinemaId) {
+      await loadCinema(config.cinemaId, prevSelected, { restore: true });
+      cinemaSelected = true; // 自动恢复的影院同样视为已选择
+    }
+    lockController.syncAvailability();
   } finally {
     // 恢复完成: 记录当前状态签名, 与云端一致的内容不再重复写入
     lastSavedSig = JSON.stringify(
@@ -550,6 +554,7 @@ function renderCinemaResults(list) {
       cinemaSelected = true;
       els.cinemaSearch.value = name;
       els.cinemaDropdown.classList.add("hidden");
+      lockController.syncAvailability();
       loadCinema(id);
     });
     els.cinemaDropdown.appendChild(item);
@@ -603,6 +608,7 @@ els.btnLoadCinema.addEventListener("click", () => {
     const id = parseCinemaInput(els.cinemaInput.value);
     els.cinemaInput.value = id;
     cinemaSelected = true;
+    lockController.syncAvailability();
     loadCinema(id);
   } catch (e) {
     showToast(e.message, "error");
