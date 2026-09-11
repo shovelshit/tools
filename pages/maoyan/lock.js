@@ -26,12 +26,8 @@
     return { min: addChinaDays(now, 0), max: addChinaDays(now, 30) };
   }
 
-  function lockDateBounds(templateDate, now = new Date()) {
-    const today = chinaDate(now);
-    const max = addChinaDays(now, 30);
-    // 目标日期允许当天: 不早于今天, 且不早于模板场次日期
-    const min = templateDate && templateDate > today ? templateDate : today;
-    return { min, max, valid: min <= max };
+  function lockDateBounds(now = new Date()) {
+    return { min: addChinaDays(now, 0), max: addChinaDays(now, 30) };
   }
 
   function templatesFromMovies(movies) {
@@ -137,6 +133,20 @@
       return map;
     }
 
+    // 提交按钮的置灰原因(展示在按钮 title 上)
+    function submitBlockReason() {
+      if (!state.session?.uploaded) return "请先上传猫眼会话";
+      if (!state.templateSeqNo) return "请选择场次";
+      if (!state.selectedSeatNos.size) return "请先选择座位";
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(els.date?.value || "")) return "请选择目标日期";
+      if (!els.risk?.checked) return "请先勾选风险提示";
+      if (state.dateBounds && ((els.date.value || "") < state.dateBounds.min || (els.date.value || "") > state.dateBounds.max)) {
+        return "目标日期超出 30 天范围";
+      }
+      if (isActiveLockRule(state.rule)) return "已有进行中的规则，请先取消";
+      return "";
+    }
+
     function renderSelection() {
       const labels = seatLabelMap();
       const seats = [...state.selectedSeatNos].map((seatNo) => labels.get(seatNo) || seatNo);
@@ -146,10 +156,11 @@
           ? `${source}已选 ${seats.length} 座：${seats.join("、")}`
           : `${source}尚未选择座位`;
       }
-      if (els.submit) els.submit.disabled = !isReadyToSubmit({
-        session: state.session, templateSeqNo: state.templateSeqNo, selectedSeatNos: state.selectedSeatNos,
-        targetDate: els.date?.value || "", riskAccepted: els.risk?.checked, dateBounds: state.dateBounds, rule: state.rule
-      });
+      const reason = submitBlockReason();
+      if (els.submit) {
+        els.submit.disabled = Boolean(reason);
+        els.submit.title = reason;
+      }
     }
 
     function renderSession() {
@@ -211,7 +222,8 @@
 
     // 目标日期有排期 → 第三项为「目标场次」(真实座位图); 无排期 → 「座位模板场次」(推断布局)
     function renderShowOptions() {
-      const targetDateStr = els.date?.value || "";
+      if (!els.date.value) els.date.value = chinaDate(new Date());
+      const targetDateStr = els.date.value;
       const movieTemplates = state.templates.filter((item) => item.movieId === state.movieId);
       const targetShows = movieTemplates.filter((item) => item.showDate === targetDateStr);
       els.template.innerHTML = "";
@@ -230,7 +242,11 @@
       } else {
         state.showMode = "template";
         els.templateLabel.textContent = "座位模板场次（推断布局）";
-        state.seatMapSource = `${targetDateStr || "该日期"} 暂无场次，以下为模板场次的未来推断座位（全部可选，开售后按实际售卖为准）`;
+        // 黄色推断提示只在选了未来日期且该日期无场次时展示
+        const isFuture = targetDateStr > chinaDate(new Date());
+        state.seatMapSource = isFuture
+          ? `${targetDateStr} 暂无场次，以下为模板场次的未来推断座位（全部可选，开售后按实际售卖为准）`
+          : `${targetDateStr} 暂无场次，以下为模板场次的推断座位（全部可选）`;
         if (!movieTemplates.length) {
           els.template.append(new Option("暂无场次", ""));
           els.template.disabled = true;

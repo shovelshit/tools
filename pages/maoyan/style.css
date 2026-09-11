@@ -757,6 +757,22 @@ input[type="password"]:focus { border-color: var(--primary); }
 .lock-seat.lover-left, .lock-seat.lover-right { background: #fdeef2; border-color: #f0a7bb; color: #b3536e; }
 .lock-seat.lover-left.available, .lock-seat.lover-right.available { background: #fdeef2; border-color: #e98aa8; color: #a34463; }
 .lock-seat.lover-left.unavailable, .lock-seat.lover-right.unavailable { background: #f5e6ea; border-color: #e5ccd3; color: #c49aa6; }
+/* 选中后与其余座位一致为绿色, 并向另一半延伸连体 */
+.lock-seat.lover-left.selected, .lock-seat.lover-right.selected {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+.lock-seat.lover-left.selected {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  box-shadow: 4px 0 0 0 var(--primary);
+}
+.lock-seat.lover-right.selected {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  box-shadow: -4px 0 0 0 var(--primary);
+}
 .lock-col-label { font-size: 9px; color: var(--muted); text-align: center; width: 28px; }
 .lock-seat.available:hover { border-color: var(--success); }
 .lock-seat.selected { background: var(--primary); border-color: var(--primary); color: #fff; }
