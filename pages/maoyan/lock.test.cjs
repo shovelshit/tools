@@ -90,6 +90,25 @@ test("lock utilities detect swapped seatNo segments in laser IMAX halls", () => 
   assert.equal(lockUtils.seatSegmentOf([]), 2);
 });
 
+test("lock utilities keep hash-delimited and numeric seats selectable and labelled", () => {
+  const { lockUtils } = loadLockModule();
+  // 金逸 # 样本: 同排 seg2(排号,前导零)恒定、seg3(座号)变化 → 座号在第三段
+  const hashSeats = [
+    { seatNo: "4401028106#01#01", rowId: "1", columnId: "1" },
+    { seatNo: "4401028106#01#02", rowId: "1", columnId: "2" }
+  ];
+  assert.equal(lockUtils.seatSegmentOf(hashSeats), 3);
+  assert.deepEqual(JSON.parse(JSON.stringify(lockUtils.seatPosition(hashSeats[0], 3))), { rowNumber: 1, seatNumber: 1 });
+  assert.equal(lockUtils.seatDisplayLabel(hashSeats[1], 3), "1排2座");
+  // 纯数字 seatId: 无段语义 → 用解析列号兜底进座位图(与官方已选气泡同口径)
+  const numeric = { seatNo: "7376", rowId: "9", columnId: "12" };
+  assert.deepEqual(JSON.parse(JSON.stringify(lockUtils.seatPosition(numeric, 2))), { rowNumber: 9, seatNumber: 12 });
+  assert.equal(lockUtils.seatDisplayLabel(numeric, 2), "9排12座");
+  // 既有保守护栏不回退: 非数字段/缺 rowId 仍无法定位
+  assert.equal(lockUtils.seatPosition({ seatNo: "1-2-x", rowId: "3" }), null);
+  assert.equal(lockUtils.seatPosition({ seatNo: "1-2-3" }), null);
+});
+
 test("lock utilities require a selected cinema before enabling lock configuration", () => {
   const { lockUtils } = loadLockModule();
   assert.equal(lockUtils.isLockAvailable({ connected: true, cinemaId: "25428", cinemaSelected: true, lockServiceEnabled: true, monitorEnabled: true }), true);

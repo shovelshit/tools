@@ -47,34 +47,54 @@
   }
 
   // 猫眼座位口径: 票面排号 = seat.rowId (影厅内 1..N 连续)。
-  // 但 seatNo 段语义存在两种影厅口径(均以真实座位页锚定):
-  //   杜比厅(万达天和广场): seatNo=区-座号-物理排 (订单 1-1-10/rowId=9 票面「9排1座」)
-  //   激光IMAX厅(寰映大融城): seatNo=区-排号-座号 (页面 33-1-29/rowId=1 为「1排29座」)
-  // 座号取"唯一值更多的段"(排号取值数 ≤ 排数, 必然少于座号取值数);
-  // 保守起见仅当第三段唯一值同时大于第二段和排数时才切换, 否则维持旧口径(第二段=座号)。
+  // data-no 是官方原样透传的不透明主键: 「-」三段/「#」三段/纯数字 seatId 并存,
+  // 且有万达天和型「区-座-排」与寰映型「区-排-座」两种段序(真实数据锚定)。
+  // 判别优先按行内特征: 同排恒定段=排号、逐座变化段=座号(普查 75/75 零失败);
+  // 不足时回落全局启发式; 纯数字等无段语义的座位由 seatPosition 用解析序号兜底。
   function seatSegmentOf(seats) {
-    const uniques = (index) => {
-      const values = new Set();
-      for (const seat of seats || []) {
-        const parts = String(seat?.seatNo || "").split("-");
-        if (parts.length === 3 && parts.every((part) => /^\d+$/.test(part))) values.add(parts[index]);
+    const parsed = [];
+    for (const seat of seats || []) {
+      const parts = String(seat?.seatNo || "").split(/[^0-9A-Za-z]+/);
+      if (parts.length === 3 && parts.every((part) => part)) {
+        parsed.push({ rowId: String(seat?.rowId ?? ""), seg2: parts[1], seg3: parts[2] });
       }
-      return values.size;
-    };
-    const seg2 = uniques(1);
-    const seg3 = uniques(2);
-    const rows = new Set((seats || []).map((seat) => String(seat?.rowId ?? ""))).size;
-    return seg3 > seg2 && seg3 > rows ? 3 : 2;
+    }
+    const rowGroups = new Map();
+    for (const item of parsed) {
+      if (!rowGroups.has(item.rowId)) rowGroups.set(item.rowId, []);
+      rowGroups.get(item.rowId).push(item);
+    }
+    let checkedRows = 0;
+    let vary2 = 0;
+    let vary3 = 0;
+    for (const group of rowGroups.values()) {
+      if (group.length < 2) continue;
+      checkedRows += 1;
+      if (new Set(group.map((item) => item.seg2)).size > 1) vary2 += 1;
+      if (new Set(group.map((item) => item.seg3)).size > 1) vary3 += 1;
+    }
+    if (checkedRows > 0) {
+      if (vary2 > 0 && vary3 === 0) return 2;
+      if (vary3 > 0 && vary2 === 0) return 3;
+    }
+    const uniq2 = new Set(parsed.map((item) => item.seg2)).size;
+    const uniq3 = new Set(parsed.map((item) => item.seg3)).size;
+    return uniq3 > uniq2 && uniq3 > rowGroups.size ? 3 : 2;
   }
 
   function seatPosition(seat, seatSegment) {
     const source = seat && typeof seat === "object" ? seat.seatNo : seat;
     const row = seat && typeof seat === "object" ? Number(seat.rowId) : NaN;
-    const parts = String(source || "").split("-");
-    const valid = parts.length === 3 && parts.every((part) => /^\d+$/.test(part));
-    const seatNumber = valid ? Number(parts[seatSegment === 3 ? 2 : 1]) : NaN;
-    if (!Number.isInteger(row) || row <= 0 || !Number.isInteger(seatNumber)) return null;
-    return { rowNumber: row, seatNumber };
+    if (!Number.isInteger(row) || row <= 0) return null;
+    const parts = String(source || "").split(/[^0-9A-Za-z]+/);
+    const seatNumber = parts.length === 3 && parts.every((part) => /^\d+$/.test(part))
+      ? Number(parts[seatSegment === 3 ? 2 : 1])
+      : NaN;
+    if (Number.isInteger(seatNumber) && seatNumber > 0) return { rowNumber: row, seatNumber };
+    // 纯数字 seatId 等无段语义: 与官方已选气泡同口径, 用解析列号兜底(座位不再整格丢失)
+    const column = seat && typeof seat === "object" ? Number(seat.columnId) : NaN;
+    if (Number.isInteger(column) && column > 0) return { rowNumber: row, seatNumber: column };
+    return null;
   }
 
   function seatDisplayLabel(seat, seatSegment) {

@@ -166,6 +166,17 @@ test("重复座位号在下发前被去重", () => {
   assert.deepEqual(values.seatNos, ["1-6-18", "1-6-19"]);
 });
 
+test("座位主键放宽为不透明字符串: #分隔与纯数字均可提交", () => {
+  const values = validateLockRuleInput(validInput({ seatNos: ["4401028106#01#01", "7376"] }));
+  assert.deepEqual(values.seatNos, ["4401028106#01#01", "7376"]);
+});
+
+test("座位主键仍拒绝空串/含空白/超长值", () => {
+  assert.throws(() => validateLockRuleInput(validInput({ seatNos: [""] })), /所选座位无效/);
+  assert.throws(() => validateLockRuleInput(validInput({ seatNos: ["a b"] })), /所选座位无效/);
+  assert.throws(() => validateLockRuleInput(validInput({ seatNos: ["x".repeat(65)] })), /所选座位无效/);
+});
+
 test("不存在的日历日期会被拒绝", async () => {
   for (const targetDate of ["2026-02-30", "2026-13-01", "2026-09-31"]) {
     await assert.rejects(

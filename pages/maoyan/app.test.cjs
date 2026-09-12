@@ -109,8 +109,10 @@ test("seat map auto-detects swapped seatNo segment order (Dolby vs laser IMAX ha
   const source = readSource("lock.js");
   // 真实缺陷: 寰映IMAX厅 data-no=区-排-座, 固定把第二段当座号 → 同排座位挤进同一列(竖条)。
   // 座号段判别 + 加载座位表后写入 state, 布局/表头/文案统一走判别后的段位。
+  // 判别已升级为行内特征优先(同排恒定段=排号、逐座变化段=座号), 启发式仅兜底。
   assert.match(source, /function seatSegmentOf\(seats\)/);
-  assert.match(source, /return seg3 > seg2 && seg3 > rows \? 3 : 2;/);
+  assert.match(source, /if \(vary2 > 0 && vary3 === 0\) return 2;/);
+  assert.match(source, /if \(vary3 > 0 && vary2 === 0\) return 3;/);
   assert.match(source, /seatPosition\(seat, state\.seatSeg\)/);
   assert.match(source, /state\.seatSeg = seatSegmentOf\(seatMap\?\.seats\)/);
   assert.match(source, /seatDisplayLabel\(seat, state\.seatSeg\)/);

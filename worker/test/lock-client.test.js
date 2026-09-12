@@ -127,6 +127,60 @@ test("detects the swapped seatNo segment order of laser IMAX halls", () => {
   assert.equal(seatSegmentOf(null), 2);
 });
 
+test("keeps #-delimited and numeric seatNos and still drops empty placeholders", () => {
+  // 55 页普查: 金逸等影院 data-no=影厅长编码#排#座(两位前导零), 部分影院为纯数字 seatId。
+  // data-no 是官方原样透传的不透明主键, 解析只保留原文; 空位/走道(无 data-no 或空值)继续过滤。
+  const html = `
+    <div class="seats-block" data-section-id="9" data-section-name="4号厅" data-seq-no="2026091301">
+      <span class="seat selectable" data-row-id="1" data-column-id="1" data-no="4401028106#01#01" data-st="N"></span>
+      <span class="seat sold" data-row-id="1" data-column-id="2" data-no="4401028106#01#02" data-st="N"></span>
+      <span class="seat selectable" data-row-id="2" data-column-id="3" data-no="7376" data-st="N"></span>
+      <span class="seat walkway" data-row-id="2" data-column-id="4" data-no="" data-st="N"></span>
+      <span class="seat selectable" data-row-id="2" data-column-id="5" data-st="N"></span>
+    </div>`;
+  const map = parseSeatPage(html);
+  assert.deepEqual(map.seats.map((seat) => seat.seatNo), ["4401028106#01#01", "4401028106#01#02", "7376"]);
+  assert.deepEqual(map.seats.map((seat) => [seat.rowId, seat.columnId, seat.available]), [
+    ["1", "1", true], ["1", "2", false], ["2", "3", true]
+  ]);
+});
+
+test("discriminates the seat segment within rows for hash, multi-zone and dolby layouts", () => {
+  // 金逸 # 样本: 同排 seg2(排号,前导零)恒定、seg3(座号)逐座变化 → 行内判别为 3
+  const hashSeats = [
+    { seatNo: "4401028106#01#01", rowId: "1", columnId: "1" },
+    { seatNo: "4401028106#01#02", rowId: "1", columnId: "2" },
+    { seatNo: "4401028106#02#01", rowId: "2", columnId: "1" }
+  ];
+  assert.equal(seatSegmentOf(hashSeats), 3);
+  assert.equal(seatDisplayLabel(hashSeats[0], 3), "1排1座");
+  // 多区厅(寰映星河形状): seg1 行内混区, 但 seg2 排号行内恒定 → 不影响判别
+  const multiZone = [
+    { seatNo: "1-3-11", rowId: "3", columnId: "1" },
+    { seatNo: "32-3-12", rowId: "3", columnId: "2" },
+    { seatNo: "33-3-13", rowId: "3", columnId: "3" }
+  ];
+  assert.equal(seatSegmentOf(multiZone), 3);
+  // 万达天和型(区-座-排): 同排 seg2(座号)逐座变化、seg3(物理排)恒定 → 2
+  const dolbyRow = [
+    { seatNo: "1-1-11", rowId: "11", columnId: "1" },
+    { seatNo: "1-2-11", rowId: "11", columnId: "2" },
+    { seatNo: "1-3-11", rowId: "11", columnId: "3" }
+  ];
+  assert.equal(seatSegmentOf(dolbyRow), 2);
+  assert.equal(seatDisplayLabel(dolbyRow[1], 2), "11排2座");
+});
+
+test("falls back to parse ordinals for numeric seat ids the way the official bubble does", () => {
+  // 纯数字 seatId(约 15% 影院)无法从 data-no 推出排/座: 与官方「已选座」气泡同口径,
+  // 显示 rowId排columnId座(官方前端解码实证气泡就是解析序号)。
+  const seat = { seatNo: "7376", rowId: "9", columnId: "12" };
+  assert.equal(seatDisplayLabel(seat, 2), "9排12座");
+  assert.equal(seatDisplayLabel(seat, 3), "9排12座");
+  // columnId 缺失时原样返回
+  assert.equal(seatDisplayLabel({ seatNo: "7376", rowId: "9" }), "7376");
+});
+
 test("matches only the exact target date and HH:mm", () => {
   const data = { showData: { movies: [{ id: 7, shows: [{ showDate: "2026-09-12", plist: [
     { seqNo: "1", tm: "19:59" }, { seqNo: "2", tm: "20:00" }, { seqNo: "3", tm: "20:05" }

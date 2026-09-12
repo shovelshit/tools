@@ -30,8 +30,10 @@ function decimal(value) {
   return /^\d+$/.test(String(value || ""));
 }
 
+// 座位主键(data-no)是不透明字符串: 「-」三段/「#」三段/纯数字 seatId 并存, 官方原样透传。
+// 校验只要求非空可见 ASCII 且长度有限; 真实有效性由座位图按 seatNo 全等匹配保证。
 function seatNo(value) {
-  return /^\d+-\d+-\d+$/.test(String(value || ""));
+  return /^[\x21-\x7e]{1,64}$/.test(String(value || ""));
 }
 
 function assertExactInput(input) {
