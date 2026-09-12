@@ -6,3 +6,4 @@ seat_debug.html
 createorder_debug.txt
 repro-order.cjs
 *.txt
+/docs/superpowers/
