@@ -51,6 +51,7 @@ let lockServiceEnabled = false;
 let monitorEnabled = false; // 默认停止, 需显式「开始监控」
 let monitorDdl = null; // 监控截止时间(ISO), 每次开始监控刷新 30 天
 let pushSaved = false; // 云端已存有当前渠道的推送配置(接口不回显时, 保存时避免误覆盖)
+let pushVerified = false; // 当前渠道 + 当前密钥已成功发送过测试推送
 
 // 城市 / 影院搜索
 let allCities = [];        // [{id, name, pinyin}]
@@ -205,6 +206,7 @@ els.token.addEventListener("keydown", (e) => {
 els.btnLogout.addEventListener("click", async () => {
   connected = false;
   lockServiceEnabled = false;
+  pushVerified = false;
   cinemaSelected = false;
   localStorage.removeItem("workerUrl");
   localStorage.removeItem("authMode");
@@ -284,6 +286,8 @@ function applyPushConfig(config) {
   if (config.barkKey) els.barkInput.value = config.barkKey;
   if (config.serverChanKey) els.serverChanInput.value = config.serverChanKey;
   pushSaved = Boolean(config.hasBark || config.hasServerChan);
+  pushVerified = config.notifyVerified === true;
+  updateMonitorBtn();
   if (pushSaved && !currentKeyInput().value.trim()) {
     log("info", `${CHANNEL_LABELS[getChannel()]} 已配置（为防泄露不回显，留空保存不会覆盖）`);
   }
@@ -315,7 +319,9 @@ async function autoSaveConfig(extra = {}, { msg = "配置已自动保存", silen
   saving = true;
   lastSavedSig = sig;
   try {
-    await api("/api/config", { method: "POST", body: sig });
+    const res = await api("/api/config", { method: "POST", body: sig });
+    pushVerified = res.config?.notifyVerified === true;
+    updateMonitorBtn();
     if (!silent) log("ok", msg);
   } catch (e) {
     lastSavedSig = ""; // 失败允许重试
@@ -347,6 +353,8 @@ function scheduleMovieSave() {
 document.addEventListener("change", (e) => {
   if (e.target && e.target.name === "push-channel") {
     renderChannel();
+    pushVerified = false;
+    updateMonitorBtn();
     autoSaveConfig({}, { msg: `推送渠道已切换为 ${CHANNEL_LABELS[getChannel()]}` });
   }
 });
@@ -358,12 +366,19 @@ if (els.pushChannelRow) {
     if (!target) return;
     target.checked = true;
     renderChannel();
+    pushVerified = false;
+    updateMonitorBtn();
     autoSaveConfig({}, { msg: `推送渠道已切换为 ${CHANNEL_LABELS[getChannel()]}` });
   });
 }
 // 推送 Key 输入后失焦即保存
-els.barkInput.addEventListener("change", () => autoSaveConfig({}, { msg: "推送配置已保存" }));
-els.serverChanInput.addEventListener("change", () => autoSaveConfig({}, { msg: "推送配置已保存" }));
+function pushKeyChanged() {
+  pushVerified = false;
+  updateMonitorBtn();
+  autoSaveConfig({}, { msg: "推送配置已保存" });
+}
+els.barkInput.addEventListener("change", pushKeyChanged);
+els.serverChanInput.addEventListener("change", pushKeyChanged);
 
 // ---------------- 监控启停 ----------------
 function fmtDate(ts) {
@@ -374,7 +389,9 @@ function updateMonitorBtn() {
   els.btnToggleMonitor.textContent = monitorEnabled ? "停止监控" : "开始监控";
   els.btnToggleMonitor.classList.toggle("danger", monitorEnabled);
   els.btnToggleMonitor.classList.toggle("success", !monitorEnabled);
-  els.btnToggleMonitor.disabled = !connected;
+  const requiresPushTest = !monitorEnabled && !pushVerified;
+  els.btnToggleMonitor.disabled = !connected || requiresPushTest;
+  els.btnToggleMonitor.title = requiresPushTest ? "请先配置推送渠道并发送测试" : "";
 }
 
 els.btnToggleMonitor.addEventListener("click", async () => {
@@ -384,6 +401,7 @@ els.btnToggleMonitor.addEventListener("click", async () => {
       const target = !monitorEnabled;
       const res = await api("/api/config", { method: "POST", body: JSON.stringify({ enabled: target }) });
       monitorEnabled = target;
+      pushVerified = res.config?.notifyVerified === true;
       if (res.config) monitorDdl = res.config.monitorDdl || monitorDdl;
       log(
         target ? "ok" : "info",
@@ -791,6 +809,8 @@ els.btnTestPush.addEventListener("click", async () => {
       }
       const res = await api("/api/test-push", { method: "POST" });
       const label = res.label || CHANNEL_LABELS[getChannel()];
+      pushVerified = true;
+      updateMonitorBtn();
       showToast(`测试推送已发送（${label}），请查收`, "success");
       log("ok", `${label} 测试推送已发送`);
     } catch (e) {

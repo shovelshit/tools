@@ -15,3 +15,12 @@ test("lock submission restores disabled state after the loading button resets", 
   const source = fs.readFileSync(path.join(__dirname, "lock.js"), "utf8");
   assert.match(source, /await buttonLoading\(els\.submit,[\s\S]*?\n\s*renderSelection\(\);\n\s*}/);
 });
+
+test("monitor start stays disabled until the current push configuration is tested", () => {
+  const source = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
+  assert.match(source, /let pushVerified = false/);
+  assert.match(source, /!monitorEnabled && !pushVerified/);
+  assert.match(source, /pushVerified = config\.notifyVerified === true/);
+  assert.match(source, /pushVerified = res\.config\?\.notifyVerified === true/);
+  assert.match(source, /pushVerified = true;[\s\S]*?updateMonitorBtn\(\)/);
+});

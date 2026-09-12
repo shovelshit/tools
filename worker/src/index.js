@@ -3,18 +3,19 @@
 import { CORS, json } from "./common/http.js";
 import { NOTIFY_CHANNELS, pushBark } from "./common/notify.js";
 import { userKey, getUserConfig } from "./maoyan/user.js";
-import { CITY_LIST, fetchCinemaDetail, publicCinemaShows, searchCinemasByKw, runCheck, pushNotify, currentChannel, minBatchMinutes, describeCrons, isMinuteStepCrons, resolveCronExprs, ddlFromNow, checkAuthFull, handleAdminTokens, handleLockApi, runScheduledChecks, runScheduledLockAfterMonitor } from "./maoyan/index.js";
+import { CITY_LIST, fetchCinemaDetail, publicCinemaShows, searchCinemasByKw, runCheck, pushNotify, currentChannel, currentCredential, isNotificationVerified, notificationVerification, minBatchMinutes, describeCrons, isMinuteStepCrons, resolveCronExprs, ddlFromNow, checkAuthFull, handleAdminTokens, handleLockApi, runScheduledChecks, runScheduledLockAfterMonitor } from "./maoyan/index.js";
 import { handleStoreApi, handleStoreFile } from "./store/proxy.js";
 
 export { LockCoordinator } from "./maoyan/lock-runner.js";
 
-function publicConfig(config) {
-  const { barkKey, serverChanKey, ...safeConfig } = config || {};
+async function publicConfig(config) {
+  const { barkKey, serverChanKey, notifyVerification, ...safeConfig } = config || {};
   return {
     ...safeConfig,
     enabled: config?.enabled === true,
     hasBark: Boolean(barkKey),
     hasServerChan: Boolean(serverChanKey),
+    notifyVerified: await isNotificationVerified(config),
   };
 }
 
@@ -68,7 +69,7 @@ export default {
         return json({
           ok: true,
           config: {
-            ...publicConfig(cfg),
+            ...await publicConfig(cfg),
             cronMinutes: minBatchMinutes(cronExprs),
             cronExprs,
             cronText: describeCrons(cronExprs),
@@ -80,11 +81,6 @@ export default {
         const body = await request.json();
         const key = userKey(token, "config");
         const cfg = await env.MAOYAN_KV.get(key, "json") || await getUserConfig(env, token);
-        if (body.enabled !== void 0) {
-          cfg.enabled = Boolean(body.enabled);
-          // 每次显式「开始监控」都刷新一次截止时间(30 天)
-          if (cfg.enabled) cfg.monitorDdl = ddlFromNow();
-        }
         if (body.cinemaId !== void 0 && String(body.cinemaId).trim()) {
           // 空值不覆盖: 防止异常状态下误清空已配置的影院
           cfg.cinemaId = String(body.cinemaId).trim();
@@ -97,8 +93,20 @@ export default {
           const ch = String(body.notifyChannel).trim();
           cfg.notifyChannel = NOTIFY_CHANNELS[ch] ? ch : "bark";
         }
+        if (body.enabled !== void 0) {
+          const enabled = Boolean(body.enabled);
+          if (enabled && !currentCredential(cfg)) {
+            return json({ ok: false, error: `请先配置当前推送渠道（${NOTIFY_CHANNELS[currentChannel(cfg)].label}）` }, 400);
+          }
+          if (enabled && !await isNotificationVerified(cfg)) {
+            return json({ ok: false, error: "请先发送并确认当前推送渠道的测试推送" }, 400);
+          }
+          cfg.enabled = enabled;
+          // 每次显式「开始监控」都刷新一次截止时间(30 天)
+          if (cfg.enabled) cfg.monitorDdl = ddlFromNow();
+        }
         await env.MAOYAN_KV.put(key, JSON.stringify(cfg));
-        return json({ ok: true, config: publicConfig(cfg) });
+        return json({ ok: true, config: await publicConfig(cfg) });
       }
       if (url.pathname === "/api/check" && request.method === "POST") {
         return json(await runCheck(env, true, token));
@@ -106,12 +114,16 @@ export default {
       if (url.pathname === "/api/test-bark" && request.method === "POST") {
         const cfg = await getUserConfig(env, token);
         await pushBark(cfg.barkKey, "猫眼场次监控", "这是一条测试推送, 云端 Bark 配置成功 ✅");
+        cfg.notifyVerification = await notificationVerification({ ...cfg, notifyChannel: "bark" });
+        await env.MAOYAN_KV.put(userKey(token, "config"), JSON.stringify(cfg));
         return json({ ok: true });
       }
       // ---- 按当前选中渠道发送测试推送 ----
       if (url.pathname === "/api/test-push" && request.method === "POST") {
         const cfg = await getUserConfig(env, token);
         const label = await pushNotify(cfg, "猫眼场次监控", "这是一条测试推送, 云端推送配置成功 ✅");
+        cfg.notifyVerification = await notificationVerification(cfg);
+        await env.MAOYAN_KV.put(userKey(token, "config"), JSON.stringify(cfg));
         return json({ ok: true, channel: currentChannel(cfg), label });
       }
       if (url.pathname === "/api/status" && request.method === "GET") {
