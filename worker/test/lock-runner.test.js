@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { MemoryKV } from "./helpers.js";
+import { captureConsole, MemoryKV } from "./helpers.js";
 import { OrderAttemptError } from "../src/maoyan/lock-client.js";
 import * as lockRunner from "../src/maoyan/lock-runner.js";
 import { LockCoordinator, runOneLockRule } from "../src/maoyan/lock-runner.js";
@@ -89,6 +89,17 @@ test("scheduled locking receives only the monitored cinema projection", async ()
     tm: "20:00",
     ticketStatus: 0
   });
+
+  const failedEnv = runtime({
+    LOCK_COORDINATOR: {
+      idFromName: (id) => id,
+      get: () => ({ fetch: async () => Response.json({ ok: false }, { status: 500 }) })
+    }
+  });
+  await assert.rejects(
+    () => lockRunner.runScheduledLockAfterMonitor(failedEnv, tokenId, monitoredCinema),
+    /锁座协调器执行失败/
+  );
 });
 
 test("coordinator locks from monitored data without fetching schedules again", async () => {
@@ -392,4 +403,24 @@ test("cron reporting keeps every configured monitor schedule", async () => {
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("scheduled rule logs are structured and omit rule identifiers", async () => {
+  const stored = rule({
+    cinemaName: "影院敏感值",
+    movieName: "影片敏感值",
+    targetDate: "2026-09-12",
+    templateTime: "20:00"
+  });
+  const { text: logs, entries } = await captureConsole(() => runOneLockRule(
+    runtime(),
+    tokenId,
+    deps(stored, { createOrder: async () => ({ orderId: "order-sensitive", payLeftSecond: 600 }) })
+  ));
+
+  assert.equal(entries.every((args) => args.length === 1 && typeof args[0] === "object"), true);
+  assert.match(logs, /"scope":"maoyan-lock"/);
+  assert.match(logs, /"event":"scheduled_rule"/);
+  assert.match(logs, /"state":"locked"/);
+  assert.doesNotMatch(logs, /影院敏感值|影片敏感值|2026-09-12|20:00|1-6-18|order-sensitive|11111111/);
 });

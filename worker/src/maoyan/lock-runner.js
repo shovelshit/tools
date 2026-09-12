@@ -4,6 +4,7 @@ import { getLockSessionStatus, loadLockSession, removeLockSession } from "./lock
 import { createLockRule, getLockRule, isLockRuleTerminal, putLockRule, removeLockRule, RULE_KNOWN_ERRORS } from "./lock-rule.js";
 import { getUserConfig } from "./user.js";
 import { pushNotify } from "./notify.js";
+import { lockError, lockLog } from "./log.js";
 
 const TOKEN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -49,13 +50,9 @@ async function notifyTerminal(env, tokenId, rule, deps) {
 
 async function terminal(env, tokenId, rule, state, changes, deps) {
   const next = await saveRule(env, tokenId, rule, { ...changes, state }, deps);
-  console.log(`[lock-run] 规则终态 ${state}: ${rule.movieName} ${rule.targetDate} ${rule.templateTime} ${lastErrorText(changes)}`);
+  lockLog("scheduled_rule", { phase: "complete", state });
   await notifyTerminal(env, tokenId, next, deps);
   return { ok: true, state };
-}
-
-function lastErrorText(changes) {
-  return changes?.lastError ? `(${changes.lastError})` : "";
 }
 
 export async function runOneLockRule(env, tokenId, deps = {}) {
@@ -96,7 +93,7 @@ export async function runOneLockRule(env, tokenId, deps = {}) {
       return await terminal(env, tokenId, rule, "failed", { lastError: "所选未来座位不可用或影厅布局已变化" }, deps);
     }
   } catch (error) {
-    console.error("[lock-run] 场次/座位获取失败:", messageFor(error));
+    lockError("scheduled_rule", { phase: "prepare", state: "waiting_schedule", reason: "provider_data_unavailable" });
     await saveRule(env, tokenId, rule, { lastError: messageFor(error) }, deps);
     return { ok: false, waiting: true };
   }
@@ -202,7 +199,7 @@ export class LockCoordinator {
       if (RULE_KNOWN_ERRORS.includes(message)) {
         return Response.json({ ok: false, error: message }, { status: 400 });
       }
-      console.error("[lock-run] 协调器错误:", message);
+      lockError("coordinator", { phase: "request", state: "failed", reason: "internal_error" });
       return Response.json({ ok: false, error: "锁座服务暂时不可用" }, { status: 500 });
     }
   }
@@ -248,5 +245,7 @@ export async function runScheduledLockAfterMonitor(env, tokenId, cinemaData) {
   if (String(env.LOCK_SERVICE_ENABLED) !== "true") return { ok: true, skipped: true, disabled: true };
   const monitoredCinema = { showData: publicCinemaShows(cinemaData) };
   const stub = env.LOCK_COORDINATOR.get(env.LOCK_COORDINATOR.idFromName(tokenId));
-  return await stub.fetch(lockRequest("run", tokenId, { monitoredCinema }));
+  const response = await stub.fetch(lockRequest("run", tokenId, { monitoredCinema }));
+  if (!response.ok) throw new Error("锁座协调器执行失败");
+  return response;
 }

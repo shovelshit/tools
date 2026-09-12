@@ -5,6 +5,7 @@ import { cleanupUserData, getUserConfig } from "./user.js";
 import { isExpired } from "./ddl.js";
 import { json } from "../common/http.js";
 import { runCheck } from "./check.js";
+import { monitorError } from "./log.js";
 
 export function randomToken() {
   const bytes = new Uint8Array(16);
@@ -62,7 +63,7 @@ export async function runScheduledChecks(env, afterMonitor) {
           : undefined
       });
     } catch (e) {
-      console.error("[monitor] 定时检查异常:", e?.message || e);
+      monitorError("scheduled_check", { state: "failed", reason: "internal_error" });
     }
   }
 }

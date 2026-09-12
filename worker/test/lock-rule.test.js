@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { MemoryKV, validSession } from "./helpers.js";
+import { captureConsole, MemoryKV, validSession } from "./helpers.js";
 import { userKey, cleanupUserData } from "../src/maoyan/user.js";
 import {
   createLockRule,
@@ -238,4 +238,24 @@ test("cleanup deletes the encrypted session and lock rule keys", async () => {
   await cleanupUserData(env, "token-a");
   assert.equal(await env.MAOYAN_KV.get(userKey("token-a", "maoyan-session")), null);
   assert.equal(await env.MAOYAN_KV.get(userKey("token-a", "maoyan-lock-rule")), null);
+});
+
+test("rule logs are structured and omit user, show, seat, and order identifiers", async () => {
+  const env = envWithConfig();
+  await env.MAOYAN_KV.put(userKey("token-a-sensitive", "config"), JSON.stringify({
+    cinemaId: "25428",
+    selectedMovieIds: ["7"]
+  }));
+  const { text: logs, entries } = await captureConsole(() => createLockRule(
+    env,
+    "token-a-sensitive",
+    validInput({ targetDate: "2026-09-11" }),
+    dependencies({ placeOrder: async () => ({ orderId: "order-sensitive", payLeftSecond: 600 }) })
+  ));
+
+  assert.equal(entries.every((args) => args.length === 1 && typeof args[0] === "object"), true);
+  assert.match(logs, /"scope":"maoyan-lock"/);
+  assert.match(logs, /"event":"rule_create"/);
+  assert.match(logs, /"state":"locked"/);
+  assert.doesNotMatch(logs, /token-a-sensitive|测试影院|测试电影|2026-09-11|20:00|1-6-18|order-sensitive|"100"/);
 });

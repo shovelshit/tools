@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { captureConsole } from "./helpers.js";
 import {
   createUnpaidOrder,
   fetchSeatMap,
@@ -44,24 +45,6 @@ async function withMockFetch(mock, callback) {
     return await callback();
   } finally {
     globalThis.fetch = original;
-  }
-}
-
-async function withCapturedConsole(callback) {
-  const originalLog = console.log;
-  const originalError = console.error;
-  const entries = [];
-  const capture = (...args) => entries.push(args.map((value) =>
-    typeof value === "string" ? value : JSON.stringify(value)
-  ).join(" "));
-  console.log = capture;
-  console.error = capture;
-  try {
-    await callback();
-    return entries.join("\n");
-  } finally {
-    console.log = originalLog;
-    console.error = originalError;
   }
 }
 
@@ -197,7 +180,7 @@ test("does not write provider credentials or internal URLs to order logs", async
       }
     }
   };
-  const logs = await withCapturedConsole(async () => {
+  const { text: logs, entries } = await captureConsole(async () => {
     await withMockFetch(async () => jsonResponse(providerError), async () => {
       await assert.rejects(
         () => createUnpaidOrder(sessionWithPrivateQuery, parseSeatPage(seatHtml), ["1-6-18"]),
@@ -206,9 +189,12 @@ test("does not write provider credentials or internal URLs to order logs", async
     });
   });
 
-  assert.match(logs, /HTTP 200/);
-  assert.match(logs, /NetError/);
-  assert.match(logs, /Bad Request/);
+  assert.equal(entries.every((args) => args.length === 1 && typeof args[0] === "object"), true);
+  assert.match(logs, /"scope":"maoyan-lock"/);
+  assert.match(logs, /"event":"order_attempt"/);
+  assert.match(logs, /"httpStatus":200/);
+  assert.match(logs, /"errorName":"NetError"/);
+  assert.match(logs, /"errorMessage":"Bad Request"/);
   assert.doesNotMatch(logs, /provider-key-secret|provider-token-secret|provider-query-secret|internal\.example/);
 });
 

@@ -37,3 +37,25 @@ export function validSession(overrides = {}) {
     ...overrides
   };
 }
+
+export async function captureConsole(callback) {
+  const originalLog = console.log;
+  const originalError = console.error;
+  const entries = [];
+  const capture = (...args) => entries.push(args);
+  console.log = capture;
+  console.error = capture;
+  try {
+    const result = await callback();
+    return {
+      result,
+      entries,
+      text: entries.flatMap((args) => args).map((value) =>
+        typeof value === "string" ? value : JSON.stringify(value)
+      ).join("\n")
+    };
+  } finally {
+    console.log = originalLog;
+    console.error = originalError;
+  }
+}

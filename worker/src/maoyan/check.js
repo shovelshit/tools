@@ -5,6 +5,7 @@ import { fetchCinemaDetail } from "./api.js";
 import { pushNotify } from "./notify.js";
 import { minBatchMinutes, resolveCronExprs } from "./cron.js";
 import { isExpired } from "./ddl.js";
+import { monitorError } from "./log.js";
 
 function fmtShow(s) {
   const parts = [`${s.showDate || s.dt || ""} ${s.tm || ""}`, s.lang || "", s.tp || "", s.th || ""];
@@ -92,13 +93,13 @@ export async function runCheck(env, manual, token, options = {}) {
     try {
       await options.afterPersist(data);
     } catch {
-      console.error({ scope: "maoyan-monitor", event: "downstream_failed" });
+      monitorError("downstream", { state: "failed", reason: "lock_handoff_failed" });
     }
   }
   return { ok: true, cinemaName, newTotal, enabled: cfg.enabled !== false };
   } catch (e) {
     // 失败也要留痕: 更新 lastCheck/lastError, 让界面能看出定时检查发生过但失败了
-    console.error("[monitor] 检查失败:", e?.message || e);
+    monitorError("check", { state: "failed", reason: "provider_data_unavailable" });
     st.lastCheckTs = now;
     st.lastCheck = new Date(now).toISOString();
     st.lastError = e.message;

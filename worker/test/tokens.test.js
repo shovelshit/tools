@@ -78,4 +78,16 @@ test("scheduled monitoring hands data off only after snapshot and status persist
   await env.MAOYAN_KV.put(userKey(tokenId, "config"), JSON.stringify({ enabled: false, cinemaId: "25428" }));
   await runScheduledChecks(env, async () => { handoffs++; });
   assert.equal(handoffs, 1);
+
+  await env.MAOYAN_KV.put(userKey(tokenId, "config"), JSON.stringify({
+    enabled: true,
+    cinemaId: "25428",
+    selectedMovieIds: ["7"],
+    monitorDdl: "2099-01-01T00:00:00.000Z"
+  }));
+  await env.MAOYAN_KV.delete(userKey(tokenId, "status"));
+  await withMockFetch(async () => { throw new Error("provider unavailable"); }, async () => {
+    await runScheduledChecks(env, async () => { handoffs++; });
+  });
+  assert.equal(handoffs, 1);
 });
