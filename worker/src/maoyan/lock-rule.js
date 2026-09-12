@@ -2,6 +2,7 @@ import { fetchCinemaDetail } from "./api.js";
 import { fetchSeatMap, findExactShows, createUnpaidOrder, OrderAttemptError } from "./lock-client.js";
 import { loadLockSession } from "./lock-session.js";
 import { getUserConfig, userKey } from "./user.js";
+import { pushNotify } from "./notify.js";
 import { lockError, lockLog } from "./log.js";
 
 const RULE_NAME = "maoyan-lock-rule";
@@ -134,6 +135,13 @@ function ruleKey(tokenId) {
   return userKey(tokenId, RULE_NAME);
 }
 
+async function notifyLockedRule(config, rule, notify = pushNotify) {
+  const labels = rule.seats.map((seat) => seat.seatNo).join("、");
+  const content = `${rule.cinemaName} ${rule.movieName}\n${rule.targetDate} ${rule.templateTime}\n${labels}` +
+    (rule.payLeftSecond !== null ? `\n剩余支付时间 ${rule.payLeftSecond} 秒` : "");
+  await notify(config, "猫眼锁座成功", content);
+}
+
 export async function getLockRule(env, tokenId) {
   return await env.MAOYAN_KV.get(ruleKey(tokenId), "json");
 }
@@ -222,6 +230,15 @@ export async function createLockRule(env, tokenId, input, options = {}) {
         lockedAt: timestamp
       });
       await putLockRule(env, tokenId, rule);
+      try {
+        await notifyLockedRule(config, rule, options.notify);
+      } catch {
+        rule.notifyError = "通知发送失败";
+        try {
+          await putLockRule(env, tokenId, rule);
+        } catch {
+        }
+      }
       return publicLockRule(rule, String(env.LOCK_SERVICE_ENABLED) === "true");
     } catch (error) {
       if (error instanceof OrderAttemptError && !error.uncertain) {

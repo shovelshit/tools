@@ -141,6 +141,40 @@ test("seat availability is enforced for real shows but ignored for inferred ones
   assert.equal(locked.orderId, "order-1");
 });
 
+test("an immediate successful lock sends the same terminal notification after persistence", async () => {
+  const env = envWithConfig({
+    cinemaId: "25428",
+    selectedMovieIds: ["7"],
+    notifyChannel: "bark",
+    barkKey: "test-key"
+  });
+  let notification;
+  const locked = await createLockRule(env, "token-a", validInput({ targetDate: "2026-09-11" }), dependencies({
+    placeOrder: async () => ({ orderId: "order-1", payLeftSecond: 600 }),
+    notify: async (config, title, content) => {
+      assert.equal((await getLockRule(env, "token-a")).state, "locked");
+      notification = { config, title, content };
+    }
+  }));
+
+  assert.equal(locked.state, "locked");
+  assert.equal(notification.config.barkKey, "test-key");
+  assert.equal(notification.title, "猫眼锁座成功");
+  assert.equal(notification.content, "测试影院 测试电影\n2026-09-11 20:00\n1-6-18\n剩余支付时间 600 秒");
+});
+
+test("an immediate notification failure keeps the successful order locked", async () => {
+  const env = envWithConfig();
+  const locked = await createLockRule(env, "token-a", validInput({ targetDate: "2026-09-11" }), dependencies({
+    placeOrder: async () => ({ orderId: "order-1", payLeftSecond: 600 }),
+    notify: async () => { throw new Error("push unavailable"); }
+  }));
+
+  assert.equal(locked.state, "locked");
+  assert.equal(locked.orderId, "order-1");
+  assert.equal((await getLockRule(env, "token-a")).notifyError, "通知发送失败");
+});
+
 test("a real show uses exactly the sequence selected by the user", async () => {
   const cinema = { showData: {
     cinemaName: "测试影院",
