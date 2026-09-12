@@ -3,7 +3,7 @@
 export { CITY_LIST } from "./cities.js";
 export { fetchCinemaDetail, publicCinemaShows, searchCinemasByKw } from "./api.js";
 export { handleLockApi } from "./lock-api.js";
-export { runCheck } from "./check.js";
+export { runCheck, appendChange } from "./check.js";
 export {
   currentChannel,
   currentCredential,

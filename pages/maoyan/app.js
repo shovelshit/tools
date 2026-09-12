@@ -321,7 +321,15 @@ async function autoSaveConfig(extra = {}, { msg = "配置已自动保存", silen
   try {
     const res = await api("/api/config", { method: "POST", body: sig });
     pushVerified = res.config?.notifyVerified === true;
+    // 服务端可能因推送渠道不可用而自动停止监控: 同步真实状态, 避免界面仍显示"监控中"
+    if (res.config && typeof res.config.enabled === "boolean") monitorEnabled = res.config.enabled;
+    if (res.config && res.config.monitorDdl !== void 0) monitorDdl = res.config.monitorDdl || null;
     updateMonitorBtn();
+    if (res.notice) {
+      await refreshChanges(); // 拉取服务端刚写入的告警与最新状态
+      log("warn", res.notice);
+      return;
+    }
     if (!silent) log("ok", msg);
   } catch (e) {
     lastSavedSig = ""; // 失败允许重试
@@ -831,11 +839,14 @@ async function refreshChanges(showLoading = false) {
     syncCronInfo(data); // 批次描述保持与服务端一致
     if (status.monitorDdl !== void 0) monitorDdl = status.monitorDdl;
     const stopped = status.enabled === false;
-    const expired = stopped && monitorDdl && Date.now() > Date.parse(monitorDdl); // 已到期被自动停止
+    // 已到期 = 被自动停止 且 截止时间确实已过; 手动停止后服务端仍保留未来的截止时间, 不能据此判定到期
+    const expired = Boolean(stopped && monitorDdl && Date.now() > Date.parse(monitorDdl));
     const lastTxt = status.lastCheck ? fmtClock(new Date(status.lastCheck).getTime()) : "从未";
-    const main = stopped ? (monitorDdl ? "已到期" : "已停止") : status.lastError ? "检查异常" : "监控中";
+    const main = stopped ? (expired ? "已到期" : "已停止") : status.lastError ? "检查异常" : "监控中";
+    // 停止状态下不再展示"截止 xxx"(那是下次续期用的未来时间, 与"未在监控"矛盾); 到期时保留以便说明原因
+    const showDdl = Boolean(monitorDdl) && (!stopped || expired);
     const segments = [
-      monitorDdl && `截止 ${fmtDate(Date.parse(monitorDdl))}`,
+      showDdl && `截止 ${fmtDate(Date.parse(monitorDdl))}`,
       `上次检查 ${lastTxt}`,
       !stopped && nextBatchText(),
       !stopped && status.lastError && `失败原因: ${status.lastError}`,

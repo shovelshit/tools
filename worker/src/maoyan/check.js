@@ -13,26 +13,43 @@ function fmtShow(s) {
   return parts.filter(Boolean).join(" | ");
 }
 
+const MAX_CHANGES = 100;
+
+// 追加一条变化记录(新在前, 只保留最近 100 条); config 变更等场景也需要留痕
+export async function appendChange(env, tokenId, entry) {
+  const chKey = userKey(tokenId, "changes");
+  const changes = await env.MAOYAN_KV.get(chKey, "json") || [];
+  changes.unshift({ time: new Date().toISOString(), ...entry });
+  while (changes.length > MAX_CHANGES) changes.pop();
+  await env.MAOYAN_KV.put(chKey, JSON.stringify(changes));
+  return changes;
+}
+
 export async function runCheck(env, manual, token, options = {}) {
   const cfg = await getUserConfig(env, token);
-  if (!cfg.cinemaId) return { ok: false, error: "未配置影院" };
-  if (cfg.enabled === false) {
-    return manual ? { ok: false, error: "监控已停止，请先在界面恢复监控" } : { ok: true, skipped: true, stopped: true };
+  if (!cfg.cinemaId) {
+    return manual ? { ok: false, error: "未配置影院", status: 400 } : { ok: true, skipped: true };
+  }
+  // 只有「明确开启监控」的配置才需要检查:
+  //   从未点过「开始监控」的配置(enabled 未设置)与已手动停止(enabled=false)一样直接跳过,
+  //   既不会被误判成"已到期", 也不会让 cron 为没在监控的用户做无意义抓取。
+  if (cfg.enabled !== true) {
+    if (manual) {
+      return cfg.enabled === false
+        ? { ok: false, error: "监控已停止，请先在界面恢复监控", status: 409 }
+        : { ok: false, error: "尚未开始监控，请先在界面点「开始监控」", status: 409 };
+    }
+    return { ok: true, skipped: true, stopped: cfg.enabled === false };
   }
   // 到期自动停止: 每次开始监控刷新截止时间, 防止设完就不管
   if (isExpired(cfg)) {
     cfg.enabled = false;
     await env.MAOYAN_KV.put(userKey(token, "config"), JSON.stringify(cfg));
-    const chKey = userKey(token, "changes");
-    const changes = await env.MAOYAN_KV.get(chKey, "json") || [];
-    changes.unshift({
-      time: new Date().toISOString(),
+    await appendChange(env, token, {
       type: "warn",
       text: `监控已到期（截止 ${(cfg.monitorDdl || "").slice(0, 10) || "未设置"}），已自动停止；在监控页点「开始监控」可再续 ${30} 天`,
     });
-    while (changes.length > 100) changes.pop();
-    await env.MAOYAN_KV.put(chKey, JSON.stringify(changes));
-    if (manual) return { ok: false, error: "监控已到期，已自动停止；点「开始监控」可再续 30 天" };
+    if (manual) return { ok: false, error: "监控已到期，已自动停止；点「开始监控」可再续 30 天", status: 409 };
     return { ok: true, stopped: true, expired: true };
   }
   const selected = new Set((cfg.selectedMovieIds || []).map(String));
@@ -81,7 +98,7 @@ export async function runCheck(env, manual, token, options = {}) {
     }
     snapshot[idStr] = shows.map((s) => s.seqNo);
   }
-  while (changes.length > 100) changes.pop();
+  while (changes.length > MAX_CHANGES) changes.pop();
   await env.MAOYAN_KV.put(snapKey, JSON.stringify(snapshot));
   await env.MAOYAN_KV.put(chKey, JSON.stringify(changes));
   delete st.lastError;
@@ -112,7 +129,7 @@ export async function runCheck(env, manual, token, options = {}) {
       now - Date.parse(lastEntry.time) < 3600e3;
     if (!recentSame) {
       changes.unshift({ time: new Date(now).toISOString(), type: "error", text: `定时检查失败: ${e.message}` });
-      while (changes.length > 100) changes.pop();
+      while (changes.length > MAX_CHANGES) changes.pop();
       await env.MAOYAN_KV.put(chKey, JSON.stringify(changes));
     }
     throw e;

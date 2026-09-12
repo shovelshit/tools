@@ -7,9 +7,11 @@ export function ddlFromNow() {
   return new Date(Date.now() + MONITOR_DDL_DAYS * 86400e3).toISOString();
 }
 
-// 已手动停止(enabled=false)不算到期; 未设置截止或已过期视为到期, 需重新开始
+// 只有「明确开启了监控」的配置才谈得上到期:
+//   enabled 未设置(只选好影院、从未点「开始监控」)/ 已手动停止(enabled=false) 都不算到期。
+// 否则前端加载影院时自动保存的 {cinemaId,...} 会被 cron 误判为到期并写入误导性告警。
 export function isExpired(cfg) {
-  if (cfg.enabled === false) return false;
+  if (cfg.enabled !== true) return false;
   if (!cfg.monitorDdl) return true;
   return Date.now() > Date.parse(cfg.monitorDdl);
 }

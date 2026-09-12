@@ -3,10 +3,17 @@
 import { CORS, json } from "./common/http.js";
 import { NOTIFY_CHANNELS, pushBark } from "./common/notify.js";
 import { userKey, getUserConfig } from "./maoyan/user.js";
-import { CITY_LIST, fetchCinemaDetail, publicCinemaShows, searchCinemasByKw, runCheck, pushNotify, currentChannel, currentCredential, isNotificationVerified, notificationVerification, minBatchMinutes, describeCrons, isMinuteStepCrons, resolveCronExprs, ddlFromNow, checkAuthFull, handleAdminTokens, handleLockApi, runScheduledChecks, runScheduledLockAfterMonitor } from "./maoyan/index.js";
+import { CITY_LIST, fetchCinemaDetail, publicCinemaShows, searchCinemasByKw, runCheck, appendChange, pushNotify, currentChannel, currentCredential, isNotificationVerified, notificationVerification, minBatchMinutes, describeCrons, isMinuteStepCrons, resolveCronExprs, ddlFromNow, checkAuthFull, handleAdminTokens, handleLockApi, runScheduledChecks, runScheduledLockAfterMonitor } from "./maoyan/index.js";
 import { handleStoreApi, handleStoreFile } from "./store/proxy.js";
 
 export { LockCoordinator } from "./maoyan/lock-runner.js";
+
+const DECIMAL = /^\d+$/;
+
+// 推送/上游失败的状态码: 凭据未配置属于客户端配置问题(400), 其余(渠道侧或猫眼侧异常)归为上游错误(502)
+function upstreamStatus(message) {
+  return /未配置$/.test(String(message || "")) ? 400 : 502;
+}
 
 async function publicConfig(config) {
   const { barkKey, serverChanKey, notifyVerification, ...safeConfig } = config || {};
@@ -52,15 +59,27 @@ export default {
         const cityId = (url.searchParams.get("cityId") || "").trim();
         const kw = (url.searchParams.get("kw") || "").trim();
         if (!cityId) return json({ ok: false, error: "缺少 cityId" }, 400);
+        if (!DECIMAL.test(cityId)) return json({ ok: false, error: "cityId 无效" }, 400);
         if (!kw) return json({ ok: false, error: "缺少 kw" }, 400);
-        const cinemas = await searchCinemasByKw(env, cityId, kw);
+        let cinemas;
+        try {
+          cinemas = await searchCinemasByKw(env, cityId, kw);
+        } catch (e) {
+          return json({ ok: false, error: e.message }, 502);
+        }
         return json({ ok: true, cinemas });
       }
       if (url.pathname === "/api/shows") {
         const cfg = await getUserConfig(env, token);
         const cinemaId = (url.searchParams.get("cinemaId") || "").trim() || cfg.cinemaId;
-        if (!cinemaId) return json({ ok: false, error: "缺少 cinemaId" });
-        const data = await fetchCinemaDetail(cinemaId);
+        if (!cinemaId) return json({ ok: false, error: "缺少 cinemaId" }, 400);
+        if (!DECIMAL.test(String(cinemaId))) return json({ ok: false, error: "cinemaId 无效" }, 400);
+        let data;
+        try {
+          data = await fetchCinemaDetail(String(cinemaId));
+        } catch (e) {
+          return json({ ok: false, error: e.message }, 502);
+        }
         return json({ ok: true, cinemaId, ...publicCinemaShows(data) });
       }
       if (url.pathname === "/api/config" && request.method === "GET") {
@@ -78,12 +97,17 @@ export default {
         });
       }
       if (url.pathname === "/api/config" && request.method === "POST") {
-        const body = await request.json();
+        const body = await request.json().catch(() => null);
+        if (!body || typeof body !== "object" || Array.isArray(body)) {
+          return json({ ok: false, error: "请求体须为 JSON 对象" }, 400);
+        }
         const key = userKey(token, "config");
         const cfg = await env.MAOYAN_KV.get(key, "json") || await getUserConfig(env, token);
         if (body.cinemaId !== void 0 && String(body.cinemaId).trim()) {
           // 空值不覆盖: 防止异常状态下误清空已配置的影院
-          cfg.cinemaId = String(body.cinemaId).trim();
+          const cinemaId = String(body.cinemaId).trim();
+          if (!DECIMAL.test(cinemaId)) return json({ ok: false, error: "影院 ID 须为纯数字" }, 400);
+          cfg.cinemaId = cinemaId;
         }
         if (body.selectedMovieIds !== void 0) cfg.selectedMovieIds = (body.selectedMovieIds || []).map(String);
         // 注: 检查频率已完全跟随 cron 批次, 旧前端的 intervalMinutes 字段不再生效
@@ -91,7 +115,8 @@ export default {
         if (body.serverChanKey !== void 0) cfg.serverChanKey = String(body.serverChanKey).trim();
         if (body.notifyChannel !== void 0) {
           const ch = String(body.notifyChannel).trim();
-          cfg.notifyChannel = NOTIFY_CHANNELS[ch] ? ch : "bark";
+          if (!NOTIFY_CHANNELS[ch]) return json({ ok: false, error: "推送渠道无效" }, 400);
+          cfg.notifyChannel = ch;
         }
         if (body.enabled !== void 0) {
           const enabled = Boolean(body.enabled);
@@ -105,15 +130,29 @@ export default {
           // 每次显式「开始监控」都刷新一次截止时间(30 天)
           if (cfg.enabled) cfg.monitorDdl = ddlFromNow();
         }
+        // 运行中必须始终有「可用且已验证」的推送渠道: 切到未配置/未验证的渠道时自动停止监控,
+        // 否则监控继续跑、推送全部失败, 页面却仍显示"监控中"(静默失效)
+        let notice = "";
+        if (cfg.enabled === true && (!currentCredential(cfg) || !await isNotificationVerified(cfg))) {
+          cfg.enabled = false;
+          notice = `推送渠道（${NOTIFY_CHANNELS[currentChannel(cfg)].label}）未配置或未验证，监控已自动停止；配置并发送测试推送后可重新开始监控`;
+        }
         await env.MAOYAN_KV.put(key, JSON.stringify(cfg));
-        return json({ ok: true, config: await publicConfig(cfg) });
+        if (notice) await appendChange(env, token, { type: "warn", text: notice });
+        return json({ ok: true, config: await publicConfig(cfg), ...(notice ? { notice } : {}) });
       }
       if (url.pathname === "/api/check" && request.method === "POST") {
-        return json(await runCheck(env, true, token));
+        const result = await runCheck(env, true, token);
+        return result.ok ? json(result) : json(result, result.status || 400);
       }
       if (url.pathname === "/api/test-bark" && request.method === "POST") {
+        // 遗留接口: 前端已改用 /api/test-push, 这里仅保留兼容
         const cfg = await getUserConfig(env, token);
-        await pushBark(cfg.barkKey, "猫眼场次监控", "这是一条测试推送, 云端 Bark 配置成功 ✅");
+        try {
+          await pushBark(cfg.barkKey, "猫眼场次监控", "这是一条测试推送, 云端 Bark 配置成功 ✅");
+        } catch (e) {
+          return json({ ok: false, error: e.message }, upstreamStatus(e.message));
+        }
         cfg.notifyVerification = await notificationVerification({ ...cfg, notifyChannel: "bark" });
         await env.MAOYAN_KV.put(userKey(token, "config"), JSON.stringify(cfg));
         return json({ ok: true });
@@ -121,7 +160,12 @@ export default {
       // ---- 按当前选中渠道发送测试推送 ----
       if (url.pathname === "/api/test-push" && request.method === "POST") {
         const cfg = await getUserConfig(env, token);
-        const label = await pushNotify(cfg, "猫眼场次监控", "这是一条测试推送, 云端推送配置成功 ✅");
+        let label;
+        try {
+          label = await pushNotify(cfg, "猫眼场次监控", "这是一条测试推送, 云端推送配置成功 ✅");
+        } catch (e) {
+          return json({ ok: false, error: e.message }, upstreamStatus(e.message));
+        }
         cfg.notifyVerification = await notificationVerification(cfg);
         await env.MAOYAN_KV.put(userKey(token, "config"), JSON.stringify(cfg));
         return json({ ok: true, channel: currentChannel(cfg), label });
