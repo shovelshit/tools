@@ -53,10 +53,24 @@ test("push key is masked after save and read from memory, not the masked input",
   const source = readSource("app.js");
   assert.match(source, /function maskKey/);
   assert.match(source, /const realKeys = \{ bark: "", serverchan: "" \};/);
-  assert.match(source, /input\.value = real \? maskKey\(real\) : "";/);
   // 保存体与测试推送都从内存取真实密钥, 不能把掩码当密钥提交
   assert.equal(source.includes("currentKeyInput().value.trim()"), false);
   assert.match(source, /const key = currentRealKey\(\);/);
+});
+
+test("stored key shows placeholder mask after refresh (cloud hasBark, no plaintext in memory)", () => {
+  const source = readSource("app.js");
+  // 刷新后内存无明文但云端已存: 输入框回显固定占位掩码, 不再一片空白
+  assert.match(source, /const KEY_STORED_MASK = "••••••••";/);
+  assert.match(source, /const keyStored = \{ bark: false, serverchan: false \};/);
+  assert.match(source, /keyStored\.bark = config\.hasBark === true;/);
+  assert.match(source, /keyStored\.serverchan = config\.hasServerChan === true;/);
+  assert.match(source, /else if \(keyStored\[getChannel\(\)\]\) \{\s*\n\s*input\.value = KEY_STORED_MASK;/);
+  // 占位掩码不当作密钥提交: 失焦保存与聚焦还原都跳过它
+  assert.match(source, /typed !== KEY_STORED_MASK/);
+  assert.match(source, /input\.value === KEY_STORED_MASK\) input\.select\(\);/);
+  // 按渠道独立记录, 只配置过 Bark 时切到 Server酱 不应显示已存掩码
+  assert.doesNotMatch(source, /pushSaved = keyStored\.bark \|\| keyStored\.serverchan;\s*\n\s*keyStored/);
 });
 
 test("lock dialog gates everything behind maoyan session upload", () => {

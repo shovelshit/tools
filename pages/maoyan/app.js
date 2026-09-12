@@ -287,6 +287,9 @@ function currentKeyField() {
 
 // 推送密钥: 真实值只存内存, 输入框在保存后显示掩码(后端本就不回显, 避免旁观/截屏泄露)
 const realKeys = { bark: "", serverchan: "" };
+// 云端已存密钥但本会话无明文(如刷新后): 用固定掩码占位标识"已保存", 明文只在云端
+const KEY_STORED_MASK = "••••••••";
+const keyStored = { bark: false, serverchan: false };
 const KEY_PLACEHOLDERS = {
   bark: "Bark Key 或 URL，如 https://api.day.app/xxxxx",
   serverchan: "SCT 开头的 SendKey"
@@ -303,18 +306,28 @@ function currentRealKey() {
   return realKeys[getChannel()] || "";
 }
 
-// 按内存真实值渲染输入框: 有密钥显掩码, 无密钥显占位提示
+// 按内存真实值渲染输入框: 有密钥显掩码, 云端已存显固定占位掩码, 都没有显占位提示
 function renderKeyInput() {
   const input = currentKeyInput();
   if (!input) return;
   const real = currentRealKey();
-  input.value = real ? maskKey(real) : "";
-  input.placeholder = real ? "已配置（不回显，点此可更换）" : KEY_PLACEHOLDERS[getChannel()];
+  if (real) {
+    input.value = maskKey(real);
+    input.placeholder = "已配置（不回显，点此可更换）";
+  } else if (keyStored[getChannel()]) {
+    input.value = KEY_STORED_MASK;
+    input.placeholder = "已在云端保存（不回显），输入新值可更换";
+  } else {
+    input.value = "";
+    input.placeholder = KEY_PLACEHOLDERS[getChannel()];
+  }
 }
 
 function applyPushConfig(config) {
   setChannel(config.notifyChannel || "bark");
-  pushSaved = Boolean(config.hasBark || config.hasServerChan);
+  keyStored.bark = config.hasBark === true;
+  keyStored.serverchan = config.hasServerChan === true;
+  pushSaved = keyStored.bark || keyStored.serverchan;
   pushVerified = config.notifyVerified === true;
   renderKeyInput();
   updateMonitorBtn();
@@ -414,13 +427,16 @@ function keyInputFocused() {
   const input = currentKeyInput();
   const real = currentRealKey();
   if (real && input.value === maskKey(real)) input.value = real;
+  // 云端已存但本会话无明文: 全选占位掩码, 直接输入即可整体替换
+  else if (!real && input.value === KEY_STORED_MASK) input.select();
 }
 
 function keyInputBlurred() {
   const input = currentKeyInput();
   const real = currentRealKey();
   const typed = input.value.trim();
-  if (typed && typed !== real && typed !== maskKey(real)) {
+  // 占位掩码视为"未改动"(不代表云端密钥, 不回传不覆盖); 输入新值才保存
+  if (typed && typed !== real && typed !== maskKey(real) && typed !== KEY_STORED_MASK) {
     realKeys[getChannel()] = typed;
     pushVerified = false;
     updateMonitorBtn();
