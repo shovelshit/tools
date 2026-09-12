@@ -7,7 +7,9 @@ import {
   findExactShows,
   OrderAttemptError,
   parseSeatPage,
-  requestMaoyan
+  requestMaoyan,
+  seatDisplayLabel,
+  seatLabelFromNo
 } from "../src/maoyan/lock-client.js";
 
 const seatHtml = `
@@ -63,6 +65,37 @@ test("parses seats only from the matched seats block", () => {
   const map = parseSeatPage(`${seatHtml}
     <aside><span class="seat selectable" data-row-id="9" data-column-id="9" data-no="1-9-9" data-st="N"></span></aside>`);
   assert.deepEqual(map.seats.map((seat) => seat.seatNo), ["1-6-18", "1-6-19"]);
+});
+
+test("renders the hall row/seat out of the Maoyan seat identifier", () => {
+  // 实测样本: 万达影城(天和广场) 2号杜比巨幕厅,
+  // 1-12-1 表示 1区/12号座/第1排 => 票面「1排12座」;
+  // 该影厅没有 4 排(排号跳号)、第10/11排在 3、4 与 27、28 号处留过道。
+  assert.equal(seatDisplayLabel("1-12-1"), "1排12座");
+  assert.equal(seatDisplayLabel({ seatNo: "1-28-3" }), "3排28座");
+  assert.equal(seatDisplayLabel({ seatNo: "1-30-12" }), "12排30座");
+  // 去掉前导零, 但保留排/座语义
+  assert.equal(seatLabelFromNo("1-05-07"), "7排5座");
+  // 非标准标识原样返回, 不吞掉原始值
+  assert.equal(seatDisplayLabel("1-12"), "1-12");
+  assert.equal(seatDisplayLabel("1-12-x"), "1-12-x");
+  assert.equal(seatDisplayLabel(""), "");
+  assert.equal(seatDisplayLabel(null), "");
+});
+
+test("parsed identifiers keep the raw seatNo while row/column stay parse ordinals", () => {
+  // 回归护栏: rowId/columnId 是影厅内部的连续序号, 与票面排座号不同口径, 不可混用
+  const map = parseSeatPage(`
+    <div class="seats-block" data-section-id="1" data-section-name="2号杜比巨幕厅" data-seq-no="202609120148439">
+      <span class="seat selectable" data-row-id="1" data-column-id="10" data-no="1-12-1" data-st="N"></span>
+      <span class="seat selectable" data-row-id="4" data-column-id="1" data-no="1-5-5" data-st="N"></span>
+    </div>`);
+  assert.deepEqual(map.seats.map((seat) => [seat.seatNo, seat.rowId, seat.columnId]), [
+    ["1-12-1", "1", "10"],
+    ["1-5-5", "4", "1"]
+  ]);
+  // 同一份数据: 内部序号是 1排10座、4排1座, 票面是 1排12座、5排5座
+  assert.deepEqual(map.seats.map(seatDisplayLabel), ["1排12座", "5排5座"]);
 });
 
 test("matches only the exact target date and HH:mm", () => {

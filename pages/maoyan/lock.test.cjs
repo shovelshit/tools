@@ -48,10 +48,18 @@ test("lock utilities derive China date bounds and submit readiness", () => {
   }), false);
 });
 
-test("lock utilities shorten displayed seat numbers without altering the full identifier", () => {
+test("lock utilities derive hall row/seat from the Maoyan seat identifier", () => {
   const { lockUtils } = loadLockModule();
-  assert.equal(lockUtils.seatLabel("1-6-18"), "18");
-  assert.equal(lockUtils.seatLabel("unexpected"), "unexpected");
+  // 猫眼 data-no 的结构是「区号-座号-排号」, 票面上看到的是「几排几座」
+  assert.equal(lockUtils.seatDisplayLabel("1-12-1"), "1排12座");
+  assert.equal(lockUtils.seatDisplayLabel("1-30-12"), "12排30座");
+  assert.equal(lockUtils.seatDisplayLabel({ seatNo: "1-3-1" }), "1排3座");
+  assert.deepEqual(JSON.parse(JSON.stringify(lockUtils.seatPosition("1-6-18"))), { rowNumber: 18, seatNumber: 6 });
+  // 非标准标识原样返回, 不吞掉原始值
+  assert.equal(lockUtils.seatDisplayLabel("unexpected"), "unexpected");
+  assert.equal(lockUtils.seatDisplayLabel(""), "");
+  assert.equal(lockUtils.seatPosition("unexpected"), null);
+  assert.equal(lockUtils.seatPosition("1-2-x"), null);
 });
 
 test("lock utilities require a selected cinema before enabling lock configuration", () => {

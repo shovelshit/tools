@@ -1,7 +1,10 @@
 import { publicCinemaShows } from "./api.js";
 import { findExactShows, fetchSeatMap, createUnpaidOrder, OrderAttemptError } from "./lock-client.js";
 import { getLockSessionStatus, loadLockSession, removeLockSession } from "./lock-session.js";
-import { createLockRule, getLockRule, isLockRuleTerminal, putLockRule, removeLockRule, RULE_KNOWN_ERRORS } from "./lock-rule.js";
+import {
+  createLockRule, getLockRule, isLockRuleTerminal, putLockRule, removeLockRule,
+  RULE_KNOWN_ERRORS, lockNotificationContent
+} from "./lock-rule.js";
 import { getUserConfig } from "./user.js";
 import { pushNotify } from "./notify.js";
 import { lockError, lockLog } from "./log.js";
@@ -38,9 +41,8 @@ async function saveRule(env, tokenId, rule, changes, deps) {
 async function notifyTerminal(env, tokenId, rule, deps) {
   const notify = deps.notify || pushNotify;
   const config = await (deps.getConfig || getUserConfig)(env, tokenId);
-  const labels = rule.seats.map((seat) => seat.seatNo).join("、");
-  const content = `${rule.cinemaName} ${rule.movieName}\n${rule.targetDate} ${rule.templateTime}\n${labels}` +
-    (rule.state === "locked" && rule.payLeftSecond !== null ? `\n剩余支付时间 ${rule.payLeftSecond} 秒` : "");
+  // 与立即锁座共用同一份正文(座位渲染成「几排几座」), 避免两处副本各自漂移
+  const content = lockNotificationContent(rule);
   try {
     await notify(config, rule.state === "locked" ? "猫眼锁座成功" : "猫眼锁座失败", content);
   } catch {

@@ -160,7 +160,8 @@ test("an immediate successful lock sends the same terminal notification after pe
   assert.equal(locked.state, "locked");
   assert.equal(notification.config.barkKey, "test-key");
   assert.equal(notification.title, "猫眼锁座成功");
-  assert.equal(notification.content, "测试影院 测试电影\n2026-09-11 20:00\n1-6-18\n剩余支付时间 600 秒");
+  // 推送里必须是人看的「几排几座」, 不能是内部座位标识 1-6-18
+  assert.equal(notification.content, "测试影院 测试电影\n2026-09-11 20:00\n18排6座\n剩余支付时间 600 秒");
 });
 
 test("an immediate notification failure keeps the successful order locked", async () => {

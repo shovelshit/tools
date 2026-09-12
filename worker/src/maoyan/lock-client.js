@@ -189,6 +189,23 @@ export function parseSeatPage(html) {
   return { sectionId, sectionName, seqNo, seats };
 }
 
+// 猫眼座位标识(data-no)的结构是「区号-座号-排号」, 而不是我们内部的解析序号:
+//   实测 1-12-1 => 1区 / 12号座 / 第1排, 即用户在票面上的「1排12座」
+//   同一排的座位共享第三段(排号), 第二段随座位递增(座号), 因此第三段才是排号。
+// 注意: rowId(影厅行序号, 从1连续) 与 columnId(该行内第几个座位) 只是解析用的序号,
+// 影厅会跳号(如没有4排)或留过道空位(如 3、4、27、28 无座), 直接当排座号展示会与猫眼对不上。
+// 展示一律用本函数, 内部请求仍使用原始 seatNo(不可改写)。
+export function seatDisplayLabel(seatOrSeatNo) {
+  const source = seatOrSeatNo && typeof seatOrSeatNo === "object" ? seatOrSeatNo.seatNo : seatOrSeatNo;
+  return seatLabelFromNo(source);
+}
+
+export function seatLabelFromNo(value) {
+  const parts = String(value || "").split("-");
+  if (parts.length !== 3 || parts.some((part) => !/^\d+$/.test(part))) return String(value || "");
+  return `${Number(parts[2])}排${Number(parts[1])}座`;
+}
+
 export function findExactShows(data, { movieId, targetDate, templateTime }) {
   const movie = (data?.showData?.movies || []).find((item) => String(item.id) === String(movieId));
   if (!movie) return [];

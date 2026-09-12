@@ -46,9 +46,18 @@
     );
   }
 
-  function seatLabel(seatNo) {
+  // 猫眼座位标识(data-no)是「区号-座号-排号」, 实测 1-12-1 => 票面「1排12座」。
+  // rowId/columnId 只是解析序号(影厅会跳号、留过道空位), 不能直接当排座号展示。
+  function seatPosition(seatNo) {
     const parts = String(seatNo || "").split("-");
-    return parts.at(-1) || String(seatNo || "");
+    if (parts.length !== 3 || parts.some((part) => !/^\d+$/.test(part))) return null;
+    return { rowNumber: Number(parts[2]), seatNumber: Number(parts[1]) };
+  }
+
+  function seatDisplayLabel(seat) {
+    const source = seat && typeof seat === "object" ? seat.seatNo : seat;
+    const position = seatPosition(source);
+    return position ? `${position.rowNumber}排${position.seatNumber}座` : String(source || "");
   }
 
   function isActiveLockRule(rule) {
@@ -149,10 +158,6 @@
       els.seatSource.classList.remove("hidden");
     }
 
-    function seatDisplayLabel(seat) {
-      return `${seat.rowId}排${seat.columnId}座`;
-    }
-
     function seatLabelMap() {
       const map = new Map();
       for (const seat of state.seatMap?.seats || []) {
@@ -214,7 +219,11 @@
         renderSelection();
         return;
       }
-      const seats = (rule.seats || []).map((seat) => seat.seatNo || seat).join("、");
+      // 规则里存的是内部座位标识(1-12-1), 展示统一换成「几排几座」
+      const labels = seatLabelMap();
+      const seats = (rule.seats || [])
+        .map((seat) => labels.get(String(seat?.seatNo ?? seat)) || seatDisplayLabel(seat))
+        .join("、");
       const status = RULE_LABELS[rule.state] || "规则状态未知";
       const suffix = rule.state === "unknown"
         ? " · 可能已经创建订单，请先检查猫眼订单，确认前不可再次提交"
@@ -320,14 +329,15 @@
       }
       const rows = new Map();
       for (const seat of seats) {
-        if (!/^\d+$/.test(String(seat.rowId)) || !/^\d+$/.test(String(seat.columnId))) continue;
-        const key = String(seat.rowId);
+        const position = seatPosition(seat.seatNo);
+        if (!position) continue;
+        const key = String(position.rowNumber);
         if (!rows.has(key)) rows.set(key, []);
         rows.get(key).push(seat);
       }
       const orderedRows = [...rows.entries()].sort((a, b) => Number(a[0]) - Number(b[0]));
-      // 列号表头(与猫眼一致)
-      const allCols = seats.map((seat) => Number(seat.columnId)).filter(Number.isFinite);
+      // 列号表头: 与猫眼一致, 用票面座号(会跳过过道空位)
+      const allCols = seats.map((seat) => seatPosition(seat.seatNo)?.seatNumber).filter(Number.isFinite);
       if (allCols.length) {
         const header = document.createElement("div");
         header.className = "lock-seat-row";
@@ -345,12 +355,12 @@
         header.append(headerLabel, headerGrid);
         els.seatGrid.append(header);
       }
-      for (const [rowId, rowSeats] of orderedRows) {
+      for (const [rowNumber, rowSeats] of orderedRows) {
         const row = document.createElement("div");
         row.className = "lock-seat-row";
         const label = document.createElement("span");
         label.className = "lock-row-label";
-        label.textContent = `${rowId}排`;
+        label.textContent = `${rowNumber}排`;
         const grid = document.createElement("div");
         grid.className = "lock-seat-grid";
         for (const seat of rowSeats) {
@@ -359,8 +369,10 @@
           const available = seat.available;
           const loverClass = seat.type === "L" ? " lover-left" : seat.type === "R" ? " lover-right" : "";
           button.className = `lock-seat${available ? " available" : " unavailable"}${loverClass}`;
-          button.style.gridColumn = String(Number(seat.columnId));
-          button.textContent = String(seat.columnId);
+          // 格位与文字都用票面座号, 这样过道空位会和猫眼一样留出缺口
+          const seatNumber = seatPosition(seat.seatNo)?.seatNumber ?? Number(seat.columnId);
+          button.style.gridColumn = String(seatNumber);
+          button.textContent = String(seatNumber);
           button.title = `${seatDisplayLabel(seat)}${loverClass ? " · 情侣座需成对选择" : ""}${available ? "" : "（不可选）"}`;
           button.disabled = !available;
           button.dataset.seatNo = String(seat.seatNo);
@@ -639,7 +651,7 @@
   const exported = {
     createMaoyanLockController,
     lockUtils: {
-      templatesFromMovies, chinaDateBounds, lockDateBounds, seatLabel, isReadyToSubmit,
+      templatesFromMovies, chinaDateBounds, lockDateBounds, seatPosition, seatDisplayLabel, isReadyToSubmit,
       isLockAvailable, lockAction, changeMovieSelection, preferredTargetShow, clearSeatSelection
     }
   };

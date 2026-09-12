@@ -194,6 +194,42 @@ test("automation exact HH:mm locks only selectable matching seats", async () => 
   assert.equal(stored.seqNo, "200");
 });
 
+test("scheduled lock push renders hall row/seat instead of the internal identifier", async () => {
+  const stored = rule({
+    seats: [{ seatNo: "1-12-1", rowId: "1", columnId: "10", type: "N" }],
+    targetDate: "2026-09-12"
+  });
+  let notification;
+  const result = await runOneLockRule(runtime(), tokenId, deps(stored, {
+    fetchSeats: async () => ({
+      seqNo: "200", sectionId: "1", sectionName: "1号厅",
+      seats: [{ seatNo: "1-12-1", rowId: "1", columnId: "10", available: true }]
+    }),
+    notify: async (_config, title, content) => { notification = { title, content }; }
+  }));
+
+  assert.equal(result.ok, true);
+  assert.equal(stored.state, "locked");
+  assert.equal(notification.title, "猫眼锁座成功");
+  // 实测样本: 1-12-1 是 1 区第 1 排第 12 号座 => 票面「1排12座」
+  assert.equal(notification.content, "测试影院 测试电影\n2026-09-12 20:00\n1排12座\n剩余支付时间 600 秒");
+  assert.equal(notification.content.includes("1-12-1"), false);
+});
+
+test("scheduled lock failure push keeps the readable seat label", async () => {
+  const stored = rule({ seats: [{ seatNo: "1-12-1", rowId: "1", columnId: "10", type: "N" }] });
+  let notification;
+  await runOneLockRule(runtime(), tokenId, deps(stored, {
+    createOrder: async () => { throw new OrderAttemptError("rejected", false); },
+    notify: async (_config, title, content) => { notification = { title, content }; }
+  }));
+
+  assert.equal(stored.state, "failed");
+  assert.equal(notification.title, "猫眼锁座失败");
+  // 失败通知没有支付倒计时
+  assert.equal(notification.content, "测试影院 测试电影\n2026-09-12 20:00\n1排12座");
+});
+
 test("automation marks a past China target date expired before provider calls", async () => {
   const stored = rule({ targetDate: "2026-09-10" });
   let cinemaCalls = 0;

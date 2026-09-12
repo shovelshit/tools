@@ -1,5 +1,8 @@
 import { fetchCinemaDetail } from "./api.js";
-import { fetchSeatMap, findExactShows, createUnpaidOrder, OrderAttemptError, ORDER_REJECTED_SESSION, ORDER_REJECTED_SEATS } from "./lock-client.js";
+import {
+  fetchSeatMap, findExactShows, createUnpaidOrder, OrderAttemptError,
+  ORDER_REJECTED_SESSION, ORDER_REJECTED_SEATS, seatDisplayLabel
+} from "./lock-client.js";
 import { loadLockSession } from "./lock-session.js";
 import { getUserConfig, userKey } from "./user.js";
 import { pushNotify } from "./notify.js";
@@ -136,11 +139,16 @@ function ruleKey(tokenId) {
   return userKey(tokenId, RULE_NAME);
 }
 
+// 推送正文: 立即锁座(createLockRule)与定时锁座(lock-runner)共用一份, 避免两处副本再次漂移。
+// 座位一律渲染成人看的「几排几座」, 不能直接扔内部标识(如 1-12-1)。
+export function lockNotificationContent(rule) {
+  const labels = (rule?.seats || []).map((seat) => seatDisplayLabel(seat)).join("、");
+  return `${rule.cinemaName} ${rule.movieName}\n${rule.targetDate} ${rule.templateTime}\n${labels}` +
+    (rule.state === "locked" && rule.payLeftSecond !== null ? `\n剩余支付时间 ${rule.payLeftSecond} 秒` : "");
+}
+
 async function notifyLockedRule(config, rule, notify = pushNotify) {
-  const labels = rule.seats.map((seat) => seat.seatNo).join("、");
-  const content = `${rule.cinemaName} ${rule.movieName}\n${rule.targetDate} ${rule.templateTime}\n${labels}` +
-    (rule.payLeftSecond !== null ? `\n剩余支付时间 ${rule.payLeftSecond} 秒` : "");
-  await notify(config, "猫眼锁座成功", content);
+  await notify(config, "猫眼锁座成功", lockNotificationContent(rule));
 }
 
 export async function getLockRule(env, tokenId) {
