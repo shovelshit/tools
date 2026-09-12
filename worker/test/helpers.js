@@ -16,6 +16,15 @@ export class MemoryKV {
   async delete(key) {
     this.data.delete(key);
   }
+
+  // 与 KV list 语义对齐的内存实现: 无分页, 一次性返回(list_complete: true)
+  async list(options = {}) {
+    const prefix = String(options.prefix || "");
+    const keys = [...this.data.keys()]
+      .filter((key) => key.startsWith(prefix))
+      .map((name) => ({ name }));
+    return { keys, list_complete: true };
+  }
 }
 
 export function testEncryptionKey() {

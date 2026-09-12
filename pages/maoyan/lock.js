@@ -171,6 +171,7 @@
       risk: $("lock-risk-accepted"), ruleStatus: $("lock-rule-status"), cancelRule: $("btn-lock-cancel-rule"),
       templateLabel: $("lock-template-label"),
       seatSource: $("lock-seat-source"),
+      seatFeedback: $("btn-lock-seat-feedback"),
       gateHint: $("lock-gate-hint"),
       sectionSchedule: $("lock-section-schedule"),
       sectionSeats: $("lock-section-seats"),
@@ -182,7 +183,7 @@
     const state = {
       context: null, session: { uploaded: false }, movieId: "", templateSeqNo: "", seatMap: null,
       selectedSeatNos: new Set(), rule: null, automationEnabled: false, templates: [], dateBounds: lockDateBounds(),
-      seatSeg: 2, zoom: 1, panX: 0, panY: 0
+      seatSeg: 2, zoom: 1, panX: 0, panY: 0, seatFeedback: { seqNo: "", at: 0 }
     };
 
     function show(message, type = "info") {
@@ -781,6 +782,7 @@
     els.removeSession.addEventListener("click", removeSession);
     els.submit.addEventListener("click", createRule);
     els.cancelRule.addEventListener("click", cancelRule);
+    els.seatFeedback?.addEventListener("click", () => { sendSeatFeedback(); });
     els.zoomIn.addEventListener("click", () => changeZoom(0.2));
     els.zoomOut.addEventListener("click", () => changeZoom(-0.2));
     els.zoomReset.addEventListener("click", resetZoom);

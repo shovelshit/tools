@@ -6,6 +6,7 @@ import { isExpired } from "./ddl.js";
 import { json } from "../common/http.js";
 import { runCheck } from "./check.js";
 import { monitorError } from "./log.js";
+import { listSeatFeedback, deleteSeatFeedback } from "./seat-feedback.js";
 
 export function randomToken() {
   const bytes = new Uint8Array(16);
@@ -100,6 +101,18 @@ export async function handleAdminTokens(request, env, url) {
       if (!revoked) return json({ ok: false, error: "令牌不存在" }, 404);
       await saveManagedTokens(env, list.filter((token) => token.id !== id));
       await cleanupUserData(env, id);
+      return json({ ok: true });
+    }
+    if (url.pathname === "/api/admin/seat-feedback" && request.method === "GET") {
+      // 座位解析失败反馈全量列表: 记录只有标识, 管理员拿 id 现场重拉座位页复习
+      return json({ ok: true, feedback: await listSeatFeedback(env) });
+    }
+    if (url.pathname === "/api/admin/seat-feedback" && request.method === "DELETE") {
+      const body = await request.json().catch(() => ({}));
+      const key = String(url.searchParams.get("key") || body.key || "");
+      if (!await deleteSeatFeedback(env, key)) {
+        return json({ ok: false, error: "无效的反馈记录" }, 400);
+      }
       return json({ ok: true });
     }
     return json({ error: "Method Not Allowed" }, 405);

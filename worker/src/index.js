@@ -40,7 +40,7 @@ export default {
     }
 
     // ---- 令牌管理接口(管理员, X-Admin-Token 鉴权) ----
-    if (url.pathname === "/api/admin/tokens" || url.pathname === "/api/admin/tokens/revoke") {
+    if (url.pathname === "/api/admin/tokens" || url.pathname === "/api/admin/tokens/revoke" || url.pathname === "/api/admin/seat-feedback") {
       return handleAdminTokens(request, env, url);
     }
 

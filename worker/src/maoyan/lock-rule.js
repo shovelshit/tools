@@ -4,6 +4,7 @@ import {
   ORDER_REJECTED_SESSION, ORDER_REJECTED_SEATS, seatDisplayLabel, seatSegmentOf
 } from "./lock-client.js";
 import { loadLockSession } from "./lock-session.js";
+import { withSeatFeedback } from "./seat-feedback.js";
 import { getUserConfig, userKey } from "./user.js";
 import { pushNotify } from "./notify.js";
 import { lockError, lockLog } from "./log.js";
@@ -193,7 +194,8 @@ export async function createLockRule(env, tokenId, input, options = {}) {
 
   const fetchCinema = options.fetchCinema || fetchCinemaDetail;
   const loadSession = options.loadSession || loadLockSession;
-  const fetchSeats = options.fetchSeats || fetchSeatMap;
+  // 默认的取图入口包一层解析失败自动留档(只写标识 KV, 失败静默); 测试/协调器注入的 fetchSeats 不经包装
+  const fetchSeats = options.fetchSeats || withSeatFeedback(fetchSeatMap, env, { tokenId, cinemaId: values.cinemaId, movieId: values.movieId });
   const placeOrder = options.placeOrder || createUnpaidOrder;
   const now = options.now || new Date();
   const [session, cinema] = await Promise.all([loadSession(env, tokenId), fetchCinema(values.cinemaId)]);

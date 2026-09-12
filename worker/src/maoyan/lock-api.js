@@ -1,5 +1,6 @@
 import { json } from "../common/http.js";
 import { fetchSeatMap } from "./lock-client.js";
+import { recordSeatFeedback } from "./seat-feedback.js";
 import {
   getLockSessionStatus,
   loadLockSession,
@@ -17,7 +18,8 @@ const LOCK_ROUTES = new Map([
   ["/api/lock/session/remove", ["POST"]],
   ["/api/lock/template-seats", ["GET"]],
   ["/api/lock/rule", ["POST", "GET"]],
-  ["/api/lock/rule/cancel", ["POST"]]
+  ["/api/lock/rule/cancel", ["POST"]],
+  ["/api/lock/seat-feedback", ["POST"]]
 ]);
 
 function response(body, status = 200) {
@@ -155,6 +157,22 @@ export async function handleLockApi(request, env, url, tokenId) {
       return response({
         rule: publicLockRule(await getLockRule(env, tokenId), String(env.LOCK_SERVICE_ENABLED) === "true")
       });
+    }
+    if (url.pathname === "/api/lock/seat-feedback" && request.method === "POST") {
+      // 只收标识: 用户在座位图旁点「反馈」上报当前影院/影片/场次。
+      // 服务端只写 KV 不拉页面, 因此不要求已上传会话; 无内容存储(用户决策)。
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        throw inputError("反馈参数无效");
+      }
+      const cinemaId = exactDecimal(body?.cinemaId, "cinemaId");
+      const movieId = exactDecimal(body?.movieId, "movieId");
+      const seqNo = body?.seqNo == null ? "" : String(body.seqNo);
+      if (seqNo && !DECIMAL.test(seqNo)) throw inputError("seqNo 无效");
+      await recordSeatFeedback(env, { tokenId, cinemaId, movieId, seqNo, source: "manual" });
+      return response({ recorded: true });
     }
     if (url.pathname === "/api/lock/rule/cancel" && request.method === "POST") {
       await cancelLockRuleThroughCoordinator(env, tokenId);

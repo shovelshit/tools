@@ -8,6 +8,7 @@ import {
 import { getUserConfig } from "./user.js";
 import { pushNotify } from "./notify.js";
 import { lockError, lockLog } from "./log.js";
+import { withSeatFeedback } from "./seat-feedback.js";
 
 const TOKEN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -74,7 +75,8 @@ export async function runOneLockRule(env, tokenId, deps = {}) {
   }
   const exactShows = deps.findShows || findExactShows;
   const loadSession = deps.loadSession || loadLockSession;
-  const fetchSeats = deps.fetchSeats || fetchSeatMap;
+  // 默认的取图入口包一层解析失败自动留档(只写标识 KV, 失败静默); 测试注入的 deps.fetchSeats 不经包装
+  const fetchSeats = deps.fetchSeats || withSeatFeedback(fetchSeatMap, env, { tokenId, cinemaId: rule.cinemaId, movieId: rule.movieId });
   const createOrder = deps.createOrder || createUnpaidOrder;
   let show;
   let session;

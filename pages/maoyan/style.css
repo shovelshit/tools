@@ -727,6 +727,9 @@ input[type="password"]:focus { border-color: var(--primary); }
 
 .lock-seat-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .lock-legend { color: var(--muted); font-size: 11px; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.lock-heading-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* 座位解析失败反馈按钮: 常驻, 座位图加载失败时红色高亮引导用户上报 */
+.lock-feedback.attention { color: var(--danger); border-color: var(--danger); }
 .legend-seat { width: 12px; height: 12px; border: 1px solid var(--border); border-radius: 3px; display: inline-block; }
 .legend-seat.available { background: #eff9f4; border-color: #8ed0af; }
 .legend-seat.selected { background: var(--primary); border-color: var(--primary); }
