@@ -105,6 +105,17 @@ test("seat map centers, pans by drag, zooms at cursor; risk box only for inferre
   assert.match(readSource("style.css"), /\.lock-seat-scroll \{ overflow: hidden;.*cursor: grab;/);
 });
 
+test("seat map auto-detects swapped seatNo segment order (Dolby vs laser IMAX halls)", () => {
+  const source = readSource("lock.js");
+  // 真实缺陷: 寰映IMAX厅 data-no=区-排-座, 固定把第二段当座号 → 同排座位挤进同一列(竖条)。
+  // 座号段判别 + 加载座位表后写入 state, 布局/表头/文案统一走判别后的段位。
+  assert.match(source, /function seatSegmentOf\(seats\)/);
+  assert.match(source, /return seg3 > seg2 && seg3 > rows \? 3 : 2;/);
+  assert.match(source, /seatPosition\(seat, state\.seatSeg\)/);
+  assert.match(source, /state\.seatSeg = seatSegmentOf\(seatMap\?\.seats\)/);
+  assert.match(source, /seatDisplayLabel\(seat, state\.seatSeg\)/);
+});
+
 test("empty today/past target date lists other-date real sessions and locks them as real shows", () => {
   const source = readSource("lock.js");
   // 今天/已过日期无场次: 不再走推断逻辑, 选中即按 jumpDate 切换目标日期进入真实场次模式

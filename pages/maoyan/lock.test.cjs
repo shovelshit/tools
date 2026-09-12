@@ -64,6 +64,32 @@ test("lock utilities derive hall row/seat from the Maoyan seat identifier", () =
   assert.equal(lockUtils.seatPosition({ seatNo: "1-2-3" }), null);
 });
 
+test("lock utilities detect swapped seatNo segments in laser IMAX halls", () => {
+  const { lockUtils } = loadLockModule();
+  // 真实座位页锚定(寰映影城大融城 1号激光IMAX厅): data-no=区-排号-座号(11排×35座),
+  // 与杜比厅「区-座号-物理排」相反; 固定把第二段当座号会把同排座位挤进同一列(竖条 bug)。
+  const imaxSeats = [
+    { seatNo: "33-1-29", rowId: "1", columnId: "29" },
+    { seatNo: "33-1-30", rowId: "1", columnId: "30" },
+    { seatNo: "33-2-31", rowId: "2", columnId: "31" },
+    { seatNo: "33-11-1", rowId: "11", columnId: "1" }
+  ];
+  assert.equal(lockUtils.seatSegmentOf(imaxSeats), 3);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(lockUtils.seatPosition(imaxSeats[0], 3))),
+    { rowNumber: 1, seatNumber: 29 }
+  );
+  assert.equal(lockUtils.seatDisplayLabel(imaxSeats[0], 3), "1排29座");
+  // 杜比厅口径不受影响: 判别回退第二段=座号
+  const dolbySeats = [
+    { seatNo: "1-12-1", rowId: "1", columnId: "10" },
+    { seatNo: "1-1-10", rowId: "9", columnId: "1" }
+  ];
+  assert.equal(lockUtils.seatSegmentOf(dolbySeats), 2);
+  // 保守回退: 无法区分时维持旧口径
+  assert.equal(lockUtils.seatSegmentOf([]), 2);
+});
+
 test("lock utilities require a selected cinema before enabling lock configuration", () => {
   const { lockUtils } = loadLockModule();
   assert.equal(lockUtils.isLockAvailable({ connected: true, cinemaId: "25428", cinemaSelected: true, lockServiceEnabled: true }), true);

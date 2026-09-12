@@ -8,7 +8,8 @@ import {
   OrderAttemptError,
   parseSeatPage,
   requestMaoyan,
-  seatDisplayLabel
+  seatDisplayLabel,
+  seatSegmentOf
 } from "../src/maoyan/lock-client.js";
 
 const seatHtml = `
@@ -98,6 +99,32 @@ test("parsed identifiers keep the raw seatNo while row/column stay parse ordinal
   ]);
   // 同一份数据: 票面是 1排12座、9排1座(data-no 第三段的 1、10 均不是票面排号口径)
   assert.deepEqual(map.seats.map(seatDisplayLabel), ["1排12座", "9排1座"]);
+});
+
+test("detects the swapped seatNo segment order of laser IMAX halls", () => {
+  // 真实座位页锚定(寰映影城大融城 1号激光IMAX厅 seqNo=202609170005201):
+  // data-no=区-排号-座号, 11 排(rowId 1..11)、座号取值 1..35, 与杜比厅的「区-座号-物理排」相反。
+  // 此前把第二段固定当座号(列), 同排全部座位挤进同一列, 座位图渲染成一根竖条。
+  const imaxSeats = [
+    { seatNo: "33-1-29", rowId: "1", columnId: "29" },
+    { seatNo: "33-1-30", rowId: "1", columnId: "30" },
+    { seatNo: "33-2-31", rowId: "2", columnId: "31" },
+    { seatNo: "33-11-1", rowId: "11", columnId: "1" }
+  ];
+  assert.equal(seatSegmentOf(imaxSeats), 3);
+  const seg = seatSegmentOf(imaxSeats);
+  assert.equal(seatDisplayLabel(imaxSeats[0], seg), "1排29座");
+  assert.equal(seatDisplayLabel(imaxSeats[3], seg), "11排1座");
+  // 杜比厅口径不受影响: 第二段唯一值多于第三段 → 维持第二段=座号
+  const dolbySeats = [
+    { seatNo: "1-12-1", rowId: "1", columnId: "10" },
+    { seatNo: "1-1-10", rowId: "9", columnId: "1" }
+  ];
+  assert.equal(seatSegmentOf(dolbySeats), 2);
+  // 保守护栏: 座位过少无法区分口径时回退旧口径(第二段=座号)
+  assert.equal(seatSegmentOf([{ seatNo: "1-1-1", rowId: "1" }]), 2);
+  assert.equal(seatSegmentOf([]), 2);
+  assert.equal(seatSegmentOf(null), 2);
 });
 
 test("matches only the exact target date and HH:mm", () => {

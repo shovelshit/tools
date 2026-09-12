@@ -189,22 +189,37 @@ export function parseSeatPage(html) {
   return { sectionId, sectionName, seqNo, seats };
 }
 
-// 猫眼座位口径(以真实订单锚定: seatNo=1-1-10 / rowId=9 的订单票面为「9排1座」):
-//   票面排号 = data-row-id (影厅内 1..N 连续)
-//   票面座号 = data-no 第二段 (物理座号, 过道处跳号, 如 1,2,5..30)
-//   data-no 第三段 = 影厅内部物理排号(1,2,3,5..12, 会跳过"4排"), 与票面排号在第 3 排之后
-//   整体错位 +1, 不可用于展示; data-no 第一段为区号。
+// 猫眼座位口径: 票面排号 = data-row-id (影厅内 1..N 连续)。
+// 但 data-no 段语义存在两种影厅口径(均以真实座位页锚定):
+//   杜比厅(万达天和广场): data-no=区-座号-物理排 (订单 1-1-10/rowId=9 票面「9排1座」)
+//   激光IMAX厅(寰映大融城): data-no=区-排号-座号 (页面 33-1-29/rowId=1 为「1排29座」)
 // rowId/columnId 是解析序号: columnId 是行内第几个座位(连续), 与座号在过道后错位。
 // 展示一律用本函数(需要 seat 对象携带 rowId); 只有 seatNo 字符串无法换算排号, 原样返回。
 // 内部请求仍使用原始 seatNo(不可改写)。
-export function seatDisplayLabel(seatOrSeatNo) {
+// 座号段判别: 仅当第三段唯一值同时大于第二段和排数时视为「区-排-座」口径, 否则维持旧口径。
+export function seatSegmentOf(seats) {
+  const uniques = (index) => {
+    const values = new Set();
+    for (const seat of seats || []) {
+      const parts = String(seat?.seatNo || "").split("-");
+      if (parts.length === 3 && parts.every((part) => /^\d+$/.test(part))) values.add(parts[index]);
+    }
+    return values.size;
+  };
+  const seg2 = uniques(1);
+  const seg3 = uniques(2);
+  const rows = new Set((seats || []).map((seat) => String(seat?.rowId ?? ""))).size;
+  return seg3 > seg2 && seg3 > rows ? 3 : 2;
+}
+
+export function seatDisplayLabel(seatOrSeatNo, seatSegment = 2) {
   const seat = seatOrSeatNo && typeof seatOrSeatNo === "object" ? seatOrSeatNo : null;
   if (!seat) return seatOrSeatNo == null ? "" : String(seatOrSeatNo);
   const seatNo = String(seat.seatNo || "");
   const parts = seatNo.split("-");
   const valid = parts.length === 3 && parts.every((part) => /^\d+$/.test(part));
   const row = Number(seat.rowId);
-  const seatNumber = valid ? Number(parts[1]) : NaN;
+  const seatNumber = valid ? Number(parts[seatSegment === 3 ? 2 : 1]) : NaN;
   if (!Number.isInteger(row) || row <= 0 || !Number.isInteger(seatNumber)) return seatNo;
   return `${row}排${seatNumber}座`;
 }
