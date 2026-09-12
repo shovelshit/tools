@@ -80,7 +80,7 @@ test("seat map centers, pans by drag, zooms at cursor; risk box only for inferre
   assert.match(source, /centerSeatMap\(\);/);
   assert.match(source, /suppressClick/);
   // 推断标记必须在模板分支被置真(此前从未置真, warn 与推断座位全可选逻辑均不生效)
-  assert.match(source, /state\.showMode = "template";\n        state\.seatMapIsTemplate = true;/);
+  assert.match(source, /state\.showMode = "template";\n          state\.seatMapIsTemplate = true;/);
   // 风险区: 仅推断座位展示, 门控期隐藏; 勾选仅在推断模式下必填
   assert.match(source, /setHidden\(els\.sectionRisk, !state\.session\?\.uploaded \|\| state\.seatMapIsTemplate !== true\)/);
   assert.match(source, /if \(state\.seatMapIsTemplate && !els\.risk\?\.checked\) return "请先勾选风险提示";/);
@@ -89,4 +89,18 @@ test("seat map centers, pans by drag, zooms at cursor; risk box only for inferre
   // 画布式容器: 滚轮缩放/拖动平移
   assert.match(html, /滚轮缩放 · 按住拖动 · 双指捏合/);
   assert.match(readSource("style.css"), /\.lock-seat-scroll \{ overflow: hidden;.*cursor: grab;/);
+});
+
+test("empty today/past target date lists other-date real sessions and locks them as real shows", () => {
+  const source = readSource("lock.js");
+  // 今天/已过日期无场次: 不再走推断逻辑, 选中即按 jumpDate 切换目标日期进入真实场次模式
+  assert.match(source, /else if \(!isFuture\) \{\n          \/\/ 今天\/已过日期无场次/);
+  assert.match(source, /els\.templateLabel\.textContent = "其他日期场次（真实可锁）"/);
+  assert.match(source, /option\.dataset\.jumpDate = item\.showDate;/);
+  assert.match(source, /const jumpDate = els\.template\.selectedOptions\?\.\[0\]\?\.dataset\?\.jumpDate;/);
+  assert.match(source, /els\.date\.value = jumpDate;/);
+  // 该分支不产生推断座位, 风险框保持隐藏
+  assert.match(source, /state\.showMode = "target";\n          state\.seatMapIsTemplate = false;/);
+  // 未来日期无场次的推断路径保持不变
+  assert.match(source, /以下为模板场次的未来推断座位/);
 });

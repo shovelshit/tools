@@ -309,7 +309,8 @@
       renderShowOptions();
     }
 
-    // 目标日期有排期 → 第三项为「目标场次」(真实座位图); 无排期 → 「座位模板场次」(推断布局)
+    // 目标日期有排期 → 「目标场次」(真实座位图, 立即锁座); 未来日期无排期 → 「座位模板场次」(推断布局, 保存等待规则);
+    // 今天/已过日期无排期 → 列出其他日期的真实场次, 选中即把目标日期切到该场次日期, 按真实场次「立即锁座」
     function renderShowOptions() {
       if (!els.date.value) els.date.value = chinaDate(new Date());
       const targetDateStr = els.date.value;
@@ -331,19 +332,43 @@
         state.seatMapIsTemplate = false;
         state.seatMapSource = `展示目标场次 ${targetDateStr} 的真实座位图`;
       } else {
-        state.showMode = "template";
-        state.seatMapIsTemplate = true;
-        els.templateLabel.textContent = "座位模板场次（推断布局）";
         // 黄色推断提示只在选了未来日期且该日期无场次时展示
         const isFuture = targetDateStr > chinaDate(new Date());
-        state.seatMapSource = isFuture
-          ? `${targetDateStr} 暂无场次，以下为模板场次的未来推断座位（全部可选，开售后按实际售卖为准）`
-          : `${targetDateStr} 暂无场次，以下为模板场次的推断座位（全部可选）`;
         if (!movieTemplates.length) {
+          state.showMode = "template";
+          state.seatMapIsTemplate = true;
+          els.templateLabel.textContent = "座位模板场次（推断布局）";
+          state.seatMapSource = isFuture
+            ? `${targetDateStr} 暂无场次，以下为模板场次的未来推断座位（全部可选，开售后按实际售卖为准）`
+            : `${targetDateStr} 暂无场次，以下为模板场次的推断座位（全部可选）`;
           els.template.append(new Option("暂无场次", ""));
           els.template.disabled = true;
           state.templateSeqNo = "";
+        } else if (!isFuture) {
+          // 今天/已过日期无场次: 推断等待无意义, 列出的其他日期场次都是真实场次。
+          // 占位选中项不产生任何规则; 用户选定后由 change 监听按 jumpDate 切换目标日期,
+          // 重新进入「目标场次」真实模式(真实座位图 + 立即锁座), 不再走推断/保存规则路径。
+          state.showMode = "target";
+          state.seatMapIsTemplate = false;
+          state.seatMapSource = `${targetDateStr} 已无场次，可选择其他日期的真实场次直接锁定`;
+          els.templateLabel.textContent = "其他日期场次（真实可锁）";
+          els.template.disabled = false;
+          els.template.append(new Option("请选择场次（选中后锁定该真实场次）", ""));
+          const sorted = movieTemplates.slice().sort((a, b) => a.showDate.localeCompare(b.showDate) || a.tm.localeCompare(b.tm));
+          for (const item of sorted) {
+            const details = [item.showDate, item.tm, item.lang, item.tp, item.th].filter(Boolean).join(" · ");
+            // 已过日期的场次不可锁(目标日期限制为今天起 30 天), 一律置灰
+            const option = new Option(item.disabled ? `${details}（停售）` : details, item.seqNo);
+            option.disabled = item.disabled || item.showDate < targetDateStr;
+            option.dataset.jumpDate = item.showDate;
+            els.template.append(option);
+          }
+          state.templateSeqNo = "";
         } else {
+          state.showMode = "template";
+          state.seatMapIsTemplate = true;
+          els.templateLabel.textContent = "座位模板场次（推断布局）";
+          state.seatMapSource = `${targetDateStr} 暂无场次，以下为模板场次的未来推断座位（全部可选，开售后按实际售卖为准）`;
           els.template.disabled = false;
           for (const item of movieTemplates) {
             const details = [item.showDate, item.tm, item.lang, item.tp, item.th].filter(Boolean).join(" · ");
@@ -696,7 +721,19 @@
       await changeMovieSelection({ state, movieId: els.movie.value, renderShowOptions, loadSeats });
     });
     els.date.addEventListener("change", () => { renderShowOptions(); loadSeats(); });
-    els.template.addEventListener("change", async () => { state.templateSeqNo = els.template.value; await loadSeats(); });
+    els.template.addEventListener("change", async () => {
+      // 今天/已过日期无场次时列出的其他日期真实场次: 选中即把目标日期切到该场次日期,
+      // 重新渲染进入「目标场次」真实模式(真实座位图 + 立即锁座), 不产生推断规则
+      const jumpDate = els.template.selectedOptions?.[0]?.dataset?.jumpDate;
+      if (jumpDate) {
+        els.date.value = jumpDate;
+        renderShowOptions();
+        await loadSeats();
+        return;
+      }
+      state.templateSeqNo = els.template.value;
+      await loadSeats();
+    });
     els.risk.addEventListener("change", renderSelection);
     els.upload.addEventListener("click", uploadSession);
     els.removeSession.addEventListener("click", removeSession);
