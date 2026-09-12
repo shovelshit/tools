@@ -144,7 +144,7 @@
     const state = {
       context: null, session: { uploaded: false }, movieId: "", templateSeqNo: "", seatMap: null,
       selectedSeatNos: new Set(), rule: null, automationEnabled: false, templates: [], dateBounds: lockDateBounds(),
-      zoom: 1
+      zoom: 1, panX: 0, panY: 0
     };
 
     function show(message, type = "info") {
@@ -175,6 +175,7 @@
 
     // 座位图来源提示: 目标场次真实座位图 / 无场次时的未来推断提醒
     function renderSeatSource() {
+      renderRiskSection();
       if (!els.seatSource) return;
       if (!state.seatMapSource) {
         els.seatSource.classList.add("hidden");
@@ -183,6 +184,12 @@
       els.seatSource.textContent = state.seatMapSource;
       els.seatSource.classList.toggle("warn", state.seatMapIsTemplate === true);
       els.seatSource.classList.remove("hidden");
+    }
+
+    // Beta 推断风险提示只在「未来日期无场次 → 推断座位」时展示;
+    // 目标场次是真实座位图无推断风险(待支付说明在弹窗副标题里已有); 门控期(未上传会话)一律隐藏
+    function renderRiskSection() {
+      setHidden(els.sectionRisk, !state.session?.uploaded || state.seatMapIsTemplate !== true);
     }
 
     function seatLabelMap() {
@@ -199,7 +206,8 @@
       if (!state.templateSeqNo) return "请选择场次";
       if (!state.selectedSeatNos.size) return "请先选择座位";
       if (!/^\d{4}-\d{2}-\d{2}$/.test(els.date?.value || "")) return "请选择目标日期";
-      if (!els.risk?.checked) return "请先勾选风险提示";
+      // 风险确认仅针对推断座位(真实座位图无推断风险, 无需勾选)
+      if (state.seatMapIsTemplate && !els.risk?.checked) return "请先勾选风险提示";
       if (state.dateBounds && ((els.date.value || "") < state.dateBounds.min || (els.date.value || "") > state.dateBounds.max)) {
         return "目标日期超出 30 天范围";
       }
@@ -324,6 +332,7 @@
         state.seatMapSource = `展示目标场次 ${targetDateStr} 的真实座位图`;
       } else {
         state.showMode = "template";
+        state.seatMapIsTemplate = true;
         els.templateLabel.textContent = "座位模板场次（推断布局）";
         // 黄色推断提示只在选了未来日期且该日期无场次时展示
         const isFuture = targetDateStr > chinaDate(new Date());
@@ -440,20 +449,56 @@
         els.seatGrid.append(row);
       }
       renderSelection();
+      centerSeatMap();
     }
 
-    function applyZoom() {
-      if (els.seatGrid) els.seatGrid.style.transform = `scale(${state.zoom})`;
+    function applyTransform() {
+      if (els.seatGrid) els.seatGrid.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.zoom})`;
       if (els.zoomLabel) els.zoomLabel.textContent = `${Math.round(state.zoom * 100)}%`;
     }
 
-    function changeZoom(delta) {
-      state.zoom = Math.min(2, Math.max(0.4, Math.round((state.zoom + delta) * 10) / 10));
+    // 平移边界: 内容不大于容器时固定居中; 超出容器时限制拖动范围, 不允许把内容整个拖出视野
+    function clampPan() {
+      const box = els.seatGrid?.closest(".lock-seat-scroll");
+      if (!box || !els.seatGrid) return;
+      const w = els.seatGrid.offsetWidth * state.zoom;
+      const h = els.seatGrid.offsetHeight * state.zoom;
+      const bw = box.clientWidth;
+      const bh = box.clientHeight;
+      state.panX = w <= bw ? (bw - w) / 2 : Math.min(0, Math.max(bw - w, state.panX));
+      state.panY = h <= bh ? (bh - h) / 2 : Math.min(0, Math.max(bh - h, state.panY));
+    }
+
+    function applyZoom() {
+      clampPan();
+      applyTransform();
+    }
+
+    // 渲染后把座位图放到容器正中
+    function centerSeatMap() {
       applyZoom();
+    }
+
+    // 以容器可视区坐标 (px,py) 为锚点缩放, 保持锚点下的内容位置不动
+    function zoomAt(newZoom, px, py) {
+      const previous = state.zoom;
+      state.zoom = Math.min(2, Math.max(0.4, Math.round(newZoom * 10) / 10));
+      if (state.zoom === previous) return;
+      const ratio = state.zoom / previous;
+      state.panX = px - (px - state.panX) * ratio;
+      state.panY = py - (py - state.panY) * ratio;
+      applyZoom();
+    }
+
+    function changeZoom(delta) {
+      const box = els.seatGrid?.closest(".lock-seat-scroll");
+      zoomAt(state.zoom + delta, box ? box.clientWidth / 2 : 0, box ? box.clientHeight / 2 : 0);
     }
 
     function resetZoom() {
       state.zoom = 1;
+      state.panX = 0;
+      state.panY = 0;
       applyZoom();
     }
 
@@ -660,13 +705,13 @@
     els.zoomIn.addEventListener("click", () => changeZoom(0.2));
     els.zoomOut.addEventListener("click", () => changeZoom(-0.2));
     els.zoomReset.addEventListener("click", resetZoom);
-    // Ctrl/Cmd+滚轮缩放, 双指捏合缩放; 普通滚轮保持滚动
+    // 滚轮缩放(以光标为锚), 双指捏合缩放(以中点为锚), 按住拖动平移
     const scrollEl = els.seatGrid.closest(".lock-seat-scroll");
     if (scrollEl) {
       scrollEl.addEventListener("wheel", (event) => {
-        if (!(event.ctrlKey || event.metaKey)) return;
         event.preventDefault();
-        changeZoom(event.deltaY < 0 ? 0.1 : -0.1);
+        const rect = scrollEl.getBoundingClientRect();
+        zoomAt(state.zoom + (event.deltaY < 0 ? 0.1 : -0.1), event.clientX - rect.left, event.clientY - rect.top);
       }, { passive: false });
       let pinch = null;
       scrollEl.addEventListener("touchstart", (event) => {
@@ -683,11 +728,45 @@
         event.preventDefault();
         const dist = Math.hypot(event.touches[0].clientX - event.touches[1].clientX, event.touches[0].clientY - event.touches[1].clientY);
         if (pinch.dist > 0) {
-          state.zoom = Math.min(2, Math.max(0.4, Math.round((pinch.zoom * dist) / pinch.dist * 10) / 10));
-          applyZoom();
+          const rect = scrollEl.getBoundingClientRect();
+          const midX = (event.touches[0].clientX + event.touches[1].clientX) / 2 - rect.left;
+          const midY = (event.touches[0].clientY + event.touches[1].clientY) / 2 - rect.top;
+          zoomAt((pinch.zoom * dist) / pinch.dist, midX, midY);
         }
       }, { passive: false });
       scrollEl.addEventListener("touchend", () => { pinch = null; });
+      // 鼠标/单指拖动平移; 移动超过阈值才算拖动, 松手后吞掉那次 click 以免误选座位
+      let drag = null;
+      let suppressClick = false;
+      scrollEl.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0) return;
+        drag = { x: event.clientX, y: event.clientY, panX: state.panX, panY: state.panY, moved: false };
+      });
+      scrollEl.addEventListener("pointermove", (event) => {
+        if (!drag) return;
+        const dx = event.clientX - drag.x;
+        const dy = event.clientY - drag.y;
+        if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+        drag.moved = true;
+        scrollEl.classList.add("dragging");
+        state.panX = drag.panX + dx;
+        state.panY = drag.panY + dy;
+        applyZoom();
+      });
+      const endDrag = () => {
+        if (!drag) return;
+        suppressClick = drag.moved;
+        drag = null;
+        scrollEl.classList.remove("dragging");
+      };
+      scrollEl.addEventListener("pointerup", endDrag);
+      scrollEl.addEventListener("pointercancel", endDrag);
+      scrollEl.addEventListener("click", (event) => {
+        if (!suppressClick) return;
+        suppressClick = false;
+        event.stopPropagation();
+        event.preventDefault();
+      }, true);
     }
     resetSeats({ clearSource: true });
 

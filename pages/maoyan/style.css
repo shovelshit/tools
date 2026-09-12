@@ -732,8 +732,10 @@ input[type="password"]:focus { border-color: var(--primary); }
 .legend-seat.selected { background: var(--primary); border-color: var(--primary); }
 .legend-seat.unavailable { background: #eceff3; border-color: #d7dce3; }
 .lock-screen { width: min(360px, 80%); margin: 6px auto 8px; padding: 3px 8px; text-align: center; background: #f5e8be; color: #805d00; border-radius: 3px; font-size: 11px; }
-.lock-seat-scroll { overflow: auto; max-height: 46vh; padding: 12px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--log-bg); }
-.lock-seat-rows { min-width: max-content; transform-origin: top left; transition: transform 0.12s ease; }
+.lock-seat-scroll { overflow: hidden; max-height: 46vh; padding: 12px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--log-bg); cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+.lock-seat-scroll.dragging { cursor: grabbing; }
+.lock-seat-scroll.dragging .lock-seat-rows { transition: none; }
+.lock-seat-rows { min-width: max-content; transform-origin: top left; transition: transform 0.08s ease; }
 .lock-zoom-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .lock-zoom-bar .btn { padding: 2px 10px; }
 #lock-zoom-label { font-size: 11px; color: var(--muted); min-width: 40px; text-align: center; }
@@ -771,7 +773,7 @@ input[type="password"]:focus { border-color: var(--primary); }
 .lock-seat.unavailable { background: #eceff3; border-color: #d7dce3; color: #a4acb8; cursor: not-allowed; }
 .lock-empty { min-width: 320px; padding: 18px 10px; color: var(--muted); font-size: 12px; text-align: center; }
 
-.lock-risk { padding: 10px 12px; border: 1px solid #f0dcb0; border-radius: 6px; background: #fff8e6; color: #805d00; font-size: 12px; line-height: 1.65; }
+.lock-risk { padding: 10px 12px; border: 1px solid #f2b8b5; border-radius: 6px; background: #fdeceb; color: #b3261e; font-size: 12px; line-height: 1.65; }
 .lock-risk-check { display: flex; align-items: center; gap: 7px; margin-top: 8px; color: var(--text); cursor: pointer; }
 .lock-risk-check input { accent-color: var(--primary); }
 

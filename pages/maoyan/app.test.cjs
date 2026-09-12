@@ -69,3 +69,24 @@ test("lock dialog gates everything behind maoyan session upload", () => {
   assert.match(html, /id="lock-gate-hint"/);
   assert.match(html, /保存并测试/);
 });
+
+test("seat map centers, pans by drag, zooms at cursor; risk box only for inferred seats", () => {
+  const source = readSource("lock.js");
+  const html = readSource("index.html");
+  // 平移/缩放/居中: translate+scale 变换, 内容小于容器时固定居中, 拖动吞 click 防误选
+  assert.match(source, /translate\(\$\{state\.panX\}px, \$\{state\.panY\}px\) scale\(\$\{state\.zoom\}\)/);
+  assert.match(source, /function clampPan/);
+  assert.match(source, /function centerSeatMap/);
+  assert.match(source, /centerSeatMap\(\);/);
+  assert.match(source, /suppressClick/);
+  // 推断标记必须在模板分支被置真(此前从未置真, warn 与推断座位全可选逻辑均不生效)
+  assert.match(source, /state\.showMode = "template";\n        state\.seatMapIsTemplate = true;/);
+  // 风险区: 仅推断座位展示, 门控期隐藏; 勾选仅在推断模式下必填
+  assert.match(source, /setHidden\(els\.sectionRisk, !state\.session\?\.uploaded \|\| state\.seatMapIsTemplate !== true\)/);
+  assert.match(source, /if \(state\.seatMapIsTemplate && !els\.risk\?\.checked\) return "请先勾选风险提示";/);
+  // 风险框红色
+  assert.match(readSource("style.css"), /\.lock-risk \{ padding: 10px 12px; border: 1px solid #f2b8b5; border-radius: 6px; background: #fdeceb; color: #b3261e;/);
+  // 画布式容器: 滚轮缩放/拖动平移
+  assert.match(html, /滚轮缩放 · 按住拖动 · 双指捏合/);
+  assert.match(readSource("style.css"), /\.lock-seat-scroll \{ overflow: hidden;.*cursor: grab;/);
+});
