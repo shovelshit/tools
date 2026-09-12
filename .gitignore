@@ -6,4 +6,5 @@ seat_debug.html
 createorder_debug.txt
 repro-order.cjs
 *.txt
-/docs/superpowers/
+# 本地文档/报告目录: 只在本地留存, 不纳入版本控制
+/docs/
