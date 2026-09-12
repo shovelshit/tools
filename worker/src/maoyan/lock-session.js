@@ -139,6 +139,8 @@ export async function loadLockSession(env, tokenId) {
     return normalizeSession(normalizedSessionAsUpload(JSON.parse(decoder.decode(plaintext))));
   } catch (error) {
     if (error?.message === "锁座服务尚未配置加密密钥") throw error;
+    // 解密得到的明文若本身不合法, 保留其可操作提示(格式错误/不完整), 不要笼统归因为"会话不可用"
+    if (/^猫眼会话(格式错误|不完整)/.test(String(error?.message || ""))) throw error;
     throw encryptedSessionError();
   }
 }

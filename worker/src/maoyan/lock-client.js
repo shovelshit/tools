@@ -17,6 +17,10 @@ export class OrderAttemptError extends Error {
   }
 }
 
+// 上游(猫眼)明确拒绝的文案: 导出为共享常量, 供 lock-rule 的错误白名单引用, 杜绝文案漂移
+export const ORDER_REJECTED_SESSION = "猫眼拒绝当前下单请求，请稍后重试或重新上传会话";
+export const ORDER_REJECTED_SEATS = "猫眼拒绝创建订单";
+
 function trustedUrl(value) {
   let url;
   try {
@@ -309,11 +313,11 @@ export async function createUnpaidOrder(session, seatMap, seats) {
       state: "failed",
       ...providerErrorSummary(payload.error)
     });
-    throw new OrderAttemptError("猫眼拒绝当前下单请求，请稍后重试或重新上传会话", false);
+    throw new OrderAttemptError(ORDER_REJECTED_SESSION, false);
   }
   if (explicitProviderRejection(payload)) {
     lockError("order_attempt", { phase: "response", state: "failed", reason: "provider_rejected" });
-    throw new OrderAttemptError("猫眼拒绝创建订单", false);
+    throw new OrderAttemptError(ORDER_REJECTED_SEATS, false);
   }
   lockError("order_attempt", { phase: "response", state: "unknown", reason: "unrecognized_response" });
   throw new OrderAttemptError("创建订单结果不确定，请在猫眼订单中确认", true);

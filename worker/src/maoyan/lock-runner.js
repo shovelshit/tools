@@ -196,6 +196,10 @@ export class LockCoordinator {
       if (message === "已有进行中的锁座规则") {
         return Response.json({ ok: false, error: message }, { status: 409 });
       }
+      // 上游(猫眼)明确拒绝: 保留原文案并返回 502, 与 /template-seats 的语义保持一致
+      if (error?.kind === "upstream") {
+        return Response.json({ ok: false, error: message }, { status: 502 });
+      }
       if (RULE_KNOWN_ERRORS.includes(message)) {
         return Response.json({ ok: false, error: message }, { status: 400 });
       }
@@ -220,6 +224,12 @@ export async function createLockRuleThroughCoordinator(env, tokenId, input) {
   if (response.status === 201 && body?.ok === true && body.rule) return body.rule;
   if (response.status === 409) throw new Error("已有进行中的锁座规则");
   if (response.status === 400 && body?.error) throw new Error(body.error);
+  // 上游拒绝(502): 保留真实原因与语义, 交给 API 边界映射为 502, 不降级成笼统的 500
+  if (response.status === 502 && body?.error) {
+    const error = new Error(body.error);
+    error.kind = "upstream";
+    throw error;
+  }
   throw new Error("锁座服务暂时不可用");
 }
 

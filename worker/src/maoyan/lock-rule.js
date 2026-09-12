@@ -1,5 +1,5 @@
 import { fetchCinemaDetail } from "./api.js";
-import { fetchSeatMap, findExactShows, createUnpaidOrder, OrderAttemptError } from "./lock-client.js";
+import { fetchSeatMap, findExactShows, createUnpaidOrder, OrderAttemptError, ORDER_REJECTED_SESSION, ORDER_REJECTED_SEATS } from "./lock-client.js";
 import { loadLockSession } from "./lock-session.js";
 import { getUserConfig, userKey } from "./user.js";
 import { pushNotify } from "./notify.js";
@@ -7,11 +7,12 @@ import { lockError, lockLog } from "./log.js";
 
 const RULE_NAME = "maoyan-lock-rule";
 // 这些错误会原样透传给前端(而不是笼统的"锁座参数无效")
+// 注意: 与上游(猫眼)相关的文案直接引用 lock-client 导出的常量, 避免文案漂移
 export const RULE_KNOWN_ERRORS = [
   "锁座参数无效", "请确认锁座风险提示", "所选座位无效", "所选座位不可用", "情侣座需成对选择",
   "影片未在当前影院监控配置中选择", "模板场次不属于当前影院影片", "目标日期需在今天起 30 天内",
-  "猫眼场次数据无效", "猫眼座位图场次无效", "猫眼会话不完整", "猫眼拒绝创建订单：座位可能已被抢占",
-  "猫眼拒绝当前请求，会话或签名可能已过期，请重新登录并上传会话",
+  "猫眼场次数据无效", "猫眼座位图场次无效", "猫眼会话不完整", `${ORDER_REJECTED_SEATS}：座位可能已被抢占`,
+  ORDER_REJECTED_SESSION,
   "目标日期存在多个相同时间场次", "所选未来座位不可用或影厅布局已变化", "锁座服务尚未配置加密密钥",
   "请选择目标日期的实际场次", "所选目标场次不可售"
 ];
@@ -243,7 +244,12 @@ export async function createLockRule(env, tokenId, input, options = {}) {
     } catch (error) {
       if (error instanceof OrderAttemptError && !error.uncertain) {
         lockError("rule_create", { phase: "complete", state: "failed", reason: "provider_rejected" });
-        throw new Error(error.message === "猫眼拒绝创建订单" ? "猫眼拒绝创建订单：座位可能已被抢占" : error.message);
+        // 标记为上游拒绝: 协调器与 API 边界据此返回 502 并保留原文案, 而不是降级成笼统的 500
+        const rejected = new Error(
+          error.message === ORDER_REJECTED_SEATS ? `${ORDER_REJECTED_SEATS}：座位可能已被抢占` : error.message
+        );
+        rejected.kind = "upstream";
+        throw rejected;
       }
       // 结果不确定(网络异常等): 保存为待人工确认, 避免重复下单
       lockError("rule_create", { phase: "complete", state: "unknown", reason: "ambiguous_result" });
