@@ -92,10 +92,12 @@ test("lock utilities detect swapped seatNo segments in laser IMAX halls", () => 
 
 test("lock utilities require a selected cinema before enabling lock configuration", () => {
   const { lockUtils } = loadLockModule();
-  assert.equal(lockUtils.isLockAvailable({ connected: true, cinemaId: "25428", cinemaSelected: true, lockServiceEnabled: true }), true);
+  assert.equal(lockUtils.isLockAvailable({ connected: true, cinemaId: "25428", cinemaSelected: true, lockServiceEnabled: true, monitorEnabled: true }), true);
   assert.equal(lockUtils.isLockAvailable({ connected: true, cinemaId: "25428", cinemaSelected: true, lockServiceEnabled: false }), false);
   assert.equal(lockUtils.isLockAvailable({ connected: true, cinemaId: "25428", cinemaSelected: false, lockServiceEnabled: true }), false);
   assert.equal(lockUtils.isLockAvailable({ connected: false, cinemaId: "25428", cinemaSelected: true, lockServiceEnabled: true }), false);
+  // 锁座随监控启停: 停止监控后入口禁用; monitorEnabled 缺省(旧调用方)视为可用
+  assert.equal(lockUtils.isLockAvailable({ connected: true, cinemaId: "25428", cinemaSelected: true, lockServiceEnabled: true, monitorEnabled: false }), false);
 });
 
 test("lock utilities allow same-day and future targets within 30 days", () => {

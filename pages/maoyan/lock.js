@@ -108,8 +108,9 @@
     return Boolean(session?.uploaded && templateSeqNo && selectedSeatNos?.size && /^\d{4}-\d{2}-\d{2}$/.test(targetDate) && riskAccepted && boundsValid && !isActiveLockRule(rule));
   }
 
-  function isLockAvailable({ connected, cinemaId, cinemaSelected, lockServiceEnabled }) {
-    return Boolean(connected && cinemaId && cinemaSelected && lockServiceEnabled);
+  function isLockAvailable({ connected, cinemaId, cinemaSelected, lockServiceEnabled, monitorEnabled }) {
+    // 锁座是监控的附属能力: 监控停止后入口一并禁用(monitorEnabled 缺省视为可用, 兼容旧调用方)
+    return Boolean(connected && cinemaId && cinemaSelected && lockServiceEnabled && monitorEnabled !== false);
   }
 
   function lockAction(showMode) {
@@ -716,7 +717,9 @@
         ? "配置锁座"
         : context?.lockServiceEnabled === false
           ? "锁座服务暂不可用"
-          : "请先在影院设置中选择影院";
+          : context?.monitorEnabled === false
+            ? "监控已停止，开始监控后才能锁座"
+            : "请先在影院设置中选择影院";
       return available;
     }
 

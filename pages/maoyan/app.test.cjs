@@ -129,3 +129,11 @@ test("empty today/past target date lists other-date real sessions and locks them
   // 未来日期无场次的推断路径保持不变
   assert.match(source, /以下为模板场次的未来推断座位/);
 });
+
+test("lock entry follows the monitor switch and explains a paused lock rule", () => {
+  const source = readSource("app.js");
+  // getContext 携带监控状态; 监控开关切换后即时刷新锁座入口可用性
+  assert.match(source, /monitorEnabled, \/\/ 锁座随监控启停/);
+  assert.match(source, /lockController\.syncAvailability\(\);\s*[\s\S]{0,400}?\/\/ 停止监控时若挂着进行中的自动锁座规则/);
+  assert.match(source, /已随监控暂停，重新开始监控后自动继续/);
+});

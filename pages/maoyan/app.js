@@ -93,6 +93,7 @@ const lockController = window.createMaoyanLockController({
     cinemaName: selectedCinema?.name || els.cinemaName.textContent,
     cinemaSelected,
     lockServiceEnabled,
+    monitorEnabled, // 锁座随监控启停: 停止监控后锁座入口禁用
     cinemaLoaded: cinemaMovies.length > 0,
     movies: cinemaMovies.filter((movie) => movie.checked)
   }),
@@ -485,6 +486,17 @@ els.btnToggleMonitor.addEventListener("click", async () => {
         ]),
         monitorEnabled ? "running" : "stopped"
       );
+      // 锁座入口与监控联动: 即时刷新可用状态
+      lockController.syncAvailability();
+      // 停止监控时若挂着进行中的自动锁座规则, 明确告知「暂停而非取消」
+      if (!target) {
+        try {
+          const { rule } = await api("/api/lock/rule");
+          if (rule && ["waiting_schedule", "matching"].includes(rule.state)) {
+            log("info", `自动锁座规则（${rule.movieName || "已选影片"} ${rule.targetDate || ""} ${rule.templateTime || ""}）已随监控暂停，重新开始监控后自动继续`);
+          }
+        } catch {}
+      }
     } catch (e) {
       showToast("操作失败：" + e.message, "error");
     }
