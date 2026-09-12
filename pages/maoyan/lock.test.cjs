@@ -159,3 +159,35 @@ test("seat resets preserve source warnings unless explicitly cleared", () => {
   assert.equal(state.seatMapSource, "");
   assert.equal(state.seatMapIsTemplate, false);
 });
+
+test("couple seats pair directionally by data-st L/R: 24 chains 23, 23 chains 24 (never 22)", () => {
+  const { lockUtils } = loadLockModule();
+  // 锚定真实数据(万达影城天和广场 2号杜比巨幕厅 19:35 场 11排): L/R 严格交替,
+  // 配对为 (1,2),(3,4)...(21,22),(23,24)...; L 是左半(列号小), R 是右半
+  const seats = [];
+  for (let columnId = 1; columnId <= 30; columnId++) {
+    seats.push({
+      rowId: "11", columnId: String(columnId), seatNo: `1-${columnId}-12`,
+      type: columnId % 2 === 1 ? "L" : "R", available: true
+    });
+  }
+  const bySeatNo = (no) => seats.find((seat) => seat.seatNo === no);
+  // 点 24(R) 连 23(L); 点 23(L) 连 24(R) —— 不允许误连 22 拆散 (21,22) 对
+  assert.equal(lockUtils.couplePartnerOf(seats, bySeatNo("1-24-12")).seatNo, "1-23-12");
+  assert.equal(lockUtils.couplePartnerOf(seats, bySeatNo("1-23-12")).seatNo, "1-24-12");
+  assert.equal(lockUtils.couplePartnerOf(seats, bySeatNo("1-22-12")).seatNo, "1-21-12");
+  assert.equal(lockUtils.couplePartnerOf(seats, bySeatNo("1-21-12")).seatNo, "1-22-12");
+  // 普通座位与未知类型不连锁
+  assert.equal(lockUtils.couplePartnerOf(seats, { ...bySeatNo("1-24-12"), type: "N" }), null);
+  assert.equal(lockUtils.couplePartnerOf(seats, { ...bySeatNo("1-24-12"), type: "LK" }), null);
+  // 同排方向位置上缺另一半返回 null(渲染层据此置灰): L 的右侧无 R、R 的左侧无 L
+  const isolatedL = { rowId: "11", columnId: "31", seatNo: "1-31-12", type: "L", available: true };
+  assert.equal(lockUtils.couplePartnerOf(seats, isolatedL), null);
+  const isolatedR = { rowId: "11", columnId: "0", seatNo: "1-0-12", type: "R", available: true };
+  assert.equal(lockUtils.couplePartnerOf(seats, isolatedR), null);
+  assert.equal(lockUtils.couplePartnerOf([], bySeatNo("1-24-12")), null);
+  assert.equal(lockUtils.couplePartnerOf(null, bySeatNo("1-24-12")), null);
+  // 跨排不配对: 即使同列位置存在 L/R
+  const otherRow = { rowId: "10", columnId: "24", seatNo: "1-24-11", type: "R", available: true };
+  assert.equal(lockUtils.couplePartnerOf([...seats, otherRow], otherRow), null);
+});

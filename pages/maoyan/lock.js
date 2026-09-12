@@ -66,6 +66,22 @@
     return position ? `${position.rowNumber}排${position.seatNumber}座` : String(source || "");
   }
 
+  // 情侣座配对以 data-st 的 L/R 属性为准: L 是双座左半、R 是右半, 同排内 L 的另一半
+  // 在 columnId+1、R 的另一半在 columnId-1(方向配对)。不能用「相邻就配」: 该影厅
+  // L/R 严格交替, L 座两侧都是 R 座, 取第一个相邻会把 (21,22)、(23,24) 两对拆散
+  // (真实缺陷: 点 24 连 23 正确, 再点 23 会误连 22, 选出 22+23+24 的非法组合)。
+  // 真实数据锚定: 万达影城天和广场 2号杜比巨幕厅 19:35 场 11排 (1,2),(3,4)...(23,24)...
+  function couplePartnerOf(seats, seat) {
+    if (!seat || (seat.type !== "L" && seat.type !== "R")) return null;
+    const expected = seat.type === "L"
+      ? Number(seat.columnId) + 1
+      : Number(seat.columnId) - 1;
+    const opposite = seat.type === "L" ? "R" : "L";
+    return (seats || []).find((candidate) =>
+      candidate.type === opposite && String(candidate.rowId) === String(seat.rowId) &&
+      Number(candidate.columnId) === expected) || null;
+  }
+
   function isActiveLockRule(rule) {
     return rule?.state === "waiting_schedule" || rule?.state === "matching" || rule?.state === "unknown";
   }
@@ -320,11 +336,7 @@
     }
 
     function couplePartner(seat) {
-      if (seat.type !== "L" && seat.type !== "R") return null;
-      const opposite = seat.type === "L" ? "R" : "L";
-      return (state.seatMap?.seats || []).find((candidate) =>
-        candidate.type === opposite && String(candidate.rowId) === String(seat.rowId) &&
-        Math.abs(Number(candidate.columnId) - Number(seat.columnId)) === 1) || null;
+      return couplePartnerOf(state.seatMap?.seats, seat);
     }
 
     function renderSeatMap() {
@@ -373,23 +385,28 @@
         for (const seat of rowSeats) {
           const button = document.createElement("button");
           button.type = "button";
-          const available = seat.available;
+          const partner = couplePartner(seat);
+          const isLover = seat.type === "L" || seat.type === "R";
           const loverClass = seat.type === "L" ? " lover-left" : seat.type === "R" ? " lover-right" : "";
-          button.className = `lock-seat${available ? " available" : " unavailable"}${loverClass}`;
+          // 情侣座另一半已售(或缺失)时整格置灰: 半对无法单独下单
+          const selectable = Boolean(seat.available) && (!isLover || Boolean(partner?.available));
+          const pairHint = isLover
+            ? (partner?.available ? " · 情侣座需成对选择" : " · 情侣座另一半已售，无法单独购买")
+            : "";
+          button.className = `lock-seat${selectable ? " available" : " unavailable"}${loverClass}`;
           // 格位与文字都用票面座号, 这样过道空位会和猫眼一样留出缺口
           const seatNumber = seatPosition(seat)?.seatNumber ?? Number(seat.columnId);
           button.style.gridColumn = String(seatNumber);
           button.textContent = String(seatNumber);
-          button.title = `${seatDisplayLabel(seat)}${loverClass ? " · 情侣座需成对选择" : ""}${available ? "" : "（不可选）"}`;
-          button.disabled = !available;
+          button.title = `${seatDisplayLabel(seat)}${pairHint}${selectable ? "" : "（不可选）"}`;
+          button.disabled = !selectable;
           button.dataset.seatNo = String(seat.seatNo);
           button.classList.toggle("selected", state.selectedSeatNos.has(String(seat.seatNo)));
-          if (available) {
+          if (selectable) {
             button.addEventListener("click", () => {
-              // 情侣座成对选择: 点一个自动带上相邻的另一半
+              // 情侣座以「对」为单位整体选中/取消: 点一个自动带上相邻的另一半
               const keys = [String(seat.seatNo)];
-              const partner = couplePartner(seat);
-              if (partner) keys.push(String(partner.seatNo));
+              if (partner?.available) keys.push(String(partner.seatNo));
               const allSelected = keys.every((key) => state.selectedSeatNos.has(key));
               for (const key of keys) {
                 if (allSelected) state.selectedSeatNos.delete(key);
@@ -658,8 +675,8 @@
   const exported = {
     createMaoyanLockController,
     lockUtils: {
-      templatesFromMovies, chinaDateBounds, lockDateBounds, seatPosition, seatDisplayLabel, isReadyToSubmit,
-      isLockAvailable, lockAction, changeMovieSelection, preferredTargetShow, clearSeatSelection
+      templatesFromMovies, chinaDateBounds, lockDateBounds, seatPosition, seatDisplayLabel, couplePartnerOf,
+      isReadyToSubmit, isLockAvailable, lockAction, changeMovieSelection, preferredTargetShow, clearSeatSelection
     }
   };
   if (typeof module !== "undefined" && module.exports) module.exports = exported;

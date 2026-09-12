@@ -95,6 +95,30 @@ test("情侣座的另一半不相邻时仍视为未成对", async () => {
   );
 });
 
+test("L/R 严格交替的情侣排: 合法对 (23,24) 不被误拆成 (21,22)", async () => {
+  // 锚定真实数据(万达影城天和广场 2号杜比巨幕厅 19:35 场 11排): L/R 严格交替,
+  // 旧「相邻即配」逻辑会为 23(L) 找到 22(R) 作为另一半, 把合法提交误判为未成对。
+  const seats = [];
+  for (let columnId = 1; columnId <= 30; columnId++) {
+    seats.push({
+      seatNo: `1-${columnId}-12`, rowId: "11", columnId: String(columnId),
+      type: columnId % 2 === 1 ? "L" : "R", available: true
+    });
+  }
+  const env = envWithConfig();
+  const rule = await createLockRule(env, "token-a", validInput({ seatNos: ["1-23-12", "1-24-12"] }), dependencies({
+    fetchSeats: async () => ({ sectionId: "1", sectionName: "1号厅", seqNo: "100", seats })
+  }));
+  assert.deepEqual(rule.seats.map((seat) => seat.seatNo), ["1-23-12", "1-24-12"]);
+  // 反向: 只选 24 不选 23 → 仍未成对(新 env, 避开上一条规则的同规则互斥)
+  await assert.rejects(
+    createLockRule(envWithConfig(), "token-a", validInput({ seatNos: ["1-24-12"] }), dependencies({
+      fetchSeats: async () => ({ sectionId: "1", sectionName: "1号厅", seqNo: "100", seats })
+    })),
+    /情侣座需成对选择/
+  );
+});
+
 test("目标场次真实存在时情侣座成对约束同样生效且校验可售", async () => {
   const cinemaWithTarget = {
     showData: {
