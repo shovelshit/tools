@@ -296,18 +296,6 @@ input[type="password"]:focus { border-color: var(--primary); }
 
 .suggest-empty { padding: 12px; color: var(--muted); font-size: 12px; text-align: center; }
 
-/* 手动输入影院折叠区 */
-.manual-cinema { margin-top: 8px; }
-.manual-cinema summary {
-  font-size: 12px;
-  color: var(--muted);
-  cursor: pointer;
-  user-select: none;
-  margin-bottom: 6px;
-}
-.manual-cinema summary:hover { color: var(--primary); }
-.manual-cinema .row { margin-top: 4px; }
-
 /* 令牌同步指引框 */
 .token-tip {
   font-size: 12px;

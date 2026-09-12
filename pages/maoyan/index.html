@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>猫眼影院场次监控 - 云端版</title>
-  <link rel="stylesheet" href="style.css?v=20260912d" />
+  <link rel="stylesheet" href="style.css?v=20260912e" />
 </head>
 <body>
   <!-- 登录层: 首次进入 / 切换连接时显示 -->
@@ -59,13 +59,6 @@
               <div id="cinema-dropdown" class="suggest-dropdown hidden"></div>
             </div>
           </div>
-          <details class="manual-cinema">
-            <summary>手动输入影院 ID / 粘贴链接</summary>
-            <div class="row">
-              <input id="cinema-input" type="text" placeholder="影院链接或影院 ID" />
-              <button id="btn-load-cinema" class="btn primary">加载</button>
-            </div>
-          </details>
           <div id="cinema-name" class="cinema-name hidden"></div>
         </section>
 
@@ -78,17 +71,17 @@
                 <label><input type="radio" name="push-channel" value="bark" checked /> Bark（iPhone）</label>
                 <label><input type="radio" name="push-channel" value="serverchan" /> Server酱（微信）</label>
               </div>
-              <button id="btn-test-push" class="btn small ghost">发送测试</button>
+              <button id="btn-test-push" class="btn small ghost">保存并测试</button>
             </div>
             <div id="push-bark-row" class="row-span-all">
-              <label for="bark-input">Bark Key 或 URL</label>
-              <input id="bark-input" type="text" placeholder="xxxxx 或 https://api.day.app/xxxxx" />
+              <label for="bark-input">推送密钥</label>
+              <input id="bark-input" type="text" placeholder="Bark Key 或 URL，如 https://api.day.app/xxxxx" autocomplete="off" />
               <div class="push-hint muted">
                 没有 Bark？<a href="https://apps.apple.com/cn/app/id1403753865" target="_blank" rel="noopener">App Store 下载 Bark</a>，打开后在 App 内复制 Key
               </div>
             </div>
             <div id="push-serverchan-row" class="row-span-all hidden">
-              <label for="serverchan-input">Server酱 SendKey</label>
+              <label for="serverchan-input">推送密钥（Server酱 SendKey）</label>
               <input id="serverchan-input" type="text" placeholder="SCT 开头的 SendKey" autocomplete="off" />
               <div class="push-hint muted">
                 微信扫码登录 <a href="https://sct.ftqq.com/sendkey" target="_blank" rel="noopener">获取 SendKey</a>（免费版每天 5 条）
@@ -109,8 +102,8 @@
           <h2>使用说明</h2>
           <ol class="help-list">
             <li>在登录页填访问令牌，点「进入监控」（同域打开无需填地址）</li>
-            <li>选择城市，模糊搜索影院并加载（也可手动输入影院 ID）</li>
-            <li>勾选电影，选择推送渠道（Bark 或 Server酱）并填好 Key，再发送一次测试推送</li>
+            <li>选择城市，模糊搜索影院并加载</li>
+            <li>勾选电影，选择推送渠道（Bark 或 Server酱）并填好推送密钥，点「保存并测试」推送一次</li>
             <li>测试成功后点「开始监控」即生效；每次开始 30 天内有效，到期会自动停止</li>
           </ol>
         </section>
@@ -157,8 +150,9 @@
       </header>
 
       <div class="lock-dialog-body">
-        <section class="lock-section">
+        <section class="lock-section" id="lock-section-session">
           <h3>猫眼会话</h3>
+          <p id="lock-gate-hint" class="lock-status hidden">锁座功能需要先上传猫眼登录态：在猫眼网页版登录后导出会话文件（session.json），上传成功后即可选座与自动锁座。会话仅加密保存在云端。</p>
           <p id="lock-session-status" class="lock-status">尚未上传猫眼会话</p>
           <div class="lock-upload-row">
             <input id="lock-session-file" type="file" accept=".json,application/json" />
@@ -167,7 +161,7 @@
           </div>
         </section>
 
-        <section class="lock-section">
+        <section class="lock-section" id="lock-section-schedule">
           <h3>场次与日期</h3>
           <div class="lock-form-grid">
             <label for="lock-cinema">影院</label>
@@ -181,7 +175,7 @@
           </div>
         </section>
 
-        <section class="lock-section">
+        <section class="lock-section" id="lock-section-seats">
           <div class="lock-seat-heading">
             <h3>座位选择</h3>
             <div class="lock-legend" aria-label="座位图图例"><span class="legend-seat available"></span>可选 <span class="legend-seat selected"></span>已选 <span class="legend-seat unavailable"></span>不可选</div>
@@ -200,12 +194,12 @@
           <p id="lock-seat-count" class="lock-status">尚未选择座位</p>
         </section>
 
-        <section class="lock-section lock-risk">
+        <section class="lock-section lock-risk" id="lock-section-risk">
           <p>Beta：未来场次与座位根据当前场次推断。实际开场时间、影厅、座位布局和售卖状态可能变化，可能导致自动锁座失败。锁座成功后仅生成待支付订单，需要在有效时间内自行支付。</p>
           <label class="lock-risk-check"><input id="lock-risk-accepted" type="checkbox" /> 我已理解上述风险</label>
         </section>
 
-        <section class="lock-section">
+        <section class="lock-section" id="lock-section-rules">
           <h3>已保存规则</h3>
           <p id="lock-rule-status" class="lock-status">暂无已保存的锁座规则</p>
           <button id="btn-lock-cancel-rule" class="btn small ghost danger hidden" type="button">取消锁座规则</button>
@@ -221,7 +215,7 @@
 
   <script src="secure-store.js?v=20260912b"></script>
   <script src="ui.js?v=20260912b"></script>
-  <script src="lock.js?v=20260912d"></script>
-  <script src="app.js?v=20260912d"></script>
+  <script src="lock.js?v=20260912e"></script>
+  <script src="app.js?v=20260912e"></script>
 </body>
 </html>

@@ -133,6 +133,11 @@
       risk: $("lock-risk-accepted"), ruleStatus: $("lock-rule-status"), cancelRule: $("btn-lock-cancel-rule"),
       templateLabel: $("lock-template-label"),
       seatSource: $("lock-seat-source"),
+      gateHint: $("lock-gate-hint"),
+      sectionSchedule: $("lock-section-schedule"),
+      sectionSeats: $("lock-section-seats"),
+      sectionRisk: $("lock-section-risk"),
+      sectionRules: $("lock-section-rules"),
       cancel: $("btn-lock-cancel"), submit: $("btn-lock-submit"),
       zoomIn: $("btn-lock-zoom-in"), zoomOut: $("btn-lock-zoom-out"), zoomReset: $("btn-lock-zoom-reset"), zoomLabel: $("lock-zoom-label")
     };
@@ -219,10 +224,21 @@
       }
     }
 
+    // 门控: 无猫眼会话时只保留「猫眼会话」上传区并给出引导, 其余区块隐藏;
+    // 上传成功(或本来就有会话)才展示完整界面
+    function renderGate(gated) {
+      setHidden(els.gateHint, !gated);
+      for (const el of [els.sectionSchedule, els.sectionSeats, els.sectionRisk, els.sectionRules]) {
+        setHidden(el, gated);
+      }
+    }
+
     function renderSession() {
       const session = state.session || { uploaded: false };
       if (!els.sessionStatus) return;
-      if (!session.uploaded) {
+      const gated = !session.uploaded;
+      renderGate(gated);
+      if (gated) {
         els.sessionStatus.textContent = "尚未上传猫眼会话";
         setHidden(els.removeSession, true);
         return;
@@ -444,6 +460,11 @@
     async function loadSeats() {
       resetSeats();
       if (!state.templateSeqNo || !state.context?.cinemaId) return;
+      if (!state.session?.uploaded) {
+        // 门控期不发请求: 无会话必然失败, 只提示先上传
+        els.seatGrid.innerHTML = '<div class="lock-empty">上传猫眼会话后加载座位表</div>';
+        return;
+      }
       els.seatGrid.innerHTML = loadingHtml("正在加载座位表...");
       try {
         renderSeatSource();
@@ -501,6 +522,7 @@
           renderSelection();
           show("猫眼会话已加密保存", "success");
           onLog?.("ok", "猫眼会话已上传，用于锁座（Beta）");
+          await loadSeats(); // 门控解除后立即加载座位表, 免去手动刷新
         } catch (error) {
           show(error.message || "上传失败", "error");
         } finally {

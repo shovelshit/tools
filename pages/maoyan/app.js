@@ -21,8 +21,6 @@ const els = {
   cinemaSearch: $("cinema-search"),
   cinemaDropdown: $("cinema-dropdown"),
   btnSearchCinema: $("btn-search-cinema"),
-  cinemaInput: $("cinema-input"),
-  btnLoadCinema: $("btn-load-cinema"),
   cinemaName: $("cinema-name"),
   // 监控设置
   btnCheck: $("btn-check"),
@@ -57,6 +55,7 @@ let pushVerified = false; // 当前渠道 + 当前密钥已成功发送过测试
 let allCities = [];        // [{id, name, pinyin}]
 let selectedCity = null;   // {id, name}
 let selectedCinema = null; // {id, name}
+let selectedCinemaId = ""; // 当前影院 ID(搜索选中/加载成功/云端恢复三处写入, 替代旧的手动输入框)
 let cinemaSelected = false; // 影院已在影院设置中选择或加载(锁座入口门槛)
 let cinemaSearchTimer = null;
 
@@ -90,7 +89,7 @@ const lockController = window.createMaoyanLockController({
   api,
   getContext: () => ({
     connected,
-    cinemaId: els.cinemaInput.value.trim(),
+    cinemaId: selectedCinemaId,
     cinemaName: selectedCinema?.name || els.cinemaName.textContent,
     cinemaSelected,
     lockServiceEnabled,
@@ -208,6 +207,10 @@ els.btnLogout.addEventListener("click", async () => {
   lockServiceEnabled = false;
   pushVerified = false;
   cinemaSelected = false;
+  selectedCinemaId = "";
+  selectedCinema = null;
+  realKeys.bark = "";
+  realKeys.serverchan = "";
   localStorage.removeItem("workerUrl");
   localStorage.removeItem("authMode");
   await secureSet("token", "");
@@ -232,20 +235,20 @@ async function restoreConfig() {
     monitorEnabled = config.enabled === true; // 默认停止, 需显式「开始监控」
     monitorDdl = config.monitorDdl || null;
     updateMonitorBtn();
-    if (config.cinemaId) els.cinemaInput.value = config.cinemaId;
+    if (config.cinemaId) selectedCinemaId = String(config.cinemaId);
     // 批次信息以服务端 cron 为准
     syncCronInfo(config);
     applyPushConfig(config);
     const prevSelected = new Set((config.selectedMovieIds || []).map(String));
-    if (config.cinemaId) {
-      await loadCinema(config.cinemaId, prevSelected, { restore: true });
+    if (selectedCinemaId) {
+      await loadCinema(selectedCinemaId, prevSelected, { restore: true });
       cinemaSelected = true; // 自动恢复的影院同样视为已选择
     }
     lockController.syncAvailability();
   } finally {
     // 恢复完成: 记录当前状态签名, 与云端一致的内容不再重复写入
     lastSavedSig = JSON.stringify(
-      pushConfigBody({ cinemaId: els.cinemaInput.value.trim(), selectedMovieIds: getSelectedIds() })
+      pushConfigBody({ cinemaId: selectedCinemaId, selectedMovieIds: getSelectedIds() })
     );
     restoring = false;
   }
@@ -271,6 +274,7 @@ function renderChannel() {
   const ch = getChannel();
   if (els.pushBarkRow) els.pushBarkRow.classList.toggle("hidden", ch !== "bark");
   if (els.pushServerChanRow) els.pushServerChanRow.classList.toggle("hidden", ch !== "serverchan");
+  renderKeyInput(); // 切换渠道后另一输入框同样按掩码/占位渲染
 }
 
 // 当前渠道对应的输入框与配置字段名
@@ -281,21 +285,47 @@ function currentKeyField() {
   return getChannel() === "serverchan" ? "serverChanKey" : "barkKey";
 }
 
+// 推送密钥: 真实值只存内存, 输入框在保存后显示掩码(后端本就不回显, 避免旁观/截屏泄露)
+const realKeys = { bark: "", serverchan: "" };
+const KEY_PLACEHOLDERS = {
+  bark: "Bark Key 或 URL，如 https://api.day.app/xxxxx",
+  serverchan: "SCT 开头的 SendKey"
+};
+
+function maskKey(key) {
+  const s = String(key || "").trim();
+  if (!s) return "";
+  if (s.length <= 8) return s.slice(0, 1) + "•".repeat(Math.max(s.length - 2, 3)) + s.slice(-1);
+  return s.slice(0, 4) + "•".repeat(6) + s.slice(-4);
+}
+
+function currentRealKey() {
+  return realKeys[getChannel()] || "";
+}
+
+// 按内存真实值渲染输入框: 有密钥显掩码, 无密钥显占位提示
+function renderKeyInput() {
+  const input = currentKeyInput();
+  if (!input) return;
+  const real = currentRealKey();
+  input.value = real ? maskKey(real) : "";
+  input.placeholder = real ? "已配置（不回显，点此可更换）" : KEY_PLACEHOLDERS[getChannel()];
+}
+
 function applyPushConfig(config) {
   setChannel(config.notifyChannel || "bark");
-  if (config.barkKey) els.barkInput.value = config.barkKey;
-  if (config.serverChanKey) els.serverChanInput.value = config.serverChanKey;
   pushSaved = Boolean(config.hasBark || config.hasServerChan);
   pushVerified = config.notifyVerified === true;
+  renderKeyInput();
   updateMonitorBtn();
-  if (pushSaved && !currentKeyInput().value.trim()) {
+  if (pushSaved && !currentRealKey()) {
     log("info", `${CHANNEL_LABELS[getChannel()]} 已配置（为防泄露不回显，留空保存不会覆盖）`);
   }
 }
 
-// 保存当前渠道的推送配置(留空则不提交, 保留云端已存值)
+// 保存当前渠道的推送配置(内存中无密钥则不提交, 保留云端已存值)
 function pushConfigBody(extra = {}) {
-  const key = currentKeyInput().value.trim();
+  const key = currentRealKey();
   const body = { notifyChannel: getChannel(), ...extra };
   if (key) body[currentKeyField()] = key;
   return body;
@@ -339,7 +369,7 @@ async function autoSaveConfig(extra = {}, { msg = "配置已自动保存", silen
     if (savePending) {
       savePending = false;
       autoSaveConfig(
-        { selectedMovieIds: getSelectedIds(), cinemaId: els.cinemaInput.value.trim() },
+        { selectedMovieIds: getSelectedIds(), cinemaId: selectedCinemaId },
         { silent: true }
       );
     }
@@ -351,7 +381,7 @@ function scheduleMovieSave() {
   clearTimeout(movieSaveTimer);
   movieSaveTimer = setTimeout(() => {
     autoSaveConfig(
-      { selectedMovieIds: getSelectedIds(), cinemaId: els.cinemaInput.value.trim() },
+      { selectedMovieIds: getSelectedIds(), cinemaId: selectedCinemaId },
       { msg: "影片勾选已自动保存", silent: true }
     );
   }, 800);
@@ -379,14 +409,29 @@ if (els.pushChannelRow) {
     autoSaveConfig({}, { msg: `推送渠道已切换为 ${CHANNEL_LABELS[getChannel()]}` });
   });
 }
-// 推送 Key 输入后失焦即保存
-function pushKeyChanged() {
-  pushVerified = false;
-  updateMonitorBtn();
-  autoSaveConfig({}, { msg: "推送配置已保存" });
+// 推送密钥: 聚焦时用真实值替换掩码便于编辑; 失焦时有改动则保存, 并一律回显掩码
+function keyInputFocused() {
+  const input = currentKeyInput();
+  const real = currentRealKey();
+  if (real && input.value === maskKey(real)) input.value = real;
 }
-els.barkInput.addEventListener("change", pushKeyChanged);
-els.serverChanInput.addEventListener("change", pushKeyChanged);
+
+function keyInputBlurred() {
+  const input = currentKeyInput();
+  const real = currentRealKey();
+  const typed = input.value.trim();
+  if (typed && typed !== real && typed !== maskKey(real)) {
+    realKeys[getChannel()] = typed;
+    pushVerified = false;
+    updateMonitorBtn();
+    autoSaveConfig({}, { msg: "推送配置已保存" });
+  }
+  renderKeyInput();
+}
+els.barkInput.addEventListener("focus", keyInputFocused);
+els.barkInput.addEventListener("blur", keyInputBlurred);
+els.serverChanInput.addEventListener("focus", keyInputFocused);
+els.serverChanInput.addEventListener("blur", keyInputBlurred);
 
 // ---------------- 监控启停 ----------------
 function fmtDate(ts) {
@@ -399,7 +444,7 @@ function updateMonitorBtn() {
   els.btnToggleMonitor.classList.toggle("success", !monitorEnabled);
   const requiresPushTest = !monitorEnabled && !pushVerified;
   els.btnToggleMonitor.disabled = !connected || requiresPushTest;
-  els.btnToggleMonitor.title = requiresPushTest ? "请先配置推送渠道并发送测试" : "";
+  els.btnToggleMonitor.title = requiresPushTest ? "请先配置推送渠道，填好推送密钥并「保存并测试」" : "";
 }
 
 els.btnToggleMonitor.addEventListener("click", async () => {
@@ -448,7 +493,7 @@ async function loadCities() {
     els.cityInput.placeholder = "城市列表加载失败（云端暂不支持）";
     els.cinemaSearch.disabled = true;
     els.btnSearchCinema.disabled = true;
-    els.cinemaSearch.placeholder = "云端暂不支持影院搜索，请展开下方手动输入";
+    els.cinemaSearch.placeholder = "影院搜索暂不可用，请稍后重试";
   }
 }
 
@@ -584,6 +629,7 @@ function renderCinemaResults(list) {
     item.addEventListener("mousedown", (e) => {
       e.preventDefault();
       selectedCinema = { id, name };
+      selectedCinemaId = id; // 锁座可用性与云端保存都以此为准(修复首次会话锁座按钮误禁用)
       cinemaSelected = true;
       els.cinemaSearch.value = name;
       els.cinemaDropdown.classList.add("hidden");
@@ -625,32 +671,7 @@ document.addEventListener("click", (e) => {
   }
 });
 
-// ---------------- 影院(手动加载) ----------------
-function parseCinemaInput(input) {
-  const s = String(input || "").trim();
-  let m = s.match(/cinema\/(\d+)/i);
-  if (m) return m[1];
-  m = s.match(/[?&]poi=(\d+)/i);
-  if (m) return m[1];
-  if (/^\d+$/.test(s)) return s;
-  throw new Error("无法识别影院 ID");
-}
-
-els.btnLoadCinema.addEventListener("click", () => {
-  try {
-    const id = parseCinemaInput(els.cinemaInput.value);
-    els.cinemaInput.value = id;
-    cinemaSelected = true;
-    lockController.syncAvailability();
-    loadCinema(id);
-  } catch (e) {
-    showToast(e.message, "error");
-  }
-});
-els.cinemaInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") els.btnLoadCinema.click();
-});
-
+// ---------------- 影院加载 ----------------
 // 拉取影院排期, 自动重试 2 次(猫眼接口偶发失败)
 async function fetchShowsWithRetry(cinemaId) {
   let lastErr;
@@ -667,9 +688,11 @@ async function fetchShowsWithRetry(cinemaId) {
 
 async function loadCinema(cinemaId, prevSelected, { restore = false } = {}) {
   setPanelLoading(els.movieList, "正在加载影院影片...");
-  await withButtonLoading(restore ? null : els.btnLoadCinema, "加载中...", async () => {
+  await withButtonLoading(null, "加载中...", async () => {
     try {
       const res = await fetchShowsWithRetry(cinemaId);
+      selectedCinemaId = String(res.cinemaId); // 以接口返回为准, 搜索与恢复两条路径在此汇合
+      cinemaSelected = true;
       els.cinemaName.textContent = `🎬 ${res.cinemaName}（ID: ${res.cinemaId}）`;
       els.cinemaName.classList.remove("hidden");
       const sel = prevSelected || new Set(getSelectedIds());
@@ -686,9 +709,9 @@ async function loadCinema(cinemaId, prevSelected, { restore = false } = {}) {
       );
     } catch (e) {
       if (restore) {
-        // 恢复配置时拉取失败: 影院 ID 仍在, 提示手动重试
-        log("warn", `影院影片自动加载失败（${e.message}），点「加载」按钮可重试`);
-        els.movieList.innerHTML = '<div class="muted empty-tip">影院影片加载失败，点上方「加载」按钮重试</div>';
+        // 恢复配置时拉取失败: 影院 ID 仍在, 提示重试方式
+        log("warn", `影院影片自动加载失败（${e.message}），重新搜索该影院或刷新页面可重试`);
+        els.movieList.innerHTML = '<div class="muted empty-tip">影院影片加载失败，重新搜索影院或刷新页面重试</div>';
       } else {
         showToast("加载失败：" + e.message, "error");
         log("error", "加载影院失败: " + e.message);
@@ -809,8 +832,8 @@ els.btnTestPush.addEventListener("click", async () => {
   if (!connected) return showToast("请先连接云端", "warn");
   await withButtonLoading(els.btnTestPush, "发送中...", async () => {
     try {
-      // 先保存当前渠道的推送配置再测试
-      const key = currentKeyInput().value.trim();
+      // 先保存当前渠道的推送配置再测试(密钥从内存取, 输入框里是掩码)
+      const key = currentRealKey();
       if (key) {
         await api("/api/config", { method: "POST", body: JSON.stringify(pushConfigBody()) });
         pushSaved = true;
