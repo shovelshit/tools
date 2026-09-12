@@ -189,21 +189,24 @@ export function parseSeatPage(html) {
   return { sectionId, sectionName, seqNo, seats };
 }
 
-// 猫眼座位标识(data-no)的结构是「区号-座号-排号」, 而不是我们内部的解析序号:
-//   实测 1-12-1 => 1区 / 12号座 / 第1排, 即用户在票面上的「1排12座」
-//   同一排的座位共享第三段(排号), 第二段随座位递增(座号), 因此第三段才是排号。
-// 注意: rowId(影厅行序号, 从1连续) 与 columnId(该行内第几个座位) 只是解析用的序号,
-// 影厅会跳号(如没有4排)或留过道空位(如 3、4、27、28 无座), 直接当排座号展示会与猫眼对不上。
-// 展示一律用本函数, 内部请求仍使用原始 seatNo(不可改写)。
+// 猫眼座位口径(以真实订单锚定: seatNo=1-1-10 / rowId=9 的订单票面为「9排1座」):
+//   票面排号 = data-row-id (影厅内 1..N 连续)
+//   票面座号 = data-no 第二段 (物理座号, 过道处跳号, 如 1,2,5..30)
+//   data-no 第三段 = 影厅内部物理排号(1,2,3,5..12, 会跳过"4排"), 与票面排号在第 3 排之后
+//   整体错位 +1, 不可用于展示; data-no 第一段为区号。
+// rowId/columnId 是解析序号: columnId 是行内第几个座位(连续), 与座号在过道后错位。
+// 展示一律用本函数(需要 seat 对象携带 rowId); 只有 seatNo 字符串无法换算排号, 原样返回。
+// 内部请求仍使用原始 seatNo(不可改写)。
 export function seatDisplayLabel(seatOrSeatNo) {
-  const source = seatOrSeatNo && typeof seatOrSeatNo === "object" ? seatOrSeatNo.seatNo : seatOrSeatNo;
-  return seatLabelFromNo(source);
-}
-
-export function seatLabelFromNo(value) {
-  const parts = String(value || "").split("-");
-  if (parts.length !== 3 || parts.some((part) => !/^\d+$/.test(part))) return String(value || "");
-  return `${Number(parts[2])}排${Number(parts[1])}座`;
+  const seat = seatOrSeatNo && typeof seatOrSeatNo === "object" ? seatOrSeatNo : null;
+  if (!seat) return seatOrSeatNo == null ? "" : String(seatOrSeatNo);
+  const seatNo = String(seat.seatNo || "");
+  const parts = seatNo.split("-");
+  const valid = parts.length === 3 && parts.every((part) => /^\d+$/.test(part));
+  const row = Number(seat.rowId);
+  const seatNumber = valid ? Number(parts[1]) : NaN;
+  if (!Number.isInteger(row) || row <= 0 || !Number.isInteger(seatNumber)) return seatNo;
+  return `${row}排${seatNumber}座`;
 }
 
 export function findExactShows(data, { movieId, targetDate, templateTime }) {

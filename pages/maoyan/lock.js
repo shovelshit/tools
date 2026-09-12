@@ -46,17 +46,23 @@
     );
   }
 
-  // 猫眼座位标识(data-no)是「区号-座号-排号」, 实测 1-12-1 => 票面「1排12座」。
-  // rowId/columnId 只是解析序号(影厅会跳号、留过道空位), 不能直接当排座号展示。
-  function seatPosition(seatNo) {
-    const parts = String(seatNo || "").split("-");
-    if (parts.length !== 3 || parts.some((part) => !/^\d+$/.test(part))) return null;
-    return { rowNumber: Number(parts[2]), seatNumber: Number(parts[1]) };
+  // 猫眼座位口径(以真实订单锚定: seatNo=1-1-10 / rowId=9 的订单票面为「9排1座」):
+  //   票面排号 = seat.rowId (影厅内 1..N 连续)
+  //   票面座号 = seat.seatNo 第二段 (物理座号, 过道处跳号)
+  //   data-no 第三段是影厅内部物理排号(会跳过"4排"), 与票面排号错位, 不可用于展示。
+  function seatPosition(seat) {
+    const source = seat && typeof seat === "object" ? seat.seatNo : seat;
+    const row = seat && typeof seat === "object" ? Number(seat.rowId) : NaN;
+    const parts = String(source || "").split("-");
+    const valid = parts.length === 3 && parts.every((part) => /^\d+$/.test(part));
+    const seatNumber = valid ? Number(parts[1]) : NaN;
+    if (!Number.isInteger(row) || row <= 0 || !Number.isInteger(seatNumber)) return null;
+    return { rowNumber: row, seatNumber };
   }
 
   function seatDisplayLabel(seat) {
+    const position = seatPosition(seat);
     const source = seat && typeof seat === "object" ? seat.seatNo : seat;
-    const position = seatPosition(source);
     return position ? `${position.rowNumber}排${position.seatNumber}座` : String(source || "");
   }
 
@@ -219,7 +225,7 @@
         renderSelection();
         return;
       }
-      // 规则里存的是内部座位标识(1-12-1), 展示统一换成「几排几座」
+      // 规则里存的是内部座位标识(seatNo), 展示统一换成「几排几座」(排号=rowId); 影厅名一并展示
       const labels = seatLabelMap();
       const seats = (rule.seats || [])
         .map((seat) => labels.get(String(seat?.seatNo ?? seat)) || seatDisplayLabel(seat))
@@ -230,7 +236,8 @@
         : rule.state === "waiting_schedule" && !rule.automationEnabled
           ? " · 锁座服务当前已停用"
           : "";
-      els.ruleStatus.textContent = `${rule.cinemaName || "影院"} · ${rule.movieName || "影片"} · ${rule.targetDate || ""} ${rule.templateTime || ""} · ${seats} · ${status}${suffix}`;
+      const hall = rule.hall ? ` · ${rule.hall}` : "";
+      els.ruleStatus.textContent = `${rule.cinemaName || "影院"} · ${rule.movieName || "影片"}${hall} · ${rule.targetDate || ""} ${rule.templateTime || ""} · ${seats} · ${status}${suffix}`;
       setHidden(els.cancelRule, false);
       renderSelection();
     }
@@ -329,7 +336,7 @@
       }
       const rows = new Map();
       for (const seat of seats) {
-        const position = seatPosition(seat.seatNo);
+        const position = seatPosition(seat);
         if (!position) continue;
         const key = String(position.rowNumber);
         if (!rows.has(key)) rows.set(key, []);
@@ -337,7 +344,7 @@
       }
       const orderedRows = [...rows.entries()].sort((a, b) => Number(a[0]) - Number(b[0]));
       // 列号表头: 与猫眼一致, 用票面座号(会跳过过道空位)
-      const allCols = seats.map((seat) => seatPosition(seat.seatNo)?.seatNumber).filter(Number.isFinite);
+      const allCols = seats.map((seat) => seatPosition(seat)?.seatNumber).filter(Number.isFinite);
       if (allCols.length) {
         const header = document.createElement("div");
         header.className = "lock-seat-row";
@@ -370,7 +377,7 @@
           const loverClass = seat.type === "L" ? " lover-left" : seat.type === "R" ? " lover-right" : "";
           button.className = `lock-seat${available ? " available" : " unavailable"}${loverClass}`;
           // 格位与文字都用票面座号, 这样过道空位会和猫眼一样留出缺口
-          const seatNumber = seatPosition(seat.seatNo)?.seatNumber ?? Number(seat.columnId);
+          const seatNumber = seatPosition(seat)?.seatNumber ?? Number(seat.columnId);
           button.style.gridColumn = String(seatNumber);
           button.textContent = String(seatNumber);
           button.title = `${seatDisplayLabel(seat)}${loverClass ? " · 情侣座需成对选择" : ""}${available ? "" : "（不可选）"}`;

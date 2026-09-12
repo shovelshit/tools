@@ -21,7 +21,7 @@ export const RULE_KNOWN_ERRORS = [
 ];
 export const LOCK_RULE_TERMINAL_STATES = new Set(["locked", "expired", "failed", "completed", "cancelled"]);
 const PUBLIC_FIELDS = [
-  "id", "cinemaId", "cinemaName", "movieId", "movieName", "targetDate",
+  "id", "cinemaId", "cinemaName", "movieId", "movieName", "hall", "targetDate",
   "templateDate", "templateTime", "templateSeqNo", "targetSeqNo", "seats", "state",
   "createdAt", "updatedAt", "lastError", "orderId", "payLeftSecond"
 ];
@@ -101,6 +101,8 @@ function scheduleForTemplate(data, movieId, seqNo) {
         return {
           cinemaName: String(data?.showData?.cinemaName || ""),
           movieName: String(movie.nm || ""),
+          // 影厅名(如「2号杜比巨幕厅-1.3米以下儿童需要购票」), 推送与核对座位时必需
+          hall: String(show.th || ""),
           date,
           time: String(show.tm),
           seqNo: String(show.seqNo),
@@ -140,10 +142,12 @@ function ruleKey(tokenId) {
 }
 
 // 推送正文: 立即锁座(createLockRule)与定时锁座(lock-runner)共用一份, 避免两处副本再次漂移。
-// 座位一律渲染成人看的「几排几座」, 不能直接扔内部标识(如 1-12-1)。
+// 座位一律渲染成人看的「几排几座」(排号=rowId, 座号=seatNo 第二段), 不能直接扔内部标识。
+// 影厅名(rule.hall, 来自场次 th 字段)是用户核对座位的关键信息, 缺失时跳过该行。
 export function lockNotificationContent(rule) {
   const labels = (rule?.seats || []).map((seat) => seatDisplayLabel(seat)).join("、");
-  return `${rule.cinemaName} ${rule.movieName}\n${rule.targetDate} ${rule.templateTime}\n${labels}` +
+  const hall = rule?.hall ? `${rule.hall}\n` : "";
+  return `${rule.cinemaName} ${rule.movieName}\n${hall}${rule.targetDate} ${rule.templateTime}\n${labels}` +
     (rule.state === "locked" && rule.payLeftSecond !== null ? `\n剩余支付时间 ${rule.payLeftSecond} 秒` : "");
 }
 
@@ -214,6 +218,7 @@ export async function createLockRule(env, tokenId, input, options = {}) {
     cinemaName: template.cinemaName,
     movieId: values.movieId,
     movieName: template.movieName,
+    hall: template.hall,
     targetDate: values.targetDate,
     templateDate: template.date,
     templateTime: template.time,

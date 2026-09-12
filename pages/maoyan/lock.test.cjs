@@ -50,16 +50,18 @@ test("lock utilities derive China date bounds and submit readiness", () => {
 
 test("lock utilities derive hall row/seat from the Maoyan seat identifier", () => {
   const { lockUtils } = loadLockModule();
-  // 猫眼 data-no 的结构是「区号-座号-排号」, 票面上看到的是「几排几座」
-  assert.equal(lockUtils.seatDisplayLabel("1-12-1"), "1排12座");
-  assert.equal(lockUtils.seatDisplayLabel("1-30-12"), "12排30座");
-  assert.equal(lockUtils.seatDisplayLabel({ seatNo: "1-3-1" }), "1排3座");
-  assert.deepEqual(JSON.parse(JSON.stringify(lockUtils.seatPosition("1-6-18"))), { rowNumber: 18, seatNumber: 6 });
-  // 非标准标识原样返回, 不吞掉原始值
+  // 票面口径(真实订单锚定): 排号 = rowId, 座号 = seatNo 第二段;
+  // data-no 第三段是影厅内部物理排号(跳过"4排"), 与票面错位, 不可用于展示
+  assert.equal(lockUtils.seatDisplayLabel({ seatNo: "1-1-10", rowId: "9" }), "9排1座");
+  assert.equal(lockUtils.seatDisplayLabel({ seatNo: "1-12-1", rowId: "1" }), "1排12座");
+  assert.deepEqual(JSON.parse(JSON.stringify(lockUtils.seatPosition({ seatNo: "1-05-07", rowId: "07" }))), { rowNumber: 7, seatNumber: 5 });
+  // 只有 seatNo 字符串无法换算票面排号, 原样返回(不猜测)
+  assert.equal(lockUtils.seatDisplayLabel("1-12-1"), "1-12-1");
   assert.equal(lockUtils.seatDisplayLabel("unexpected"), "unexpected");
   assert.equal(lockUtils.seatDisplayLabel(""), "");
   assert.equal(lockUtils.seatPosition("unexpected"), null);
-  assert.equal(lockUtils.seatPosition("1-2-x"), null);
+  assert.equal(lockUtils.seatPosition({ seatNo: "1-2-x", rowId: "3" }), null);
+  assert.equal(lockUtils.seatPosition({ seatNo: "1-2-3" }), null);
 });
 
 test("lock utilities require a selected cinema before enabling lock configuration", () => {

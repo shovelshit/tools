@@ -28,7 +28,7 @@ function dependencies(overrides = {}) {
     fetchCinema: async () => ({ showData: {
       cinemaName: "测试影院",
       movies: [{ id: 7, nm: "测试电影", shows: [{ showDate: "2026-09-11", plist: [
-        { seqNo: "100", tm: "20:00", ticketStatus: 0 }
+        { seqNo: "100", tm: "20:00", ticketStatus: 0, th: "2号杜比巨幕厅-1.3米以下儿童需要购票" }
       ] }] }]
     } }),
     fetchSeats: async () => ({ sectionId: "1", sectionName: "1号厅", seqNo: "100", seats: [
@@ -61,6 +61,7 @@ test("creates a rule from authoritative cinema and seat data", async () => {
 
   assert.equal(rule.cinemaName, "测试影院");
   assert.equal(rule.movieName, "测试电影");
+  assert.equal(rule.hall, "2号杜比巨幕厅-1.3米以下儿童需要购票");
   assert.equal(rule.templateDate, "2026-09-11");
   assert.equal(rule.templateTime, "20:00");
   assert.equal(rule.templateSeqNo, "100");
@@ -160,8 +161,9 @@ test("an immediate successful lock sends the same terminal notification after pe
   assert.equal(locked.state, "locked");
   assert.equal(notification.config.barkKey, "test-key");
   assert.equal(notification.title, "猫眼锁座成功");
-  // 推送里必须是人看的「几排几座」, 不能是内部座位标识 1-6-18
-  assert.equal(notification.content, "测试影院 测试电影\n2026-09-11 20:00\n18排6座\n剩余支付时间 600 秒");
+  // 推送里必须是人看的「几排几座」(排号=rowId, 座号=seatNo 第二段), 不能是内部座位标识;
+  // 影厅名也要带上, 便于用户核对(如 2号杜比巨幕厅)
+  assert.equal(notification.content, "测试影院 测试电影\n2号杜比巨幕厅-1.3米以下儿童需要购票\n2026-09-11 20:00\n6排6座\n剩余支付时间 600 秒");
 });
 
 test("an immediate notification failure keeps the successful order locked", async () => {

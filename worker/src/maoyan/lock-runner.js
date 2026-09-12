@@ -101,7 +101,9 @@ export async function runOneLockRule(env, tokenId, deps = {}) {
   }
 
   const matching = await saveRule(env, tokenId, rule, {
-    state: "matching", attemptStartedAt: new Date(now).toISOString(), seqNo: String(show.seqNo), lastError: null
+    state: "matching", attemptStartedAt: new Date(now).toISOString(), seqNo: String(show.seqNo), lastError: null,
+    // 目标日期的影厅可能与模板场次不同(如 VIP厅), 推送前刷新为实际场次影厅名
+    hall: String(show.th || rule.hall || "")
   }, deps);
   if (shouldCancel()) return { ok: true, skipped: true };
   const currentRule = await getRule(env, tokenId);
