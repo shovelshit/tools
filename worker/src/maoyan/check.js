@@ -12,7 +12,7 @@ function fmtShow(s) {
   return parts.filter(Boolean).join(" | ");
 }
 
-export async function runCheck(env, manual, token) {
+export async function runCheck(env, manual, token, options = {}) {
   const cfg = await getUserConfig(env, token);
   if (!cfg.cinemaId) return { ok: false, error: "未配置影院" };
   if (cfg.enabled === false) {
@@ -50,7 +50,8 @@ export async function runCheck(env, manual, token) {
   const snapshot = await env.MAOYAN_KV.get(snapKey, "json") || {};
   const changes = await env.MAOYAN_KV.get(chKey, "json") || [];
   try {
-    const data = await fetchCinemaDetail(cfg.cinemaId);
+    const fetchCinema = options.fetchCinema || fetchCinemaDetail;
+    const data = await fetchCinema(cfg.cinemaId);
     const cinemaName = data.showData.cinemaName || "";
     let newTotal = 0;
   for (const movie of data.showData.movies || []) {
@@ -87,6 +88,13 @@ export async function runCheck(env, manual, token) {
     stKey,
     JSON.stringify({ lastCheckTs: now, lastCheck: new Date().toISOString(), cinemaName, newTotal, enabled: cfg.enabled !== false })
   );
+  if (typeof options.afterPersist === "function") {
+    try {
+      await options.afterPersist(data);
+    } catch {
+      console.error({ scope: "maoyan-monitor", event: "downstream_failed" });
+    }
+  }
   return { ok: true, cinemaName, newTotal, enabled: cfg.enabled !== false };
   } catch (e) {
     // 失败也要留痕: 更新 lastCheck/lastError, 让界面能看出定时检查发生过但失败了

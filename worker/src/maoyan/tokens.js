@@ -53,10 +53,14 @@ export async function checkAuthFull(request, env) {
 }
 
 // cron 直接读取唯一的令牌元数据，不维护会与删除操作竞争的副本。
-export async function runScheduledChecks(env) {
+export async function runScheduledChecks(env, afterMonitor) {
   for (const token of await getManagedTokens(env)) {
     try {
-      await runCheck(env, false, token.id);
+      await runCheck(env, false, token.id, {
+        afterPersist: typeof afterMonitor === "function"
+          ? (cinemaData) => afterMonitor(token.id, cinemaData)
+          : undefined
+      });
     } catch (e) {
       console.error("[monitor] 定时检查异常:", e?.message || e);
     }
