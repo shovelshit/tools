@@ -27,7 +27,7 @@
 - Consumes: `createUnpaidOrder(session, seatMap, seatNos)` and `fetchSeatMap(session, { cinemaId, movieId, seqNo })`
 - Produces: a form-encoded create-order request whose `seats.list` contains `{ rowId, columnId, seatNo, type }` objects and whose referrer contains `movieId` and `cinemaId`
 
-- [ ] **Step 1: Write the failing request-parity assertions**
+- [x] **Step 1: Write the failing request-parity assertions**
 
 Update the create-order test to expect:
 
@@ -39,17 +39,17 @@ assert.equal(init.headers.Referer, "https://www.maoyan.com/xseats/2026091201?mov
 assert.equal(payload.get("seats"), '{"count":1,"list":[{"rowId":"6","columnId":"18","seatNo":"1-6-18","type":"N"}]}');
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run: `node --test test/lock-client.test.js`
 
 Expected: FAIL because the Worker still sends a string-only seat list and incomplete request context.
 
-- [ ] **Step 3: Implement minimal request parity**
+- [x] **Step 3: Implement minimal request parity**
 
 Change `selectedSeats` to resolve and return provider seat objects, return `movieId` and `cinemaId` from `fetchSeatMap`, construct the complete referrer, and add the three AJAX headers. Change the provider-error message to `猫眼拒绝当前下单请求，请稍后重试或重新上传会话`.
 
-- [ ] **Step 4: Verify focused and complete tests**
+- [x] **Step 4: Verify focused and complete tests**
 
 Run: `node --test test/lock-client.test.js`
 
@@ -59,7 +59,7 @@ Run: `npm test`
 
 Expected: all Worker tests pass with zero failures.
 
-- [ ] **Step 5: Review and commit**
+- [x] **Step 5: Review and commit**
 
 Run: `git diff --check && git diff -- worker/src/maoyan/lock-client.js worker/test/lock-client.test.js`
 

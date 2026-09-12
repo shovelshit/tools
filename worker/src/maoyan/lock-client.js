@@ -199,12 +199,18 @@ export function findExactShows(data, { movieId, targetDate, templateTime }) {
 
 export async function fetchSeatMap(session, { cinemaId, movieId, seqNo }) {
   const url = new URL(`${ORIGIN}/xseats/${assertId(seqNo)}`);
-  url.searchParams.set("movieId", assertId(movieId));
-  url.searchParams.set("cinemaId", assertId(cinemaId));
+  const normalizedMovieId = assertId(movieId);
+  const normalizedCinemaId = assertId(cinemaId);
+  url.searchParams.set("movieId", normalizedMovieId);
+  url.searchParams.set("cinemaId", normalizedCinemaId);
   const response = await requestMaoyan(session, url.toString());
   const html = await response.text();
   try {
-    return parseSeatPage(html);
+    return {
+      ...parseSeatPage(html),
+      movieId: normalizedMovieId,
+      cinemaId: normalizedCinemaId
+    };
   } catch (error) {
     if (/^猫眼座位图格式无效$/.test(String(error?.message || ""))) {
       error.message = `${error.message}（${pageHint(html)}）`;
@@ -214,12 +220,34 @@ export async function fetchSeatMap(session, { cinemaId, movieId, seqNo }) {
 }
 
 function selectedSeats(seatMap, seats) {
-  if (!Array.isArray(seats) || !seats.length || new Set(seats).size !== seats.length) {
+  const seatNos = Array.isArray(seats) ? seats.map(String) : [];
+  if (!seatNos.length || new Set(seatNos).size !== seatNos.length) {
     throw new Error("所选座位无效");
   }
-  const available = new Set(seatMap.seats.filter((seat) => seat.available).map((seat) => seat.seatNo));
-  if (!seats.every((seat) => available.has(seat))) throw new Error("所选座位不可用");
-  return seats.map(String);
+  const available = new Map(
+    seatMap.seats
+      .filter((seat) => seat.available)
+      .map((seat) => [String(seat.seatNo), seat])
+  );
+  if (!seatNos.every((seatNo) => available.has(seatNo))) throw new Error("所选座位不可用");
+  return seatNos.map((seatNo) => {
+    const seat = available.get(seatNo);
+    return {
+      rowId: String(seat.rowId),
+      columnId: String(seat.columnId),
+      seatNo: String(seat.seatNo),
+      type: String(seat.type || "N")
+    };
+  });
+}
+
+function seatPageReferer(seatMap) {
+  const url = new URL(`${ORIGIN}/xseats/${assertId(seatMap.seqNo)}`);
+  if (seatMap.movieId && seatMap.cinemaId) {
+    url.searchParams.set("movieId", assertId(seatMap.movieId));
+    url.searchParams.set("cinemaId", assertId(seatMap.cinemaId));
+  }
+  return url.toString();
 }
 
 
@@ -242,10 +270,13 @@ export async function createUnpaidOrder(session, seatMap, seats) {
       allowHttpError: true,
       method: "POST",
       headers: {
+        Accept: "application/json, text/plain, */*",
+        "Accept-Language": "zh-CN,zh;q=0.9",
         mtgsig: session.mtgsig,
         Origin: ORIGIN,
-        Referer: `${ORIGIN}/xseats/${seatMap.seqNo}`,
-        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
+        Referer: seatPageReferer(seatMap),
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "X-Requested-With": "XMLHttpRequest"
       },
       body
     });
@@ -278,7 +309,7 @@ export async function createUnpaidOrder(session, seatMap, seats) {
       state: "failed",
       ...providerErrorSummary(payload.error)
     });
-    throw new OrderAttemptError("猫眼拒绝当前请求，会话或签名可能已过期，请重新登录并上传会话", false);
+    throw new OrderAttemptError("猫眼拒绝当前下单请求，请稍后重试或重新上传会话", false);
   }
   if (explicitProviderRejection(payload)) {
     lockError("order_attempt", { phase: "response", state: "failed", reason: "provider_rejected" });

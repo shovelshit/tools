@@ -99,13 +99,15 @@ test("fetches a seat map through the fixed authenticated endpoint", async () => 
     return new Response(seatHtml, { status: 200 });
   }, async () => {
     const map = await fetchSeatMap(session, { cinemaId: "25428", movieId: "7", seqNo: "2026091201" });
+    assert.equal(map.movieId, "7");
+    assert.equal(map.cinemaId, "25428");
     assert.equal(map.seats.length, 2);
     assert.equal(map.seats[0].available, true);
   });
 });
 
 test("creates an unpaid order using session-captured query values only", async () => {
-  const seatMap = parseSeatPage(seatHtml);
+  const seatMap = { ...parseSeatPage(seatHtml), movieId: "7", cinemaId: "25428" };
   await withMockFetch(async (input, init) => {
     const url = new URL(input);
     assert.equal(url.origin, "https://www.maoyan.com");
@@ -120,14 +122,17 @@ test("creates an unpaid order using session-captured query values only", async (
     assert.equal(init.headers.Cookie, "uid=test-user; token=test-cookie");
     assert.equal(init.headers.mtgsig, "test-signature");
     assert.equal(init.headers.Origin, "https://www.maoyan.com");
-    assert.equal(init.headers.Referer, "https://www.maoyan.com/xseats/2026091201");
+    assert.equal(init.headers.Referer, "https://www.maoyan.com/xseats/2026091201?movieId=7&cinemaId=25428");
     assert.equal(init.headers["User-Agent"], "Test Agent/1.0");
+    assert.equal(init.headers.Accept, "application/json, text/plain, */*");
+    assert.equal(init.headers["Accept-Language"], "zh-CN,zh;q=0.9");
+    assert.equal(init.headers["X-Requested-With"], "XMLHttpRequest");
     const payload = new URLSearchParams(init.body);
     assert.deepEqual([...payload.entries()], [
       ["sectionId", "88"],
       ["sectionName", "1号厅 & 特效"],
       ["seqNo", "2026091201"],
-      ["seats", '{"count":1,"list":["1-6-18"]}']
+      ["seats", '{"count":1,"list":[{"rowId":"6","columnId":"18","seatNo":"1-6-18","type":"N"}]}']
     ]);
     return jsonResponse({ data: { data: { id: 12345, payLeftSecond: 600 } } });
   }, async () => {
@@ -184,7 +189,9 @@ test("does not write provider credentials or internal URLs to order logs", async
     await withMockFetch(async () => jsonResponse(providerError), async () => {
       await assert.rejects(
         () => createUnpaidOrder(sessionWithPrivateQuery, parseSeatPage(seatHtml), ["1-6-18"]),
-        (error) => error instanceof OrderAttemptError && error.uncertain === false
+        (error) => error instanceof OrderAttemptError &&
+          error.uncertain === false &&
+          error.message === "猫眼拒绝当前下单请求，请稍后重试或重新上传会话"
       );
     });
   });
