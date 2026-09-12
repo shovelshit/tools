@@ -148,7 +148,10 @@ export function parseSeatPage(html) {
   const block = source.match(/<div\b[^>]*\bclass\s*=\s*(["'])[^"']*\bseats-block\b[^"']*\1[^>]*>/i);
   if (!block) throw malformedSeatMap();
   const blockAttributes = attributes(block[0]);
-  const sectionId = requiredSeatMapValue(blockAttributes["data-section-id"]);
+  // 分区 id 实证存在字母数字混合值(如 "A001", 9 页语料), 仅作元数据透传不参与下单, 放宽为非空可见字符
+  const sectionIdRaw = String(blockAttributes["data-section-id"] || "");
+  if (!/^[\x21-\x7e]{1,64}$/.test(sectionIdRaw)) throw malformedSeatMap();
+  const sectionId = sectionIdRaw;
   const sectionName = String(blockAttributes["data-section-name"] || "");
   const seqNo = requiredSeatMapValue(blockAttributes["data-seq-no"]);
   if (!sectionName) throw malformedSeatMap();

@@ -67,6 +67,37 @@ test("parses seats only from the matched seats block", () => {
   assert.deepEqual(map.seats.map((seat) => seat.seatNo), ["1-6-18", "1-6-19"]);
 });
 
+test("accepts alphanumeric section ids and multi-line seat attributes from real pages", () => {
+  // 真实语料(超低价区/特价区/特惠区共 9 页): section-id 为字母数字混合 "A001", 且座位属性多行排布
+  const html = `<div class="seats-block"
+    data-section-id="A001"
+    data-section-name="超低价区"
+    data-seq-no="202609130135454">
+    <span class="seat selectable"
+              data-column-id="20"
+              data-row-id="1"
+              data-no="0000000000000001-1-20"
+              data-st="N"
+              data-act="seat-click">
+    <span class="seat sold"
+              data-column-id="19"
+              data-row-id="1"
+              data-no="0000000000000001-1-19"
+              data-st="LK">
+  </div>`;
+  const map = parseSeatPage(html);
+  assert.equal(map.sectionId, "A001");
+  assert.equal(map.sectionName, "超低价区");
+  assert.equal(map.seqNo, "202609130135454");
+  assert.deepEqual(map.seats.map((seat) => seat.seatNo), ["0000000000000001-1-20", "0000000000000001-1-19"]);
+});
+
+test("rejects malformed section ids and empty section names", () => {
+  assert.throws(() => parseSeatPage(`<div class="seats-block" data-section-id="" data-section-name="x" data-seq-no="1"><span class="seat selectable" data-row-id="1" data-column-id="1" data-no="1-1-1"></span></div>`), /猫眼座位图格式无效/);
+  assert.throws(() => parseSeatPage(`<div class="seats-block" data-section-id="a b" data-section-name="x" data-seq-no="1"><span class="seat selectable" data-row-id="1" data-column-id="1" data-no="1-1-1"></span></div>`), /猫眼座位图格式无效/);
+  assert.throws(() => parseSeatPage(`<div class="seats-block" data-section-id="1" data-section-name="" data-seq-no="1"><span class="seat selectable" data-row-id="1" data-column-id="1" data-no="1-1-1"></span></div>`), /猫眼座位图格式无效/);
+});
+
 test("renders the hall row/seat out of the Maoyan seat identifier", () => {
   // 真实订单锚定(万达影城 2号杜比巨幕厅): seatNo=1-1-10 / rowId=9 的订单票面为「9排1座」。
   // 即: 票面排号 = rowId(1..N 连续), 票面座号 = seatNo 第二段(过道处跳号);
