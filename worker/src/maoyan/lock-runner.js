@@ -1,8 +1,7 @@
-import { fetchCinemaDetail } from "./api.js";
+import { publicCinemaShows } from "./api.js";
 import { findExactShows, fetchSeatMap, createUnpaidOrder, OrderAttemptError } from "./lock-client.js";
 import { getLockSessionStatus, loadLockSession, removeLockSession } from "./lock-session.js";
 import { createLockRule, getLockRule, isLockRuleTerminal, putLockRule, removeLockRule, RULE_KNOWN_ERRORS } from "./lock-rule.js";
-import { getManagedTokens } from "./tokens.js";
 import { getUserConfig } from "./user.js";
 import { pushNotify } from "./notify.js";
 
@@ -70,7 +69,10 @@ export async function runOneLockRule(env, tokenId, deps = {}) {
   const now = (deps.now || (() => new Date()))();
   if (rule.targetDate < chinaDate(now)) return await terminal(env, tokenId, rule, "expired", { lastError: "目标场次已过期" }, deps);
 
-  const fetchCinema = deps.fetchCinema || fetchCinemaDetail;
+  const fetchCinema = deps.fetchCinema;
+  if (typeof fetchCinema !== "function") {
+    return { ok: true, skipped: true, missingMonitorData: true };
+  }
   const exactShows = deps.findShows || findExactShows;
   const loadSession = deps.loadSession || loadLockSession;
   const fetchSeats = deps.fetchSeats || fetchSeatMap;
@@ -184,7 +186,11 @@ export class LockCoordinator {
       const getRule = this.deps.getRule || getLockRule;
       const rule = await getRule(this.env, tokenId);
       if (rule && await this.state.storage.get("terminalRuleId") === rule.id) return Response.json({ ok: true, skipped: true });
-      const result = await runOneLockRule(this.env, tokenId, { ...this.deps, shouldCancel: () => this.cancelRequested });
+      const monitoredCinema = input?.monitoredCinema;
+      const runDeps = monitoredCinema && typeof monitoredCinema === "object"
+        ? { ...this.deps, fetchCinema: async () => monitoredCinema }
+        : this.deps;
+      const result = await runOneLockRule(this.env, tokenId, { ...runDeps, shouldCancel: () => this.cancelRequested });
       const latest = await getRule(this.env, tokenId);
       if (latest && isLockRuleTerminal(latest.state)) await this.state.storage.put("terminalRuleId", latest.id);
       return Response.json(result);
@@ -238,13 +244,9 @@ export async function removeLockSessionThroughCoordinator(env, tokenId) {
   return await removeThroughCoordinator(env, tokenId, "remove-session", "未找到锁座资源");
 }
 
-export async function runScheduledLocks(env) {
-  if (String(env.LOCK_SERVICE_ENABLED) !== "true") return;
-  for (const token of await getManagedTokens(env)) {
-    try {
-      const stub = env.LOCK_COORDINATOR.get(env.LOCK_COORDINATOR.idFromName(token.id));
-      await stub.fetch(lockRequest("run", token.id));
-    } catch {
-    }
-  }
+export async function runScheduledLockAfterMonitor(env, tokenId, cinemaData) {
+  if (String(env.LOCK_SERVICE_ENABLED) !== "true") return { ok: true, skipped: true, disabled: true };
+  const monitoredCinema = { showData: publicCinemaShows(cinemaData) };
+  const stub = env.LOCK_COORDINATOR.get(env.LOCK_COORDINATOR.idFromName(tokenId));
+  return await stub.fetch(lockRequest("run", tokenId, { monitoredCinema }));
 }

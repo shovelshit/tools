@@ -2,8 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { MemoryKV } from "./helpers.js";
 import { OrderAttemptError } from "../src/maoyan/lock-client.js";
-import { LockCoordinator, runOneLockRule, runScheduledLocks } from "../src/maoyan/lock-runner.js";
-import { LOCK_CRON_EXPRESSION, resolveCronExprs } from "../src/maoyan/cron.js";
+import * as lockRunner from "../src/maoyan/lock-runner.js";
+import { LockCoordinator, runOneLockRule } from "../src/maoyan/lock-runner.js";
+import worker from "../src/index.js";
 
 const tokenId = "11111111-1111-4111-8111-111111111111";
 const now = new Date("2026-09-11T04:00:00.000Z");
@@ -53,22 +54,123 @@ test("automation disabled leaves a waiting rule unchanged", async () => {
   assert.equal(stored.state, "waiting_schedule");
 });
 
-test("the service switch also controls scheduled lock scans", async () => {
-  let calls = 0;
-  const scheduledRuntime = (enabled) => ({
-    ...runtime({ LOCK_SERVICE_ENABLED: enabled }),
+test("scheduled locking receives only the monitored cinema projection", async () => {
+  let requestBody;
+  const env = runtime({
+    LOCK_COORDINATOR: {
+      idFromName: (id) => id,
+      get: () => ({
+        fetch: async (request) => {
+          requestBody = await request.json();
+          return Response.json({ ok: true, waiting: true });
+        }
+      })
+    }
+  });
+  const monitoredCinema = {
+    providerSecret: "must-not-cross-boundary",
+    showData: {
+      cinemaName: "测试影院",
+      privateField: "must-not-cross-boundary",
+      movies: [{ id: 7, nm: "测试电影", privateField: "must-not-cross-boundary", shows: [{
+        showDate: "2026-09-12",
+        plist: [{ seqNo: "200", tm: "20:00", ticketStatus: 0, privateField: "must-not-cross-boundary" }]
+      }] }]
+    }
+  };
+
+  await lockRunner.runScheduledLockAfterMonitor(env, tokenId, monitoredCinema);
+
+  assert.equal(requestBody.action, "run");
+  assert.equal(requestBody.tokenId, tokenId);
+  assert.equal(JSON.stringify(requestBody).includes("must-not-cross-boundary"), false);
+  assert.deepEqual(requestBody.input.monitoredCinema.showData.movies[0].shows[0].plist[0], {
+    seqNo: "200",
+    tm: "20:00",
+    ticketStatus: 0
+  });
+});
+
+test("coordinator locks from monitored data without fetching schedules again", async () => {
+  const stored = rule();
+  let independentFetches = 0;
+  let orderCalls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    independentFetches++;
+    throw new Error("independent schedule fetch is forbidden");
+  };
+  try {
+    const coordinator = new LockCoordinator(coordinatorState(), runtime(), deps(stored, {
+      fetchCinema: undefined,
+      createOrder: async () => {
+        orderCalls++;
+        return { orderId: "order-1", payLeftSecond: 600 };
+      }
+    }));
+    const response = await coordinator.fetch(coordinatorRequest({
+      action: "run",
+      tokenId,
+      input: { monitoredCinema: {
+        showData: {
+          cinemaName: "测试影院",
+          movies: [{ id: "7", shows: [{ showDate: "2026-09-12", plist: [
+            { seqNo: "200", tm: "20:00", ticketStatus: 0 }
+          ] }] }]
+        }
+      } }
+    }));
+
+    assert.equal(response.status, 200);
+    assert.equal(stored.state, "locked");
+    assert.equal(orderCalls, 1);
+    assert.equal(independentFetches, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("the monitor cron hands a persisted monitor result to locking", async () => {
+  let coordinatorCalls = 0;
+  const env = runtime({
     MAOYAN_KV: new MemoryKV({
-      "meta:tokens": JSON.stringify([{ id: tokenId, token: "access-token" }])
+      "meta:tokens": JSON.stringify([{ id: tokenId, token: "access-token" }]),
+      [`u:${tokenId}:config`]: JSON.stringify({
+        enabled: true,
+        cinemaId: "25428",
+        selectedMovieIds: ["7"],
+        monitorDdl: "2099-01-01T00:00:00.000Z"
+      })
     }),
     LOCK_COORDINATOR: {
       idFromName: (id) => id,
-      get: () => ({ fetch: async () => { calls++; return Response.json({ ok: true }); } })
+      get: () => ({
+        fetch: async () => {
+          coordinatorCalls++;
+          return Response.json({ ok: true, waiting: true });
+        }
+      })
     }
   });
-  await runScheduledLocks(scheduledRuntime("false"));
-  assert.equal(calls, 0);
-  await runScheduledLocks(scheduledRuntime("true"));
-  assert.equal(calls, 1);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    if (String(input).includes("/ajax/cinemaDetail")) {
+      return new Response(JSON.stringify({ showData: {
+        cinemaName: "测试影院",
+        movies: [{ id: 7, nm: "测试电影", shows: [] }]
+      } }), { status: 200 });
+    }
+    return new Response("ok", { status: 200 });
+  };
+  try {
+    await worker.scheduled({ cron: "*/30 * * * *" }, env);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(coordinatorCalls, 1);
+  assert.ok(await env.MAOYAN_KV.get(`u:${tokenId}:snapshot`, "json"));
+  assert.ok(await env.MAOYAN_KV.get(`u:${tokenId}:status`, "json"));
 });
 
 test("automation exact HH:mm locks only selectable matching seats", async () => {
@@ -278,15 +380,15 @@ test("concurrency cancellation after matching persistence prevents an order and 
   assert.equal(sessionPresent, false);
 });
 
-test("monitor cron reporting excludes the one-minute lock schedule", async () => {
+test("cron reporting keeps every configured monitor schedule", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(JSON.stringify({ success: true, result: [
     { cron: "*/30 * * * *" }, { cron: "* * * * *" }
   ] }));
   try {
-    const monitorCrons = await resolveCronExprs({ CF_API_TOKEN: "test", CF_ACCOUNT_ID: "account" });
-    assert.equal(LOCK_CRON_EXPRESSION, "* * * * *");
-    assert.deepEqual(monitorCrons, ["*/30 * * * *"]);
+    const freshCron = await import(`../src/maoyan/cron.js?test=${Date.now()}`);
+    const monitorCrons = await freshCron.resolveCronExprs({ CF_API_TOKEN: "test", CF_ACCOUNT_ID: "account" });
+    assert.deepEqual(monitorCrons, ["*/30 * * * *", "* * * * *"]);
   } finally {
     globalThis.fetch = originalFetch;
   }

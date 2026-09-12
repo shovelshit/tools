@@ -17,10 +17,10 @@ routes = [
 ]
 
 # ============ 定时触发 ============
-# 注意: 修改 crons 时需同步修改 src/maoyan/cron.js 里的 CRON_EXPRESSION
-# (监控页的批次提示与检查频率都依赖它)
+# 监控与未来锁座共用此 cron。Dashboard 调整后两者频率同步变化。
+# 默认值需同步 src/maoyan/cron.js 的 CRON_EXPRESSION，供 API 查询失败时回落。
 [triggers]
-crons = ["*/30 * * * *", "* * * * *"]
+crons = ["*/30 * * * *"]
 
 # ============ 环境变量 ============
 # 变量已改为仅在 Dashboard 中配置(配合 keep_vars, 部署不会删除/覆盖)
