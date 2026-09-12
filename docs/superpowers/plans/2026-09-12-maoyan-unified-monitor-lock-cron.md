@@ -75,4 +75,4 @@
 - [x] Run focused tests and confirm the sentinel values currently leak from rule logs.
 - [x] Replace string logs with structured, identifier-free records.
 - [x] Run focused tests, then `npm test`, `git diff --check`, and `npx wrangler deploy --dry-run`.
-- [ ] Commit, push `master`, deploy with Wrangler, and verify the active version ID.
+- [x] Commit, push `master`, deploy with Wrangler, and verify the active version ID.
