@@ -93,6 +93,12 @@ function snippet(text, max = 400) {
   return value.length > max ? `${value.slice(0, max)}...` : value;
 }
 
+function providerErrorSummary(error) {
+  const name = typeof error?.name === "string" ? snippet(error.name, 80) : "UnknownError";
+  const message = typeof error?.message === "string" ? snippet(error.message, 160) : "无错误信息";
+  return { name, message };
+}
+
 export async function requestMaoyan(session, value, options = {}) {
   const url = trustedUrl(value);
   const { allowHttpError = false, ...requestOptions } = options;
@@ -227,7 +233,7 @@ export async function createUnpaidOrder(session, seatMap, seats) {
     seqNo: seatMap.seqNo,
     seats: JSON.stringify({ count: selected.length, list: selected })
   });
-  console.log("[lock] createOrder POST", `${url.pathname}${url.search}`, "seats=", seats.join(","));
+  console.log("[lock] createOrder POST seatCount=", selected.length);
   let response;
   try {
     response = await requestMaoyan(session, url.toString(), {
@@ -246,7 +252,7 @@ export async function createUnpaidOrder(session, seatMap, seats) {
     throw new OrderAttemptError("创建订单结果不确定，请在猫眼订单中确认", true);
   }
   const text = await response.text();
-  console.log("[lock] createOrder HTTP", response.status, "body:", snippet(text));
+  console.log("[lock] createOrder HTTP", response.status);
   let payload;
   try {
     payload = JSON.parse(text);
@@ -256,7 +262,7 @@ export async function createUnpaidOrder(session, seatMap, seats) {
   const order = payload?.data?.data;
   if (order && (typeof order.id === "string" || typeof order.id === "number")) {
     const payLeftSecond = Number(order.payLeftSecond);
-    console.log("[lock] createOrder 成功 orderId=", order.id);
+    console.log("[lock] createOrder 成功");
     return {
       orderId: String(order.id),
       payLeftSecond: Number.isFinite(payLeftSecond) ? payLeftSecond : null
@@ -264,13 +270,13 @@ export async function createUnpaidOrder(session, seatMap, seats) {
   }
   // 猫眼网关错误(error 对象, 如 NetError/Bad Request): 多为会话或 mtgsig 签名过期
   if (payload?.error && typeof payload.error === "object") {
-    console.error("[lock] createOrder 后端错误:", snippet(text, 300));
+    console.error("[lock] createOrder 后端错误:", providerErrorSummary(payload.error));
     throw new OrderAttemptError("猫眼拒绝当前请求，会话或签名可能已过期，请重新登录并上传会话", false);
   }
   if (explicitProviderRejection(payload)) {
-    console.error("[lock] createOrder 被拒绝:", snippet(text, 200));
+    console.error("[lock] createOrder 被拒绝");
     throw new OrderAttemptError("猫眼拒绝创建订单", false);
   }
-  console.error("[lock] createOrder 响应无法识别:", snippet(text, 200));
+  console.error("[lock] createOrder 响应无法识别");
   throw new OrderAttemptError("创建订单结果不确定，请在猫眼订单中确认", true);
 }

@@ -47,6 +47,24 @@ async function withMockFetch(mock, callback) {
   }
 }
 
+async function withCapturedConsole(callback) {
+  const originalLog = console.log;
+  const originalError = console.error;
+  const entries = [];
+  const capture = (...args) => entries.push(args.map((value) =>
+    typeof value === "string" ? value : JSON.stringify(value)
+  ).join(" "));
+  console.log = capture;
+  console.error = capture;
+  try {
+    await callback();
+    return entries.join("\n");
+  } finally {
+    console.log = originalLog;
+    console.error = originalError;
+  }
+}
+
 test("parses available and unavailable seats without losing layout", () => {
   const map = parseSeatPage(seatHtml);
   assert.equal(map.sectionId, "88");
@@ -158,6 +176,40 @@ test("classifies a 409 JSON provider rejection as a certain order failure", asyn
       }
     );
   });
+});
+
+test("does not write provider credentials or internal URLs to order logs", async () => {
+  const sessionWithPrivateQuery = {
+    ...session,
+    createOrderQuery: {
+      ...session.createOrderQuery,
+      signature: "provider-query-secret"
+    }
+  };
+  const providerError = {
+    error: {
+      name: "NetError",
+      message: "Bad Request",
+      url: "http://internal.example/order/createOrder.json",
+      header: {
+        Key: "provider-key-secret",
+        Token: "provider-token-secret"
+      }
+    }
+  };
+  const logs = await withCapturedConsole(async () => {
+    await withMockFetch(async () => jsonResponse(providerError), async () => {
+      await assert.rejects(
+        () => createUnpaidOrder(sessionWithPrivateQuery, parseSeatPage(seatHtml), ["1-6-18"]),
+        (error) => error instanceof OrderAttemptError && error.uncertain === false
+      );
+    });
+  });
+
+  assert.match(logs, /HTTP 200/);
+  assert.match(logs, /NetError/);
+  assert.match(logs, /Bad Request/);
+  assert.doesNotMatch(logs, /provider-key-secret|provider-token-secret|provider-query-secret|internal\.example/);
 });
 
 test("classifies ambiguous post-order failures as uncertain", async () => {
