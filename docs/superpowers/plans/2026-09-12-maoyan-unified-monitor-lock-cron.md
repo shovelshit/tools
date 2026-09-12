@@ -31,10 +31,10 @@
 - `options.afterPersist(cinemaData)` runs only after snapshot and status writes succeed.
 - `runScheduledChecks(env, afterMonitor)` invokes `afterMonitor(tokenId, cinemaData)` without turning a lock failure into a monitor failure.
 
-- [ ] Add a failing test proving the handoff occurs after persisted monitor state and is skipped for failed/stopped monitoring.
-- [ ] Run `node --test test/tokens.test.js` and confirm the new test fails for the missing handoff.
-- [ ] Add the minimal post-persistence callback and isolated lock-error handling.
-- [ ] Run `node --test test/tokens.test.js` and confirm it passes.
+- [x] Add a failing test proving the handoff occurs after persisted monitor state and is skipped for failed/stopped monitoring.
+- [x] Run `node --test test/tokens.test.js` and confirm the new test fails for the missing handoff.
+- [x] Add the minimal post-persistence callback and isolated lock-error handling.
+- [x] Run `node --test test/tokens.test.js` and confirm it passes.
 
 ### Task 2: Consume Monitored Data Through The Coordinator
 
@@ -51,11 +51,11 @@
 - The coordinator `run` action injects that snapshot as `fetchCinema`, so `runOneLockRule` never independently fetches future schedules.
 - The Worker `scheduled` handler always runs monitoring and uses its handoff for locking.
 
-- [ ] Add failing tests proving monitored data is used, no independent schedule fetch occurs, and monitor cron reporting has no special lock-cron exclusion.
-- [ ] Run `node --test test/lock-runner.test.js` and confirm the expected failures.
-- [ ] Implement the coordinator handoff and remove `LOCK_CRON_EXPRESSION` plus the all-token lock scan.
-- [ ] Reduce Wrangler triggers to the single default monitor cron.
-- [ ] Run `node --test test/lock-runner.test.js` and confirm it passes.
+- [x] Add failing tests proving monitored data is used, no independent schedule fetch occurs, and monitor cron reporting has no special lock-cron exclusion.
+- [x] Run `node --test test/lock-runner.test.js` and confirm the expected failures.
+- [x] Implement the coordinator handoff and remove `LOCK_CRON_EXPRESSION` plus the all-token lock scan.
+- [x] Reduce Wrangler triggers to the single default monitor cron.
+- [x] Run `node --test test/lock-runner.test.js` and confirm it passes.
 
 ### Task 3: Replace Identifier Logs With Structured Events
 
@@ -71,8 +71,8 @@
 - Structured records use `scope: "maoyan-lock"` and stable `event`/`phase`/`state` fields.
 - Only bounded provider error `name` and `message` fields may be retained.
 
-- [ ] Add failing tests with sentinel token, show, seat, order, query, URL, and header secrets and assert none appear in captured logs.
-- [ ] Run focused tests and confirm the sentinel values currently leak from rule logs.
-- [ ] Replace string logs with structured, identifier-free records.
-- [ ] Run focused tests, then `npm test`, `git diff --check`, and `npx wrangler deploy --dry-run`.
+- [x] Add failing tests with sentinel token, show, seat, order, query, URL, and header secrets and assert none appear in captured logs.
+- [x] Run focused tests and confirm the sentinel values currently leak from rule logs.
+- [x] Replace string logs with structured, identifier-free records.
+- [x] Run focused tests, then `npm test`, `git diff --check`, and `npx wrangler deploy --dry-run`.
 - [ ] Commit, push `master`, deploy with Wrangler, and verify the active version ID.
