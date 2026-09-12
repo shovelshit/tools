@@ -3,7 +3,7 @@
 // 配置了 CF_API_TOKEN + CF_ACCOUNT_ID 后, 会改为运行时调 Cloudflare API
 // 查询真实调度(支持多个 cron), Dashboard 里改 cron 也能自动同步, 常量仅作回落
 
-export const CRON_EXPRESSION = "*/30 * * * *";
+export const CRON_EXPRESSION = "*/10 * * * *";
 const SCRIPT_NAME = "tools-api";
 let cronCache = null; // { exprs, ts }
 
