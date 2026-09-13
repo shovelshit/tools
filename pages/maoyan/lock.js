@@ -407,16 +407,23 @@
           state.showMode = "template";
           state.seatMapIsTemplate = true;
           els.templateLabel.textContent = "座位模板场次（推断布局）";
-          state.seatMapSource = `${targetDateStr} 暂无场次，以下为模板场次的未来推断座位（全部可选，开售后按实际售卖为准）`;
           els.template.disabled = false;
-          for (const item of movieTemplates) {
+          // 推断模板收敛到「最后一个有真实场次的日期」: 越接近目标日期的排片形态越可能延续;
+          // 跨日期全量列出会让默认模板落在最早一天的旧布局上(用户报障: 选 9.21 却用 9.14 早场做模板)
+          const lastDate = movieTemplates.reduce((acc, item) => (item.showDate > acc ? item.showDate : acc), "");
+          const lastDayShows = movieTemplates.filter((item) => item.showDate === lastDate);
+          for (const item of lastDayShows) {
             const details = [item.showDate, item.tm, item.lang, item.tp, item.th].filter(Boolean).join(" · ");
             const option = new Option(item.disabled ? `${details}（停售）` : details, item.seqNo);
             option.disabled = item.disabled;
             els.template.append(option);
           }
-          const current = movieTemplates.find((item) => item.seqNo === state.templateSeqNo && !item.disabled);
-          state.templateSeqNo = current ? current.seqNo : "";
+          // 默认选该日末班(最后一场可售); 用户此前已选中该日的场次则保留其选择
+          const preferred = lastDayShows.find((item) => item.seqNo === state.templateSeqNo && !item.disabled)
+            || lastDayShows.filter((item) => !item.disabled).sort((a, b) => b.tm.localeCompare(a.tm))[0]
+            || null;
+          state.templateSeqNo = preferred ? preferred.seqNo : "";
+          state.seatMapSource = `${targetDateStr} 暂无场次，以 ${lastDate} 末班场次为模板推断未来座位（全部可选，开售后按实际售卖为准）`;
         }
       }
       els.template.value = state.templateSeqNo;
