@@ -157,8 +157,10 @@ test("锁座输入拒绝未声明的额外字段", () => {
   assert.throws(() => validateLockRuleInput({ ...validInput(), extra: "nope" }), /锁座参数无效/);
 });
 
-test("riskAccepted 必须是布尔 true, 字符串 \"true\" 不被接受", () => {
-  assert.throws(() => validateLockRuleInput(validInput({ riskAccepted: "true" })), /请确认锁座风险提示/);
+test("riskAccepted is passed through as strict boolean (string \"true\" is not true); enforcement lives in createLockRule", () => {
+  const values = validateLockRuleInput(validInput({ riskAccepted: "true" }));
+  assert.equal(values.riskAccepted, false);
+  assert.equal(validateLockRuleInput(validInput()).riskAccepted, true);
 });
 
 test("重复座位号在下发前被去重", () => {

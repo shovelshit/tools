@@ -94,6 +94,28 @@ test("requires explicit risk acceptance", async () => {
   await reject(envWithConfig(), validInput({ riskAccepted: "true" }), /风险/);
 });
 
+test("a real target show does not require risk acceptance (inferred ones still do)", async () => {
+  // 目标场次(真实座位图): 前端不显示风险勾选框, payload riskAccepted=false 也必须能下单
+  const realShowCinema = { showData: {
+    cinemaName: "测试影院",
+    movies: [{ id: 7, nm: "测试电影", shows: [{ showDate: "2026-09-12", plist: [
+      { seqNo: "200", tm: "20:00", ticketStatus: 0 }
+    ] }] }]
+  } };
+  const locked = await createLockRule(envWithConfig(), "token-a", validInput({ templateSeqNo: "200", riskAccepted: false }), dependencies({
+    fetchCinema: async () => realShowCinema,
+    fetchSeats: async (_session, request) => ({
+      seqNo: request.seqNo, sectionId: "1", sectionName: "2号厅",
+      seats: [{ seatNo: "1-6-18", rowId: "6", columnId: "18", type: "N", available: true }]
+    }),
+    placeOrder: async () => ({ orderId: "order-1", payLeftSecond: 600 })
+  }));
+  assert.equal(locked.state, "locked");
+  assert.equal(locked.orderId, "order-1");
+  // 推断模式(目标日期无排期): 缺少风险勾选仍拒绝
+  await reject(envWithConfig(), validInput({ riskAccepted: false }), /风险/);
+});
+
 test("rejects non-decimal IDs before reading provider data", async () => {
   let called = false;
   await reject(envWithConfig(), validInput({ cinemaId: "25428x" }), /参数/, dependencies({

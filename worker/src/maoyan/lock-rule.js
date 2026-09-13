@@ -44,7 +44,8 @@ function assertExactInput(input) {
   if (!decimal(input.cinemaId) || !decimal(input.movieId) || !decimal(input.templateSeqNo)) {
     throw new Error("锁座参数无效");
   }
-  if (input.riskAccepted !== true) throw new Error("请确认锁座风险提示");
+  // riskAccepted 不在此处硬校验: 目标场次(真实座位图, 确认弹窗已明示将创建待支付订单)无推断风险,
+  // 前端该模式下不显示风险勾选框; 推断模式(保存等待规则)的强制勾选在 createLockRule 按 targetShow 分支校验
   if (!Array.isArray(input.seatNos) || !input.seatNos.length || input.seatNos.some((value) => !seatNo(value))) {
     throw new Error("所选座位无效");
   }
@@ -53,7 +54,8 @@ function assertExactInput(input) {
     movieId: String(input.movieId),
     templateSeqNo: String(input.templateSeqNo),
     targetDate: String(input.targetDate),
-    seatNos: [...new Set(input.seatNos.map(String))]
+    seatNos: [...new Set(input.seatNos.map(String))],
+    riskAccepted: input.riskAccepted === true
   };
 }
 
@@ -215,6 +217,9 @@ export async function createLockRule(env, tokenId, input, options = {}) {
   });
   if (String(seatMap?.seqNo) !== seatSeqNo) throw new Error("猫眼座位图场次无效");
   const ignoreAvailability = !targetShow;
+  // 推断模式(保存等待规则, 未来场次可能无法兑现)必须显式勾选风险提示;
+  // 目标场次为真实座位图, 与前端 renderRiskSection/submitBlockReason 同口径(仅模板模式显示并要求勾选)
+  if (!targetShow && values.riskAccepted !== true) throw new Error("请确认锁座风险提示");
   const seats = selectedSeats(seatMap, values.seatNos, { ignoreAvailability });
   const timestamp = new Date(now).toISOString();
   lockLog("rule_create", {
