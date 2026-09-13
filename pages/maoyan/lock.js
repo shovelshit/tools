@@ -587,9 +587,12 @@
         }
         state.seatMap = seatMap;
         renderSeatMap();
+        els.seatFeedback?.classList.remove("attention");
       } catch (error) {
         state.seatMap = null;
         els.seatGrid.innerHTML = '<div class="lock-empty">座位表加载失败，请确认猫眼会话后重试</div>';
+        // 加载失败红显反馈按钮, 引导用户上报场次标识供管理员排查
+        els.seatFeedback?.classList.add("attention");
         show(error.message || "座位表加载失败", "error");
       }
     }
@@ -601,6 +604,33 @@
       if (!els.date.value || els.date.value < state.dateBounds.min || els.date.value > state.dateBounds.max) {
         els.date.value = state.dateBounds.min;
       }
+    }
+
+    // 座位解析失败反馈: 只上报当前影院/影片/场次标识, 服务端写 KV 供管理员排查(不要求已上传会话)
+    async function sendSeatFeedback() {
+      if (!state.context?.cinemaId) return show("请先选择影院", "warn");
+      const seqNo = state.templateSeqNo || "";
+      const key = seqNo || "na";
+      const now = Date.now();
+      // 同场次 60s 内不重复上报
+      if (state.seatFeedback.seqNo === key && now - state.seatFeedback.at < 60000) {
+        show("该场次刚刚已反馈过，管理员会尽快处理", "info");
+        return;
+      }
+      await buttonLoading(els.seatFeedback, "反馈中...", async () => {
+        try {
+          await api("/api/lock/seat-feedback", {
+            method: "POST",
+            body: JSON.stringify({ cinemaId: state.context.cinemaId, movieId: state.movieId, seqNo })
+          });
+          state.seatFeedback = { seqNo: key, at: now };
+          els.seatFeedback?.classList.remove("attention");
+          show("已收到反馈，管理员会尽快处理", "success");
+          onLog?.("ok", "座位问题已反馈（影院/影片/场次标识已记录）");
+        } catch (error) {
+          show(error.message || "反馈失败", "error");
+        }
+      });
     }
 
     async function refreshRemoteState() {

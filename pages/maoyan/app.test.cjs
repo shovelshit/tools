@@ -84,6 +84,19 @@ test("lock dialog gates everything behind maoyan session upload", () => {
   assert.match(html, /保存并测试/);
 });
 
+test("seat feedback: button exists in DOM, handler defined, wired and highlighted on load failure", () => {
+  // 7673d81 曾因并行编辑把 sendSeatFeedback 函数体与 attention 联动整体丢失(按钮点击 ReferenceError)
+  const source = readSource("lock.js");
+  const html = readSource("index.html");
+  assert.match(html, /id="btn-lock-seat-feedback"/);
+  assert.match(source, /async function sendSeatFeedback\(\)/);
+  assert.match(source, /api\("\/api\/lock\/seat-feedback", \{/);
+  assert.match(source, /state\.seatFeedback\.seqNo === key && now - state\.seatFeedback\.at < 60000/);
+  assert.match(source, /els\.seatFeedback\?\.addEventListener\("click", \(\) => \{ sendSeatFeedback\(\); \}\);/);
+  assert.match(source, /els\.seatFeedback\?\.classList\.remove\("attention"\);/);
+  assert.match(source, /els\.seatFeedback\?\.classList\.add\("attention"\);/);
+});
+
 test("seat map centers, pans by drag, zooms at cursor; risk box only for inferred seats", () => {
   const source = readSource("lock.js");
   const html = readSource("index.html");
