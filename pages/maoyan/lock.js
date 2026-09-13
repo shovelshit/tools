@@ -753,7 +753,9 @@
       renderSelection();
       els.overlay.classList.remove("hidden");
       document.addEventListener("keydown", onKeydown);
-      await Promise.allSettled([refreshRemoteState(), loadSeats()]);
+      // 串行: 座位加载依赖最新会话状态, 并发会读到过期的 uploaded:false 误入门控(首次打开不加载座位的根因)
+      await refreshRemoteState();
+      await loadSeats();
     }
 
     els.button.addEventListener("click", open);

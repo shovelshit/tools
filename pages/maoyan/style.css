@@ -745,6 +745,8 @@ input[type="password"]:focus { border-color: var(--primary); }
 .lock-seat-row { display: grid; grid-template-columns: 30px max-content; align-items: center; min-height: 32px; }
 .lock-row-label { color: var(--muted); font-size: 10px; text-align: center; white-space: nowrap; }
 .lock-seat-grid { display: grid; grid-auto-columns: 28px; gap: 4px; min-width: max-content; }
+/* 全部格子锁定第一行: 只指定列号时, 猫眼 DOM 的列号递减顺序会触发 auto-placement 逐座换行(对角线斜排 bug) */
+.lock-seat-grid > * { grid-row: 1; }
 .lock-seat { width: 28px; height: 28px; padding: 0; border: 1px solid; border-radius: 4px; font-size: 10px; line-height: 1; }
 .lock-seat.available { background: #eff9f4; border-color: #8ed0af; color: #167047; cursor: pointer; }
 .lock-seat.lover-left, .lock-seat.lover-right { background: #fdeef2; border-color: #f0a7bb; color: #b3536e; }

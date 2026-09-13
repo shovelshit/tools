@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>猫眼影院场次监控 - 云端版</title>
-  <link rel="stylesheet" href="style.css?v=20260912f" />
+  <link rel="stylesheet" href="style.css?v=20260913c" />
 </head>
 <body>
   <!-- 登录层: 首次进入 / 切换连接时显示 -->
@@ -178,7 +178,10 @@
         <section class="lock-section" id="lock-section-seats">
           <div class="lock-seat-heading">
             <h3>座位选择</h3>
-            <div class="lock-legend" aria-label="座位图图例"><span class="legend-seat available"></span>可选 <span class="legend-seat selected"></span>已选 <span class="legend-seat unavailable"></span>不可选</div>
+              <div class="lock-heading-tools">
+                <div class="lock-legend" aria-label="座位图图例"><span class="legend-seat available"></span>可选 <span class="legend-seat selected"></span>已选 <span class="legend-seat unavailable"></span>不可选</div>
+                <button id="btn-lock-seat-feedback" class="btn small ghost lock-feedback" type="button">反馈座位问题</button>
+              </div>
           </div>
           <div class="lock-zoom-bar">
             <span class="muted">缩放</span>
@@ -215,7 +218,7 @@
 
   <script src="secure-store.js?v=20260912b"></script>
   <script src="ui.js?v=20260912b"></script>
-  <script src="lock.js?v=20260913b"></script>
+  <script src="lock.js?v=20260913c"></script>
   <script src="app.js?v=20260913b"></script>
 </body>
 </html>
