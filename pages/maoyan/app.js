@@ -231,8 +231,11 @@ els.btnLogout.addEventListener("click", async () => {
 
 async function restoreConfig() {
   restoring = true; // 恢复期间自动保存全部跳过, 避免每次连接都冗余写 KV
+  let cloudConfig = null;
+  let restoredOk = false;
   try {
     const { config } = await api("/api/config");
+    cloudConfig = config;
     monitorEnabled = config.enabled === true; // 默认停止, 需显式「开始监控」
     monitorDdl = config.monitorDdl || null;
     updateMonitorBtn();
@@ -242,15 +245,18 @@ async function restoreConfig() {
     applyPushConfig(config);
     const prevSelected = new Set((config.selectedMovieIds || []).map(String));
     if (selectedCinemaId) {
-      await loadCinema(selectedCinemaId, prevSelected, { restore: true });
-      cinemaSelected = true; // 自动恢复的影院同样视为已选择
+      // 恢复加载成功才视为已选择(失败保持未选, 锁座禁用待重试)
+      restoredOk = (await loadCinema(selectedCinemaId, prevSelected, { restore: true })) === true;
+      cinemaSelected = restoredOk;
     }
     lockController.syncAvailability();
   } finally {
-    // 恢复完成: 记录当前状态签名, 与云端一致的内容不再重复写入
-    lastSavedSig = JSON.stringify(
-      pushConfigBody({ cinemaId: selectedCinemaId, selectedMovieIds: getSelectedIds() })
-    );
+    // 恢复完成: 记录当前状态签名, 与云端一致的内容不再重复写入。
+    // 恢复加载失败时以云端原值为基线 — 否则后续任何其他字段的保存都会把影院勾选清空
+    const baseline = restoredOk || !cloudConfig
+      ? { cinemaId: selectedCinemaId, selectedMovieIds: getSelectedIds() }
+      : { cinemaId: String(cloudConfig.cinemaId || ""), selectedMovieIds: (cloudConfig.selectedMovieIds || []).map(String) };
+    lastSavedSig = JSON.stringify(pushConfigBody(baseline));
     restoring = false;
   }
 }
@@ -714,11 +720,16 @@ async function fetchShowsWithRetry(cinemaId) {
   throw lastErr;
 }
 
+// 请求序号: 快速连续切换影院时, 慢响应后到会覆盖新选择(界面/云端回退到旧影院) — 过期响应一律丢弃
+let cinemaLoadSeq = 0;
+
 async function loadCinema(cinemaId, prevSelected, { restore = false } = {}) {
+  const seq = ++cinemaLoadSeq;
   setPanelLoading(els.movieList, "正在加载影院影片...");
-  await withButtonLoading(null, "加载中...", async () => {
+  return await withButtonLoading(null, "加载中...", async () => {
     try {
       const res = await fetchShowsWithRetry(cinemaId);
+      if (seq !== cinemaLoadSeq) return true; // 过期响应: 已有更新的选择在加载, 丢弃本次结果(不更新界面/不保存云端)
       selectedCinemaId = String(res.cinemaId); // 以接口返回为准, 搜索与恢复两条路径在此汇合
       cinemaSelected = true;
       els.cinemaName.textContent = `🎬 ${res.cinemaName}（ID: ${res.cinemaId}）`;
@@ -735,7 +746,12 @@ async function loadCinema(cinemaId, prevSelected, { restore = false } = {}) {
         { cinemaId: String(res.cinemaId), selectedMovieIds: getSelectedIds() },
         { msg: `影院已保存到云端：${res.cinemaName}` }
       );
+      return true;
     } catch (e) {
+      if (seq !== cinemaLoadSeq) return true; // 过期请求的失败不提示、不回滚新选择的状态
+      // 加载失败: 影院选择视为未完成(排期未就绪不可锁座), 待重新搜索/刷新后恢复
+      cinemaSelected = false;
+      selectedCinema = null;
       if (restore) {
         // 恢复配置时拉取失败: 影院 ID 仍在, 提示重试方式
         log("warn", `影院影片自动加载失败（${e.message}），重新搜索该影院或刷新页面可重试`);
@@ -745,6 +761,7 @@ async function loadCinema(cinemaId, prevSelected, { restore = false } = {}) {
         log("error", "加载影院失败: " + e.message);
         els.movieList.innerHTML = '<div class="muted empty-tip">加载失败，请重试</div>';
       }
+      return false;
     } finally {
       lockController.syncAvailability();
     }
