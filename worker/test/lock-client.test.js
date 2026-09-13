@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { captureConsole } from "./helpers.js";
 import {
   createUnpaidOrder,
+  extractOfficialSeatHtml,
   fetchSeatMap,
   findExactShows,
   OrderAttemptError,
@@ -63,8 +64,7 @@ test("parses available and unavailable seats without losing layout", () => {
   ]);
 });
 
-test("keeps aisle placeholders in orderIndex and parses data-cols (HuanYing IMAX real layout)", () => {
-  // 真实原页锚定(寰映影城 1号激光IMAX厅, 2026-09-14): 每排 37 物理格(data-cols),
+test("keeps aisle placeholders in orderIndex and parses data-cols (HuanYing IMAX real layout)", () => {  // 真实原页锚定(寰映影城 1号激光IMAX厅, 2026-09-14): 每排 37 物理格(data-cols),
   // 过道由 data-st="E" 空占位符占据(无 data-no/column-id); DOM 顺序即物理从左到右,
   // 座位列号降序(座 29 最左)。排1 = 4 占位 + 座29..1 + 4 占位; 排10 左端孤立座 33。
   // 前端按 orderIndex 复现主站居中/孤立座布局; 占位符本体不进 seats(不可选不可下单)。
@@ -91,6 +91,28 @@ test("keeps aisle placeholders in orderIndex and parses data-cols (HuanYing IMAX
     ["33-10-33", 1],                   // 排10: 孤立座 33 在格位 1
     ["33-10-31", 3]                    // 排10: 31 座在第 3 格(孤立座 + 1 占位之后)
   ]);
+});
+
+test("extracts the official seats block for side-by-side rendering and strips scripts", () => {
+  // 真实用途: 前端在沙箱 iframe 里配合官方 CSS 副本渲染 1:1 主站座位图。
+  // 提取整块 seats-block, 剥离 script/注释/埋点属性(data-act/data-bid), 压缩标签间空白。
+  const html = `<html><head><script>alert(1)</script></head><body>
+    <div class="seats-block" data-section-id="1" data-section-name="普通区" data-seq-no="100" data-cols="37">
+      <span class="seat selectable" data-row-id="1" data-column-id="1" data-no="1-1-1" data-st="N" data-act="seat-click" data-bid="b_x"></span>
+      <!-- tracking -->
+      <script>track()</script>
+      <span class="seat sold" data-row-id="1" data-column-id="2" data-no="1-1-2" data-st="N"></span>
+    </div>
+  </body></html>`;
+  const out = extractOfficialSeatHtml(html);
+  assert.ok(out.startsWith('<div class="seats-block"'), "从 seats-block 开始标签起提取");
+  assert.ok(out.includes('data-no="1-1-1"') && out.includes('data-no="1-1-2"'), "座位 DOM 完整保留");
+  assert.ok(!out.includes("<script"), "脚本剥离");
+  assert.ok(!out.includes("<!--"), "注释剥离");
+  assert.ok(!out.includes("data-act") && !out.includes("data-bid"), "埋点属性剥离");
+  assert.ok(!/>\\s+</.test(out), "标签间空白已压缩");
+  assert.equal(extractOfficialSeatHtml("<html><body>无座位</body></html>"), "");
+  assert.equal(extractOfficialSeatHtml('<div class="seats-block"><div>未闭合'), "", "提取失败返回空串不抛错");
 });
 
 test("parses seats only from the matched seats block", () => {

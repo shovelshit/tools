@@ -778,6 +778,14 @@ input[type="password"]:focus { border-color: var(--primary); }
 .lock-seat.unavailable { background: #eceff3; border-color: #d7dce3; color: #a4acb8; cursor: not-allowed; }
 .lock-empty { min-width: 320px; padding: 18px 10px; color: var(--muted); font-size: 12px; text-align: center; }
 
+/* 官方座位图对比(沙箱 iframe 内为猫眼原版渲染, 外层容器样式保持工具风格) */
+.lock-official { margin-top: 10px; border: 1px solid var(--border, #e2e6ec); border-radius: 6px; padding: 8px 10px; }
+.lock-official summary { cursor: pointer; font-size: 12px; color: var(--muted); user-select: none; }
+.lock-official[open] summary { margin-bottom: 6px; }
+.lock-official-hint { margin: 0 0 8px; font-size: 11px; color: var(--muted); line-height: 1.6; }
+.lock-official-frame-wrap { overflow: hidden; border: 1px solid var(--border, #e2e6ec); border-radius: 4px; background: #fff; }
+.lock-official-frame-wrap iframe { display: block; width: 100%; border: 0; }
+
 .lock-risk { padding: 10px 12px; border: 1px solid #f2b8b5; border-radius: 6px; background: #fdeceb; color: #b3261e; font-size: 12px; line-height: 1.65; }
 .lock-risk-check { display: flex; align-items: center; gap: 7px; margin-top: 8px; color: var(--text); cursor: pointer; }
 .lock-risk-check input { accent-color: var(--primary); }

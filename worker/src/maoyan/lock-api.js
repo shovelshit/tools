@@ -103,6 +103,8 @@ function publicSeatMap(seatMap) {
     sectionName: String(seatMap.sectionName),
     // 每排物理格总数(含过道占位): 前端复现主站物理布局用, 旧解析无此字段时为 0
     cols: Number(seatMap.cols) || 0,
+    // 官方座位图片段(1:1 对比用, 已剥 script/埋点属性): 提取失败为空串, 前端隐藏对比区
+    officialHtml: String(seatMap.officialHtml || ""),
     seats: (seatMap.seats || []).map(({ seatNo, rowId, columnId, type, available, orderIndex }) => ({
       seatNo: String(seatNo),
       rowId: String(rowId),

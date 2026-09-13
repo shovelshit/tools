@@ -97,8 +97,13 @@ test("API response secrecy: template seats expose the sanitized seat map only", 
       "token-a"
     );
     assert.equal(response.status, 200);
-    assert.deepEqual((await body(response)).seatMap, {
-      seqNo: "100", sectionId: "1", sectionName: "1号厅", cols: 0,
+    // officialHtml 为官方座位图片段(剥离脚本/埋点), 供前端沙箱 iframe 1:1 对比渲染
+    const seatMapBody = (await body(response)).seatMap;
+    assert.equal(typeof seatMapBody.officialHtml, "string");
+    assert.ok(seatMapBody.officialHtml.startsWith('<div class="seats-block"'));
+    assert.ok(!/<script/i.test(seatMapBody.officialHtml));
+    assert.deepEqual({ ...seatMapBody, officialHtml: "" }, {
+      seqNo: "100", sectionId: "1", sectionName: "1号厅", cols: 0, officialHtml: "",
       seats: [{ seatNo: "1-6-18", rowId: "6", columnId: "18", type: "N", available: true, orderIndex: 1 }]
     });
   } finally {

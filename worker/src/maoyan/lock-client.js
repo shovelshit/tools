@@ -208,6 +208,41 @@ export function parseSeatPage(html) {
   return { sectionId, sectionName, seqNo, cols, seats };
 }
 
+// 官方座位图 1:1 对比: 从原页提取 seats-block 整块(排号列+银幕+座位 DOM, 官方 class 语义),
+// 供前端在沙箱 iframe 内配合官方 CSS 副本还原主站渲染(实证: 官方 CSS 无属性选择器依赖,
+// data-act/data-bid 仅为埋点, 可安全剥离; data-no/row-id/column-id/st 保留)。
+// 失败一律返回空串——对比图是增强能力, 任何提取异常都不能影响座位数据主链路。
+export function extractOfficialSeatHtml(html) {
+  try {
+    const source = String(html);
+    const block = source.match(/<div\b[^>]*\bclass\s*=\s*(["'])[^"']*\bseats-block\b[^"']*\1[^>]*>/i);
+    if (!block) return "";
+    const divPattern = /<\/?div\b[^>]*>/gi;
+    divPattern.lastIndex = block.index + block[0].length;
+    let depth = 1;
+    let blockEnd = -1;
+    for (const tag of source.matchAll(divPattern)) {
+      if (/^<\//i.test(tag[0])) depth -= 1;
+      else if (!/\/\s*>$/.test(tag[0])) depth += 1;
+      if (depth === 0) {
+        blockEnd = tag.index + tag[0].length;
+        break;
+      }
+    }
+    if (blockEnd < 0) return "";
+    let fragment = source.slice(block.index, blockEnd);
+    fragment = fragment.replace(/<script\b[\s\S]*?<\/script>/gi, "");
+    fragment = fragment.replace(/<!--[\s\S]*?-->/g, "");
+    // 埋点属性剥离(官方 CSS 与本工具前端均不使用)
+    fragment = fragment.replace(/\s(?:data-act|data-bid)="[^"]*"/gi, "");
+    // 标签间空白压缩(片段原样含大量缩进, 直接影响响应体积)
+    fragment = fragment.replace(/>\s+</g, "><").trim();
+    return fragment;
+  } catch {
+    return "";
+  }
+}
+
 // 猫眼座位口径: 票面排号 = data-row-id (影厅内 1..N 连续)。
 // data-no 是官方前端原样透传的不透明主键, 实际存在四种编码形状(55 页普查实证):
 //   ① 「#」三段: 影厅长编码#排#座 (seg2/seg3 常见两位前导零)
@@ -292,6 +327,7 @@ export async function fetchSeatMap(session, { cinemaId, movieId, seqNo }) {
   try {
     return {
       ...parseSeatPage(html),
+      officialHtml: extractOfficialSeatHtml(html),
       movieId: normalizedMovieId,
       cinemaId: normalizedCinemaId
     };

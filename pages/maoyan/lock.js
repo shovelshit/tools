@@ -172,6 +172,7 @@
       templateLabel: $("lock-template-label"),
       seatSource: $("lock-seat-source"),
       seatFeedback: $("btn-lock-seat-feedback"),
+      officialWrap: $("lock-official-wrap"), officialFrame: $("lock-official-frame"),
       gateHint: $("lock-gate-hint"),
       sectionSchedule: $("lock-section-schedule"),
       sectionSeats: $("lock-section-seats"),
@@ -613,8 +614,31 @@
       applyZoom();
     }
 
+    // 官方座位图对比(1:1 复刻): seatMap.officialHtml 是 worker 从猫眼原页提取的 seats-block
+    // 片段(已剥脚本/埋点属性), 放进无脚本沙箱 iframe 配官方 CSS 副本(pages/maoyan/maoyan-seat.css)
+    // 还原主站渲染。CSS 副本随官方改版可能失效, 失效时 iframe 仍显示原始 DOM(近似样式),
+    // 只影响对比观感, 不影响工具座位图与下单链路。iframe 高度按排数估算(沙箱无脚本无法自适应)。
+    function renderOfficialCompare(seatMap) {
+      if (!els.officialWrap || !els.officialFrame) return;
+      const html = String(seatMap?.officialHtml || "");
+      if (!html) {
+        els.officialWrap.classList.add("hidden");
+        els.officialFrame.removeAttribute("srcdoc");
+        return;
+      }
+      const rowIds = new Set((seatMap?.seats || []).map((seat) => String(seat.rowId)));
+      const frameHeight = 100 + rowIds.size * 44 + 40;
+      els.officialFrame.style.height = `${frameHeight}px`;
+      els.officialFrame.srcdoc = `<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">`
+        + `<link rel="stylesheet" href="maoyan-seat.css">`
+        + `<style>*{box-sizing:border-box}body{margin:0;background:#fff;overflow-y:hidden}</style>`
+        + `</head><body>${html}</body></html>`;
+      els.officialWrap.classList.remove("hidden");
+    }
+
     async function loadSeats() {
       resetSeats();
+      renderOfficialCompare(null); // 先隐藏旧对比区, 加载成功后再渲染新片段
       if (!state.templateSeqNo || !state.context?.cinemaId) return;
       if (!state.session?.uploaded) {
         // 门控期不发请求: 无会话必然失败, 只提示先上传
@@ -634,9 +658,11 @@
         }
         state.seatMap = seatMap;
         renderSeatMap();
+        renderOfficialCompare(seatMap);
         els.seatFeedback?.classList.remove("attention");
       } catch (error) {
         state.seatMap = null;
+        renderOfficialCompare(null);
         els.seatGrid.innerHTML = '<div class="lock-empty">座位表加载失败，请确认猫眼会话后重试</div>';
         // 加载失败红显反馈按钮, 引导用户上报场次标识供管理员排查
         els.seatFeedback?.classList.add("attention");
