@@ -107,6 +107,11 @@ export default {
           // 空值不覆盖: 防止异常状态下误清空已配置的影院
           const cinemaId = String(body.cinemaId).trim();
           if (!DECIMAL.test(cinemaId)) return json({ ok: false, error: "影院 ID 须为纯数字" }, 400);
+          // 影院切换时旧场次快照失效: 快照按影片 id 记 seqNo, 换影院后同影片的 seqNo 全部不同,
+          // 不清理会把新影院该影片的全部场次误报为"新增场次"; 同一影院重复保存不受影响
+          if (cfg.cinemaId && cfg.cinemaId !== cinemaId) {
+            await env.MAOYAN_KV.delete(userKey(token, "snapshot"));
+          }
           cfg.cinemaId = cinemaId;
         }
         if (body.selectedMovieIds !== void 0) cfg.selectedMovieIds = (body.selectedMovieIds || []).map(String);
