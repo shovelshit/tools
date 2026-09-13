@@ -442,6 +442,16 @@
         els.seatGrid.innerHTML = '<div class="lock-empty">该场次暂无可用座位图</div>';
         return;
       }
+      // 布局口径(主站同款): orderIndex=座位在排内的物理位次(含过道占位), cols=每排物理格总数。
+      // 猫眼每排按 DOM 顺序铺满 data-cols 格, 过道由空占位符占据 → 居中/孤立座/等宽排。
+      // 旧数据(无 orderIndex)回落票面座号布局: 座号当格位, 有跳号时同样能留出缺口。
+      const hasOrder = seats.some((seat) => Number(seat?.orderIndex) > 0);
+      const gridWidth = hasOrder
+        ? Math.max(
+            Number(state.seatMap?.cols) || 0,
+            ...seats.map((seat) => Number(seat?.orderIndex) || 0)
+          )
+        : 0;
       const rows = new Map();
       for (const seat of seats) {
         const position = seatPosition(seat, state.seatSeg);
@@ -451,7 +461,8 @@
         rows.get(key).push(seat);
       }
       const orderedRows = [...rows.entries()].sort((a, b) => Number(a[0]) - Number(b[0]));
-      // 列号表头: 与猫眼一致, 用票面座号(会跳过过道空位)
+      // 列号表头: 与猫眼一致用票面座号。物理格模式下跨排过道错位会让同一格位座号不同
+      // (如排10 的孤立座), 取该格位上出现最多的票面号, 过道格留空
       const allCols = seats.map((seat) => seatPosition(seat, state.seatSeg)?.seatNumber).filter(Number.isFinite);
       if (allCols.length) {
         const header = document.createElement("div");
@@ -460,12 +471,37 @@
         headerLabel.className = "lock-row-label";
         const headerGrid = document.createElement("div");
         headerGrid.className = "lock-seat-grid";
-        for (let col = Math.min(...allCols); col <= Math.max(...allCols); col++) {
-          const cell = document.createElement("span");
-          cell.className = "lock-col-label";
-          cell.style.gridColumn = String(col);
-          cell.textContent = String(col);
-          headerGrid.append(cell);
+        if (hasOrder) {
+          headerGrid.style.gridTemplateColumns = `repeat(${gridWidth}, 28px)`;
+          const tally = new Map();
+          for (const seat of seats) {
+            const cell = Number(seat?.orderIndex) || 0;
+            const position = seatPosition(seat, state.seatSeg);
+            if (cell <= 0 || !position) continue;
+            if (!tally.has(cell)) tally.set(cell, new Map());
+            const counts = tally.get(cell);
+            counts.set(position.seatNumber, (counts.get(position.seatNumber) || 0) + 1);
+          }
+          for (let col = 1; col <= gridWidth; col++) {
+            const cell = document.createElement("span");
+            cell.className = "lock-col-label";
+            cell.style.gridColumn = String(col);
+            let bestCount = 0;
+            let bestNumber = "";
+            for (const [number, count] of tally.get(col) || []) {
+              if (count > bestCount) { bestCount = count; bestNumber = number; }
+            }
+            cell.textContent = bestNumber ? String(bestNumber) : "";
+            headerGrid.append(cell);
+          }
+        } else {
+          for (let col = Math.min(...allCols); col <= Math.max(...allCols); col++) {
+            const cell = document.createElement("span");
+            cell.className = "lock-col-label";
+            cell.style.gridColumn = String(col);
+            cell.textContent = String(col);
+            headerGrid.append(cell);
+          }
         }
         header.append(headerLabel, headerGrid);
         els.seatGrid.append(header);
@@ -478,6 +514,8 @@
         label.textContent = `${rowNumber}排`;
         const grid = document.createElement("div");
         grid.className = "lock-seat-grid";
+        // 物理格模式: 每排显式等宽(占位格无元素也要撑位), 否则座位少的排右端会参差
+        if (hasOrder) grid.style.gridTemplateColumns = `repeat(${gridWidth}, 28px)`;
         for (const seat of rowSeats) {
           const button = document.createElement("button");
           button.type = "button";
@@ -490,9 +528,11 @@
             ? (partner?.available ? " · 情侣座需成对选择" : " · 情侣座另一半已售，无法单独购买")
             : "";
           button.className = `lock-seat${selectable ? " available" : " unavailable"}${loverClass}`;
-          // 格位与文字都用票面座号, 这样过道空位会和猫眼一样留出缺口
+          // 格位: 物理格模式用 orderIndex(与主站 DOM 位次一致, 过道留空); 回落模式用票面座号。
+          // 文字一律票面座号, 用户凭「X排Y座」对号入座
           const seatNumber = seatPosition(seat, state.seatSeg)?.seatNumber ?? Number(seat.columnId);
-          button.style.gridColumn = String(seatNumber);
+          const cellIndex = hasOrder && Number(seat.orderIndex) > 0 ? Number(seat.orderIndex) : seatNumber;
+          button.style.gridColumn = String(cellIndex);
           button.textContent = String(seatNumber);
           button.title = `${seatDisplayLabel(seat, state.seatSeg)}${pairHint}${selectable ? "" : "（不可选）"}`;
           button.disabled = !selectable;

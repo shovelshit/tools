@@ -101,12 +101,16 @@ function publicSeatMap(seatMap) {
     seqNo: String(seatMap.seqNo),
     sectionId: String(seatMap.sectionId),
     sectionName: String(seatMap.sectionName),
-    seats: (seatMap.seats || []).map(({ seatNo, rowId, columnId, type, available }) => ({
+    // 每排物理格总数(含过道占位): 前端复现主站物理布局用, 旧解析无此字段时为 0
+    cols: Number(seatMap.cols) || 0,
+    seats: (seatMap.seats || []).map(({ seatNo, rowId, columnId, type, available, orderIndex }) => ({
       seatNo: String(seatNo),
       rowId: String(rowId),
       columnId: String(columnId),
       type: String(type || ""),
-      available: available === true
+      available: available === true,
+      // 排内物理位次(含过道占位计数): 主站同款布局锚点
+      orderIndex: Number(orderIndex) || 0
     }))
   };
 }

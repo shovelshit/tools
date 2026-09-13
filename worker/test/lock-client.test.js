@@ -55,9 +55,41 @@ test("parses available and unavailable seats without losing layout", () => {
   assert.equal(map.sectionId, "88");
   assert.equal(map.sectionName, "1号厅 & 特效");
   assert.equal(map.seqNo, "2026091201");
+  // cols: 无 data-cols 的旧页为 0; orderIndex: 排内 DOM 位次(含过道占位符计数)
+  assert.equal(map.cols, 0);
   assert.deepEqual(map.seats, [
-    { rowId: "6", columnId: "18", seatNo: "1-6-18", type: "N", available: true },
-    { rowId: "6", columnId: "19", seatNo: "1-6-19", type: "N", available: false }
+    { rowId: "6", columnId: "18", seatNo: "1-6-18", type: "N", available: true, orderIndex: 1 },
+    { rowId: "6", columnId: "19", seatNo: "1-6-19", type: "N", available: false, orderIndex: 2 }
+  ]);
+});
+
+test("keeps aisle placeholders in orderIndex and parses data-cols (HuanYing IMAX real layout)", () => {
+  // 真实原页锚定(寰映影城 1号激光IMAX厅, 2026-09-14): 每排 37 物理格(data-cols),
+  // 过道由 data-st="E" 空占位符占据(无 data-no/column-id); DOM 顺序即物理从左到右,
+  // 座位列号降序(座 29 最左)。排1 = 4 占位 + 座29..1 + 4 占位; 排10 左端孤立座 33。
+  // 前端按 orderIndex 复现主站居中/孤立座布局; 占位符本体不进 seats(不可选不可下单)。
+  const html = `<div class="seats-block" data-section-id="1" data-section-name="普通区" data-seq-no="202609140012244" data-cols="37">
+    <div class="row">
+      <span class="seat empty" data-column-id="" data-row-id="1" data-no="" data-st="E"></span>
+      <span class="seat empty" data-column-id="" data-row-id="1" data-no="" data-st="E"></span>
+      <span class="seat empty" data-column-id="" data-row-id="1" data-no="" data-st="E"></span>
+      <span class="seat empty" data-column-id="" data-row-id="1" data-no="" data-st="E"></span>
+      <span class="seat sold" data-column-id="29" data-row-id="1" data-no="33-1-29" data-st="LK"></span>
+      <span class="seat selectable" data-column-id="28" data-row-id="1" data-no="33-1-28" data-st="N"></span>
+      <span class="seat empty" data-column-id="" data-row-id="1" data-no="" data-st="E"></span>
+    </div>
+    <div class="row">
+      <span class="seat sold" data-column-id="33" data-row-id="10" data-no="33-10-33" data-st="LK"></span>
+      <span class="seat empty" data-column-id="" data-row-id="10" data-no="" data-st="E"></span>
+      <span class="seat selectable" data-column-id="31" data-row-id="10" data-no="33-10-31" data-st="N"></span>
+    </div>
+  </div>`;
+  const map = parseSeatPage(html);
+  assert.equal(map.cols, 37);
+  assert.deepEqual(map.seats.map((s) => [s.seatNo, s.orderIndex]), [
+    ["33-1-29", 5], ["33-1-28", 6],   // 排1: 首座 29 在格位 5(前面 4 个过道占位)
+    ["33-10-33", 1],                   // 排10: 孤立座 33 在格位 1
+    ["33-10-31", 3]                    // 排10: 31 座在第 3 格(孤立座 + 1 占位之后)
   ]);
 });
 

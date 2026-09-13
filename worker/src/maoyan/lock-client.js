@@ -171,15 +171,25 @@ export function parseSeatPage(html) {
   if (blockEnd < 0) throw malformedSeatMap();
 
   const seats = [];
+  // 物理布局口径(主站同款): 每排 span 按 DOM 顺序即物理从左到右, class 含 seat 的 span
+  // 都占一个物理格——包括 data-st="E" 的空占位符(无 data-no/column-id, 表示过道/空白)。
+  // orderIndex = 座位在其排内含占位符的位次(1 起), 前端据此复现主站的居中/孤立座布局;
+  // 丢弃占位符本体(不可选不可下单), 只把它计入位次。
+  const orderCounter = new Map();
   const seatMarkup = source.slice(block.index + block[0].length, blockEnd);
   for (const match of seatMarkup.matchAll(/<span\b[^>]*>/gi)) {
     const seatAttributes = attributes(match[0]);
     if (!hasClass(seatAttributes.class, "seat")) continue;
+    const rowId = String(seatAttributes["data-row-id"] || "");
+    let orderIndex = 0;
+    if (rowId) {
+      orderIndex = (orderCounter.get(rowId) || 0) + 1;
+      orderCounter.set(rowId, orderIndex);
+    }
     // 跳过空位/走道占位符: 只收集字段完整的座位。data-no 是不透明主键, 官方前端点击时
     // 原样透传(官方 JS 解码实证), 实际存在「-」三段/「#」三段/纯数字 seatId 等形状,
     // 因此不做格式校验, 仅要求非空且携带 rowId/columnId(解析序号, 展示与情侣座配对依赖它们)。
     const seatNo = String(seatAttributes["data-no"] || "");
-    const rowId = String(seatAttributes["data-row-id"] || "");
     const columnId = String(seatAttributes["data-column-id"] || "");
     if (!seatNo || !rowId || !columnId) continue;
     seats.push({
@@ -187,11 +197,15 @@ export function parseSeatPage(html) {
       columnId,
       seatNo,
       type: String(seatAttributes["data-st"] || ""),
-      available: hasClass(seatAttributes.class, "selectable")
+      available: hasClass(seatAttributes.class, "selectable"),
+      orderIndex
     });
   }
   if (!seats.length) throw malformedSeatMap();
-  return { sectionId, sectionName, seqNo, seats };
+  // data-cols = 每排物理格总数(含过道占位), 主站以此铺排; 缺失时前端按最大 orderIndex 兜底
+  const colsRaw = String(blockAttributes["data-cols"] || "");
+  const cols = /^\d+$/.test(colsRaw) ? Number(colsRaw) : 0;
+  return { sectionId, sectionName, seqNo, cols, seats };
 }
 
 // 猫眼座位口径: 票面排号 = data-row-id (影厅内 1..N 连续)。

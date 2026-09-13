@@ -98,8 +98,8 @@ test("API response secrecy: template seats expose the sanitized seat map only", 
     );
     assert.equal(response.status, 200);
     assert.deepEqual((await body(response)).seatMap, {
-      seqNo: "100", sectionId: "1", sectionName: "1号厅",
-      seats: [{ seatNo: "1-6-18", rowId: "6", columnId: "18", type: "N", available: true }]
+      seqNo: "100", sectionId: "1", sectionName: "1号厅", cols: 0,
+      seats: [{ seatNo: "1-6-18", rowId: "6", columnId: "18", type: "N", available: true, orderIndex: 1 }]
     });
   } finally {
     globalThis.fetch = originalFetch;
