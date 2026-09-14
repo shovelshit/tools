@@ -630,7 +630,7 @@
       const frameHeight = 100 + rowIds.size * 44 + 40;
       els.officialFrame.style.height = `${frameHeight}px`;
       els.officialFrame.srcdoc = `<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">`
-        + `<link rel="stylesheet" href="maoyan-seat.css">`
+        + `<link rel="stylesheet" href="maoyan-seat.css?v=20260914c">`
         + `<style>*{box-sizing:border-box}body{margin:0;background:#fff;overflow-y:hidden}</style>`
         + `</head><body>${html}</body></html>`;
       els.officialWrap.classList.remove("hidden");
