@@ -77,7 +77,8 @@ test("switching cinema resets the show snapshot so the new cinema is not reporte
     throw new Error("pushNotify must not be called right after a cinema switch");
   }, () => runCheck(env, false, tokenId, { fetchCinema: async () => cinemaB }));
   assert.equal(res.skipped, undefined);
-  const changes = await env.MAOYAN_KV.get(userKey(tokenId, "changes"), "json");
+  // 无变化批次(重建基线)不再落盘 changes(KV 写额度优化), 读取为 null
+  const changes = (await env.MAOYAN_KV.get(userKey(tokenId, "changes"), "json")) || [];
   assert.equal(changes.length, 0);
   const snapshot = await env.MAOYAN_KV.get(userKey(tokenId, "snapshot"), "json");
   assert.deepEqual(snapshot["900"], ["B1"]); // 新影院基线已建立

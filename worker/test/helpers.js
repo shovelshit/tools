@@ -1,6 +1,8 @@
 export class MemoryKV {
   constructor(entries = {}) {
     this.data = new Map(Object.entries(entries));
+    // 写操作记录: [{op: "put"|"delete", key}], 供断言「某批次是否真的落盘」(KV 写额度去重优化)
+    this.ops = [];
   }
 
   async get(key, type) {
@@ -10,11 +12,22 @@ export class MemoryKV {
   }
 
   async put(key, value) {
+    this.ops.push({ op: "put", key });
     this.data.set(key, String(value));
   }
 
   async delete(key) {
+    this.ops.push({ op: "delete", key });
     this.data.delete(key);
+  }
+
+  // 统计某 key 的写操作次数(put/delete 合计)
+  writeCount(key) {
+    return this.ops.filter((entry) => entry.key === key).length;
+  }
+
+  resetOps() {
+    this.ops = [];
   }
 
   // 与 KV list 语义对齐的内存实现: 无分页, 一次性返回(list_complete: true)
