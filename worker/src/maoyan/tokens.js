@@ -6,6 +6,7 @@ import { isExpired } from "./ddl.js";
 import { json } from "../common/http.js";
 import { runCheck } from "./check.js";
 import { monitorError } from "./log.js";
+import { inMonitorWindow } from "./cron.js";
 import { listSeatFeedback, deleteSeatFeedback } from "./seat-feedback.js";
 
 export function randomToken() {
@@ -55,7 +56,10 @@ export async function checkAuthFull(request, env) {
 }
 
 // cron 直接读取唯一的令牌元数据，不维护会与删除操作竞争的副本。
-export async function runScheduledChecks(env, afterMonitor) {
+// 窗口外(北京 23:00~06:59)批次整体跳过: 不抓上游、锁座链不执行(等待中的规则保留, 窗口内恢复)。
+// opts.now 供测试注入固定时刻; 手动检查不经此函数, 不受窗口限制。
+export async function runScheduledChecks(env, afterMonitor, opts = {}) {
+  if (!inMonitorWindow(opts.now)) return;
   for (const token of await getManagedTokens(env)) {
     try {
       await runCheck(env, false, token.id, {

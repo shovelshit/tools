@@ -64,7 +64,7 @@ test("BUG-1: cron 跳过从未开始监控的用户, 不写告警也不抓取上
     upstreamCalls += 1;
     throw new Error("不应为未监控用户抓取上游");
   }, async () => {
-    await runScheduledChecks(env);
+    await runScheduledChecks(env, undefined, { now: Date.parse("2026-09-14T02:00:00.000Z") }); // 北京 10:00, 窗口内
   });
   assert.equal(upstreamCalls, 0);
   assert.equal(await env.MAOYAN_KV.get(userKey(tokenId, "changes"), "json"), null);

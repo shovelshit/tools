@@ -4,6 +4,9 @@ import { MemoryKV } from "./helpers.js";
 import { handleAdminTokens, runScheduledChecks } from "../src/maoyan/tokens.js";
 import { userKey } from "../src/maoyan/user.js";
 
+// 固定窗口内时刻(北京 10:00), 使 runScheduledChecks 的监控窗口判断稳定通过
+const WINDOW_NOW = Date.parse("2026-09-14T02:00:00.000Z");
+
 async function withMockFetch(mock, callback) {
   const original = globalThis.fetch;
   globalThis.fetch = mock;
@@ -70,13 +73,13 @@ test("scheduled monitoring hands data off only after snapshot and status persist
       assert.deepEqual(monitoredCinema, cinema);
       assert.ok(await env.MAOYAN_KV.get(userKey(tokenId, "snapshot"), "json"));
       assert.ok(await env.MAOYAN_KV.get(userKey(tokenId, "status"), "json"));
-    });
+    }, { now: WINDOW_NOW });
   });
 
   assert.equal(handoffs, 1);
 
   await env.MAOYAN_KV.put(userKey(tokenId, "config"), JSON.stringify({ enabled: false, cinemaId: "25428" }));
-  await runScheduledChecks(env, async () => { handoffs++; });
+  await runScheduledChecks(env, async () => { handoffs++; }, { now: WINDOW_NOW });
   assert.equal(handoffs, 1);
 
   await env.MAOYAN_KV.put(userKey(tokenId, "config"), JSON.stringify({
@@ -87,7 +90,7 @@ test("scheduled monitoring hands data off only after snapshot and status persist
   }));
   await env.MAOYAN_KV.delete(userKey(tokenId, "status"));
   await withMockFetch(async () => { throw new Error("provider unavailable"); }, async () => {
-    await runScheduledChecks(env, async () => { handoffs++; });
+    await runScheduledChecks(env, async () => { handoffs++; }, { now: WINDOW_NOW });
   });
   assert.equal(handoffs, 1);
 });

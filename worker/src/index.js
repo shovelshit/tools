@@ -3,7 +3,7 @@
 import { CORS, json } from "./common/http.js";
 import { NOTIFY_CHANNELS, pushBark } from "./common/notify.js";
 import { userKey, getUserConfig } from "./maoyan/user.js";
-import { CITY_LIST, fetchCinemaDetail, publicCinemaShows, searchCinemasByKw, runCheck, appendChange, pushNotify, currentChannel, currentCredential, isNotificationVerified, notificationVerification, minBatchMinutes, describeCrons, isMinuteStepCrons, resolveCronExprs, ddlFromNow, checkAuthFull, handleAdminTokens, handleLockApi, runScheduledChecks, runScheduledLockAfterMonitor } from "./maoyan/index.js";
+import { CITY_LIST, fetchCinemaDetail, publicCinemaShows, searchCinemasByKw, runCheck, appendChange, pushNotify, currentChannel, currentCredential, isNotificationVerified, notificationVerification, minBatchMinutes, describeCrons, isMinuteStepCrons, resolveCronExprs, ddlFromNow, checkAuthFull, handleAdminTokens, handleLockApi, runScheduledChecks, runScheduledLockAfterMonitor, MONITOR_WINDOW_LABEL } from "./maoyan/index.js";
 import { handleStoreApi, handleStoreFile } from "./store/proxy.js";
 
 export { LockCoordinator } from "./maoyan/lock-runner.js";
@@ -91,7 +91,7 @@ export default {
             ...await publicConfig(cfg),
             cronMinutes: minBatchMinutes(cronExprs),
             cronExprs,
-            cronText: describeCrons(cronExprs),
+            cronText: describeCrons(cronExprs) + " · " + MONITOR_WINDOW_LABEL,
             cronMinuteStep: isMinuteStepCrons(cronExprs),
           },
         });
@@ -197,7 +197,7 @@ export default {
           changes,
           cronMinutes: minBatchMinutes(cronExprs),
           cronExprs,
-          cronText: describeCrons(cronExprs),
+          cronText: describeCrons(cronExprs) + " · " + MONITOR_WINDOW_LABEL,
           cronMinuteStep: isMinuteStepCrons(cronExprs),
         });
       }
