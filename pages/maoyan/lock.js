@@ -181,6 +181,7 @@
       cancel: $("btn-lock-cancel"), submit: $("btn-lock-submit"),
       zoomIn: $("btn-lock-zoom-in"), zoomOut: $("btn-lock-zoom-out"), zoomReset: $("btn-lock-zoom-reset"), zoomLabel: $("lock-zoom-label")
     };
+    if (els.officialFrame) bindOfficialAutoScale(els.officialFrame);
     const state = {
       context: null, session: { uploaded: false }, movieId: "", templateSeqNo: "", seatMap: null,
       selectedSeatNos: new Set(), rule: null, automationEnabled: false, templates: [], dateBounds: lockDateBounds(),
@@ -634,6 +635,33 @@
         + `<style>*{box-sizing:border-box}body{margin:0;background:#fff;overflow-y:hidden}</style>`
         + `</head><body>${html}</body></html>`;
       els.officialWrap.classList.remove("hidden");
+    }
+
+    // 官方片段自适应缩放: 主站选座页由 JS 把座位图缩到约 0.4 适配容器(座位格基准 40px, 37 格内容约 1520px),
+    // 无脚本沙箱内不会自动缩, 这里在父页面 onload 后测量并注入纯 CSS transform(iframe 内仍然零脚本运行)。
+    // 注意 .seats-block 自带 overflow:hidden, body.scrollWidth 不含被裁内容, 须先用 width:max-content 撑开测真实宽。
+    function bindOfficialAutoScale(frame) {
+      frame.onload = () => {
+        try {
+          const body = frame.contentDocument && frame.contentDocument.body;
+          if (!body || !body.firstChild) return; // 清空 srcdoc 时的 about:blank, 跳过
+          const wrapW = (frame.parentElement && frame.parentElement.clientWidth) || 0;
+          if (!wrapW) return;
+          body.style.width = "max-content";
+          const w = body.scrollWidth;
+          const h = body.scrollHeight;
+          if (!w || !h) return;
+          const scale = Math.min(1, wrapW / w);
+          if (scale < 1) {
+            body.style.width = `${w}px`;
+            body.style.transform = `scale(${scale})`;
+            body.style.transformOrigin = "0 0";
+          } else {
+            body.style.width = "auto";
+          }
+          frame.style.height = `${Math.ceil(h * scale) + 2}px`;
+        } catch (e) { /* 测量失败保持估算高度, 内容仍以原生尺寸+横向滚动展示 */ }
+      };
     }
 
     async function loadSeats() {
