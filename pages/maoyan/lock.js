@@ -632,7 +632,12 @@
       els.officialFrame.style.height = `${frameHeight}px`;
       els.officialFrame.srcdoc = `<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">`
         + `<link rel="stylesheet" href="maoyan-seat.css?v=20260914c">`
-        + `<style>*{box-sizing:border-box}body{margin:0;background:#fff;overflow-y:hidden}</style>`
+        + `<style>*{box-sizing:border-box}body{margin:0;background:#fff;overflow-y:hidden}`
+        // 银幕水平居中基线: 官方主站由 JS 运行时给 .screen-container 写 left/width,
+        // 服务端原始片段没有(抓取发生在执行前), 沙箱零脚本不会定位 -> 银幕落在静态位置(最左缘)。
+        // 基线让银幕容器撑满 seats-container、550px 银幕 margin auto 居中(缩放态下容器宽=座位区宽, 已居中)。
+        + `.seats-block .screen-container{left:0;right:0}`
+        + `.seats-block .screen-container .screen{margin-left:auto;margin-right:auto}</style>`
         + `</head><body>${html}</body></html>`;
       els.officialWrap.classList.remove("hidden");
     }
@@ -658,6 +663,18 @@
             body.style.transformOrigin = "0 0";
           } else {
             body.style.width = "auto";
+          }
+          // 银幕精确对中: 按最宽排(seats-wrapper)居中银幕容器, 兜住 scale=1 的小厅
+          // (此时 body 未定宽, seats-container 比座位区宽, 仅靠 CSS 基线会偏向容器中心)。
+          const sCont = body.querySelector(".screen-container");
+          const sWrap = body.querySelector(".seats-wrapper");
+          if (sCont && sWrap) {
+            const sEl = sCont.querySelector(".screen");
+            const sw = sEl ? sEl.offsetWidth : 0;
+            if (sw) {
+              sCont.style.width = `${sw}px`;
+              sCont.style.left = `${Math.max(0, Math.round((sWrap.offsetWidth - sw) / 2))}px`;
+            }
           }
           frame.style.height = `${Math.ceil(h * scale) + 2}px`;
         } catch (e) { /* 测量失败保持估算高度, 内容仍以原生尺寸+横向滚动展示 */ }
