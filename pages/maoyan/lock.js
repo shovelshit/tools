@@ -98,8 +98,20 @@
   }
 
   function seatDisplayLabel(seat, seatSegment) {
-    const position = seatPosition(seat, seatSegment);
     const source = seat && typeof seat === "object" ? seat.seatNo : seat;
+    const row = seat && typeof seat === "object" ? Number(seat.rowId) : NaN;
+    if (!Number.isInteger(row) || row <= 0) return String(source || "");
+    const parts = String(source || "").split(/[^0-9A-Za-z]+/);
+    if (parts.length === 3 && parts.every((part) => /^\d+$/.test(part))) {
+      // 「区-排-座」强信号(仅展示文案; 座位图几何排序仍由 seatPosition 全图普查判别):
+      // seg2===rowId 且 seg3===columnId → 寰映激光IMAX型, 座号取 seg3。修复: 未加载座位图时
+      // segment 缺省 2(万达「区-座-排」假设), 会把排号段误当座号(真实缺陷: 9排15座→9排9座)。
+      const colOrdinal = Number(seat.columnId);
+      if (colOrdinal > 0 && Number(parts[1]) === row && Number(parts[2]) === colOrdinal) {
+        return `${row}排${Number(parts[2])}座`;
+      }
+    }
+    const position = seatPosition(seat, seatSegment);
     return position ? `${position.rowNumber}排${position.seatNumber}座` : String(source || "");
   }
 
@@ -311,10 +323,11 @@
         renderSelection();
         return;
       }
-      // 规则里存的是内部座位标识(seatNo), 展示统一换成「几排几座」(排号=rowId); 影厅名一并展示
+      // 规则里存的是内部座位标识(seatNo), 展示统一换成「几排几座」(排号=rowId); 影厅名一并展示。
+      // 优先用创建时服务端持久化的 label(全图普查定段); 旧规则回退本地展示换算
       const labels = seatLabelMap();
       const seats = (rule.seats || [])
-        .map((seat) => labels.get(String(seat?.seatNo ?? seat)) || seatDisplayLabel(seat, state.seatSeg))
+        .map((seat) => seat?.label || labels.get(String(seat?.seatNo ?? seat)) || seatDisplayLabel(seat, state.seatSeg))
         .join("、");
       const status = RULE_LABELS[rule.state] || "规则状态未知";
       const suffix = rule.state === "unknown"

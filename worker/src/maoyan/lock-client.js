@@ -292,12 +292,19 @@ export function seatDisplayLabel(seatOrSeatNo, seatSegment = 2) {
   const seatNo = String(seat.seatNo || "");
   const row = Number(seat.rowId);
   if (!Number.isInteger(row) || row <= 0) return seatNo;
-  // 段有效(三段全数字) → 排号仍用 rowId(与真实订单票面「9排1座」锚定), 座号取判别段并去前导零
   const parts = seatNo.split(/[^0-9A-Za-z]+/);
-  const seatNumber = parts.length === 3 && parts.every((part) => /^\d+$/.test(part))
-    ? Number(parts[seatSegment === 3 ? 2 : 1])
-    : NaN;
-  if (Number.isInteger(seatNumber) && seatNumber > 0) return `${row}排${seatNumber}座`;
+  if (parts.length === 3 && parts.every((part) => /^\d+$/.test(part))) {
+    // 「区-排-座」强信号: seg2 与票面排号一致且 seg3 与解析列号一致(寰映激光IMAX型实证)。
+    // 不依赖座位图普查 —— 单座规则/未加载座位图时普查不充分、恒回落 seg=2(万达「区-座-排」假设),
+    // 会把该型排号段误当座号(真实缺陷: 9排15座 显示成 9排9座)。
+    const colOrdinal = Number(seat.columnId);
+    if (colOrdinal > 0 && Number(parts[1]) === row && Number(parts[2]) === colOrdinal) {
+      return `${row}排${Number(parts[2])}座`;
+    }
+    // 段有效(三段全数字) → 排号仍用 rowId(与真实订单票面「9排1座」锚定), 座号取判别段并去前导零
+    const seatNumber = Number(parts[seatSegment === 3 ? 2 : 1]);
+    if (Number.isInteger(seatNumber) && seatNumber > 0) return `${row}排${seatNumber}座`;
+  }
   // 段无效(纯数字 seatId 等) → 与官方「已选座」气泡同口径, 用解析序号兜底
   const column = Number(seat.columnId);
   if (Number.isInteger(column) && column > 0) return `${row}排${column}座`;

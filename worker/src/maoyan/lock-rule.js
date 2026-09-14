@@ -143,7 +143,10 @@ function selectedSeats(seatMap, seatNos, { ignoreAvailability = false } = {}) {
     seatNo: String(seat.seatNo),
     rowId: String(seat.rowId),
     columnId: String(seat.columnId),
-    type: String(seat.type || "")
+    type: String(seat.type || ""),
+    // 展示标签在创建时用全图普查定段并持久化: 规则自身座位(常为单座)的二次普查不充分、
+    // 恒回落 seg=2, 会把寰映型「区-排-座」的排号段误当座号(9排15座→9排9座)
+    label: seatDisplayLabel(seat, seatSegmentOf(seatMap?.seats))
   }));
 }
 
@@ -155,8 +158,10 @@ function ruleKey(tokenId) {
 // 座位一律渲染成人看的「几排几座」(排号=rowId, 座号段按影厅口径自动判别), 不能直接扔内部标识。
 // 影厅名(rule.hall, 来自场次 th 字段)是用户核对座位的关键信息, 缺失时跳过该行。
 export function lockNotificationContent(rule) {
-  const seatSegment = seatSegmentOf(rule?.seats);
-  const labels = (rule?.seats || []).map((seat) => seatDisplayLabel(seat, seatSegment)).join("、");
+  // 优先用创建时持久化的 label(全图普查定段, 见 selectedSeats); 旧规则无 label 才二次判别
+  const seats = rule?.seats || [];
+  const fallbackSegment = seatSegmentOf(seats);
+  const labels = seats.map((seat) => seat?.label || seatDisplayLabel(seat, fallbackSegment)).join("、");
   const hall = rule?.hall ? `${rule.hall}\n` : "";
   return `${rule.cinemaName} ${rule.movieName}\n${hall}${rule.targetDate} ${rule.templateTime}\n${labels}` +
     (rule.state === "locked" && rule.payLeftSecond !== null ? `\n剩余支付时间 ${rule.payLeftSecond} 秒` : "");

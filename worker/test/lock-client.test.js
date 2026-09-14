@@ -212,6 +212,20 @@ test("detects the swapped seatNo segment order of laser IMAX halls", () => {
   assert.equal(seatSegmentOf(null), 2);
 });
 
+test("resolves 区-排-座 labels without a seat map via the rowId/columnId signal", () => {
+  // 回归(真实缺陷): 已保存规则重开/单座规则推送时无座位图可普查, 缺省 seg=2(万达「区-座-排」假设)
+  // 把寰映型「区-排-座」的排号段误当座号 —— KV 座位 32-9-15/rowId 9/columnId 15 显示成 9排9座。
+  // 强信号: 三段全数字且 seg2===rowId、seg3===columnId → 座号取 seg3, 与普查结论一致。
+  const seat = { seatNo: "32-9-15", rowId: "9", columnId: "15", type: "LK" };
+  assert.equal(seatDisplayLabel(seat, 2), "9排15座");
+  assert.equal(seatDisplayLabel(seat, 3), "9排15座");
+  // 万达型不满足强信号(seg2=座号≠rowId): 维持判别段口径
+  assert.equal(seatDisplayLabel({ seatNo: "1-1-10", rowId: "9", columnId: "1" }, 2), "9排1座");
+  assert.equal(seatDisplayLabel({ seatNo: "1-12-1", rowId: "1", columnId: "10" }, 2), "1排12座");
+  // columnId 缺失(旧数据形状)时不触发强信号, 行为不变
+  assert.equal(seatDisplayLabel({ seatNo: "1-1-10", rowId: "9" }, 2), "9排1座");
+});
+
 test("keeps #-delimited and numeric seatNos and still drops empty placeholders", () => {
   // 55 页普查: 金逸等影院 data-no=影厅长编码#排#座(两位前导零), 部分影院为纯数字 seatId。
   // data-no 是官方原样透传的不透明主键, 解析只保留原文; 空位/走道(无 data-no 或空值)继续过滤。

@@ -141,7 +141,10 @@ test("coordinator locks from monitored data without fetching schedules again", a
   }
 });
 
-test("the monitor cron hands a persisted monitor result to locking", async () => {
+test("the monitor cron hands a persisted monitor result to locking", async (t) => {
+  // cron 入口有北京 23:00~06:59 监控窗口闸(inMonitorWindow): 此前用例读真实墙钟,
+  // 深夜跑套件必挂(coordinatorCalls=0)。mock 时钟固定在窗口内(北京 12:00)消除时间依赖。
+  t.mock.timers.enable({ apis: ["Date"], now: now.getTime() });
   let coordinatorCalls = 0;
   const env = runtime({
     MAOYAN_KV: new MemoryKV({

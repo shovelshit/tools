@@ -65,7 +65,9 @@ test("creates a rule from authoritative cinema and seat data", async () => {
   assert.equal(rule.templateDate, "2026-09-11");
   assert.equal(rule.templateTime, "20:00");
   assert.equal(rule.templateSeqNo, "100");
-  assert.deepEqual(rule.seats, [{ seatNo: "1-6-18", rowId: "6", columnId: "18", type: "N" }]);
+  // label 在创建时用全图普查定段持久化(夹具数据 seg2=rowId、seg3 逐座变化 → 区-排-座, 座号=18),
+  // 通知与「已保存规则」直接复用, 不再做单座二次判别
+  assert.deepEqual(rule.seats, [{ seatNo: "1-6-18", rowId: "6", columnId: "18", type: "N", label: "6排18座" }]);
   assert.equal(rule.state, "waiting_schedule");
   assert.equal(rule.automationEnabled, true);
   assert.equal(rule.lastError, null);
@@ -183,9 +185,10 @@ test("an immediate successful lock sends the same terminal notification after pe
   assert.equal(locked.state, "locked");
   assert.equal(notification.config.barkKey, "test-key");
   assert.equal(notification.title, "猫眼锁座成功");
-  // 推送里必须是人看的「几排几座」(排号=rowId, 座号=seatNo 第二段), 不能是内部座位标识;
+  // 推送里必须是人看的「几排几座」, 不能是内部座位标识; 座号取创建时全图普查持久化的 label
+  // (夹具数据为「区-排-座」: seg2=rowId 恒定、seg3 逐座变化 → 6排18座)。
   // 影厅名也要带上, 便于用户核对(如 2号杜比巨幕厅)
-  assert.equal(notification.content, "测试影院 测试电影\n2号杜比巨幕厅-1.3米以下儿童需要购票\n2026-09-11 20:00\n6排6座\n剩余支付时间 600 秒");
+  assert.equal(notification.content, "测试影院 测试电影\n2号杜比巨幕厅-1.3米以下儿童需要购票\n2026-09-11 20:00\n6排18座\n剩余支付时间 600 秒");
 });
 
 test("an immediate notification failure keeps the successful order locked", async () => {
