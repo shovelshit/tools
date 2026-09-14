@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>猫眼影院场次监控 - 云端版</title>
-  <link rel="stylesheet" href="style.css?v=20260914c" />
+  <link rel="stylesheet" href="style.css?v=20260914d" />
 </head>
 <body>
   <!-- 登录层: 首次进入 / 切换连接时显示 -->
@@ -196,8 +196,16 @@
           <div class="lock-seat-scroll"><div id="lock-seat-grid" class="lock-seat-rows"><div class="lock-empty">选择可售场次后加载座位表</div></div></div>
           <details id="lock-official-wrap" class="lock-official hidden">
             <summary>官方座位图（对比 · 只读）</summary>
-            <p class="lock-official-hint">猫眼主站原版渲染（沙箱内嵌，无任何脚本运行），仅供与上方工具座位图对照；工具图可点选，此图只读。</p>
-            <div class="lock-official-frame-wrap"><iframe id="lock-official-frame" sandbox="allow-same-origin" title="官方座位图（只读对比）"></iframe></div>
+            <p class="lock-official-hint">猫眼主站原版渲染（沙箱内嵌，无任何脚本运行），仅供与上方工具座位图对照；可缩放查看细节，工具图可点选，此图只读。</p>
+            <div class="lock-zoom-bar">
+              <span class="muted">缩放</span>
+              <button id="btn-official-zoom-out" class="btn small ghost" type="button" aria-label="缩小">－</button>
+              <span id="official-zoom-label">适应</span>
+              <button id="btn-official-zoom-in" class="btn small ghost" type="button" aria-label="放大">＋</button>
+              <button id="btn-official-zoom-reset" class="btn small ghost" type="button">重置</button>
+              <span class="muted">滚轮缩放 · 按住拖动 · 双指捏合 · 只读</span>
+            </div>
+            <div class="lock-official-frame-wrap"><iframe id="lock-official-frame" sandbox="allow-same-origin" scrolling="no" title="官方座位图（只读对比）"></iframe><div id="lock-official-gesture" class="lock-official-gesture" title="滚轮缩放，按住拖动"></div></div>
           </details>
           <p id="lock-seat-count" class="lock-status">尚未选择座位</p>
         </section>
@@ -223,7 +231,7 @@
 
   <script src="secure-store.js?v=20260912b"></script>
   <script src="ui.js?v=20260912b"></script>
-<script src="lock.js?v=20260914f"></script>
+<script src="lock.js?v=20260914g"></script>
 <script src="app.js?v=20260914c"></script>
 </body>
 </html>

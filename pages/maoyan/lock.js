@@ -173,6 +173,9 @@
       seatSource: $("lock-seat-source"),
       seatFeedback: $("btn-lock-seat-feedback"),
       officialWrap: $("lock-official-wrap"), officialFrame: $("lock-official-frame"),
+      officialZoomIn: $("btn-official-zoom-in"), officialZoomOut: $("btn-official-zoom-out"),
+      officialZoomReset: $("btn-official-zoom-reset"), officialZoomLabel: $("official-zoom-label"),
+      officialGesture: $("lock-official-gesture"),
       gateHint: $("lock-gate-hint"),
       sectionSchedule: $("lock-section-schedule"),
       sectionSeats: $("lock-section-seats"),
@@ -181,7 +184,9 @@
       cancel: $("btn-lock-cancel"), submit: $("btn-lock-submit"),
       zoomIn: $("btn-lock-zoom-in"), zoomOut: $("btn-lock-zoom-out"), zoomReset: $("btn-lock-zoom-reset"), zoomLabel: $("lock-zoom-label")
     };
-    if (els.officialFrame) bindOfficialAutoScale(els.officialFrame);
+    // 官方对比区视图状态: fit=onload 适应缩放, zoom=用户缩放(1=适应), 视觉缩放=fit*zoom
+    const officialView = { fit: 1, zoom: 1, panX: 0, panY: 0, w: 0, h: 0 };
+    if (els.officialFrame) { bindOfficialAutoScale(els.officialFrame); bindOfficialZoom(); }
     const state = {
       context: null, session: { uploaded: false }, movieId: "", templateSeqNo: "", seatMap: null,
       selectedSeatNos: new Set(), rule: null, automationEnabled: false, templates: [], dateBounds: lockDateBounds(),
@@ -621,6 +626,7 @@
     // 只影响对比观感, 不影响工具座位图与下单链路。iframe 高度按排数估算(沙箱无脚本无法自适应)。
     function renderOfficialCompare(seatMap) {
       if (!els.officialWrap || !els.officialFrame) return;
+      officialView.w = 0; // 新片段待 onload 重新测量, 期间手势不生效
       const html = String(seatMap?.officialHtml || "");
       if (!html) {
         els.officialWrap.classList.add("hidden");
@@ -632,7 +638,9 @@
       els.officialFrame.style.height = `${frameHeight}px`;
       els.officialFrame.srcdoc = `<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">`
         + `<link rel="stylesheet" href="maoyan-seat.css?v=20260914c">`
-        + `<style>*{box-sizing:border-box}body{margin:0;background:#fff;overflow-y:hidden}`
+        // html/body 双 overflow:hidden: transform 只改视觉不改布局, body 布局宽仍超视口,
+        // 不禁用会出现横向滚动条且吃掉一排高度(线上用户截图实锤)
+        + `<style>*{box-sizing:border-box}html{overflow:hidden}body{margin:0;background:#fff;overflow:hidden}`
         // 银幕水平居中基线: 官方主站由 JS 运行时给 .screen-container 写 left/width,
         // 服务端原始片段没有(抓取发生在执行前), 沙箱零脚本不会定位 -> 银幕落在静态位置(最左缘)。
         // 基线让银幕容器撑满 seats-container、550px 银幕 margin auto 居中(缩放态下容器宽=座位区宽, 已居中)。
@@ -656,16 +664,14 @@
           const w = body.scrollWidth;
           const h = body.scrollHeight;
           if (!w || !h) return;
-          const scale = Math.min(1, wrapW / w);
-          if (scale < 1) {
-            body.style.width = `${w}px`;
-            body.style.transform = `scale(${scale})`;
-            body.style.transformOrigin = "0 0";
-          } else {
-            body.style.width = "auto";
-          }
-          // 银幕精确对中: 按最宽排(seats-wrapper)居中银幕容器, 兜住 scale=1 的小厅
-          // (此时 body 未定宽, seats-container 比座位区宽, 仅靠 CSS 基线会偏向容器中心)。
+          officialView.fit = Math.min(1, wrapW / w);
+          officialView.w = w;
+          officialView.h = h;
+          officialView.zoom = 1; // 换场次重置用户缩放
+          officialView.panX = 0;
+          officialView.panY = 0;
+          // 银幕精确对中: 按最宽排(seats-wrapper)居中银幕容器, 兜住 fit=1 的小厅
+          // (此时容器比座位区宽, 仅靠 CSS 基线会偏向容器中心)。
           const sCont = body.querySelector(".screen-container");
           const sWrap = body.querySelector(".seats-wrapper");
           if (sCont && sWrap) {
@@ -676,9 +682,112 @@
               sCont.style.left = `${Math.max(0, Math.round((sWrap.offsetWidth - sw) / 2))}px`;
             }
           }
-          frame.style.height = `${Math.ceil(h * scale) + 2}px`;
-        } catch (e) { /* 测量失败保持估算高度, 内容仍以原生尺寸+横向滚动展示 */ }
+          body.style.width = `${w}px`; // 定宽保证平移钳制几何稳定(transform 不改布局)
+          body.style.transformOrigin = "0 0";
+          frame.style.height = `${Math.ceil(h * officialView.fit) + 2}px`;
+          applyOfficialView();
+        } catch (e) {
+          officialView.w = 0; // 测量失败: 手势不生效, 内容以原生尺寸展示
+        }
       };
+    }
+
+    // 官方对比区视图: 视觉缩放 = fit*zoom, 平移钳制(内容小于视口时居中, 大于时限制拖动范围)
+    function applyOfficialView() {
+      const frame = els.officialFrame;
+      const body = frame && frame.contentDocument && frame.contentDocument.body;
+      if (!frame || !body || !officialView.w) return;
+      const eff = officialView.fit * officialView.zoom;
+      const boxW = frame.clientWidth;
+      const boxH = frame.clientHeight;
+      const cw = officialView.w * eff;
+      const ch = officialView.h * eff;
+      officialView.panX = cw <= boxW ? (boxW - cw) / 2 : Math.min(0, Math.max(boxW - cw, officialView.panX));
+      officialView.panY = ch <= boxH ? (boxH - ch) / 2 : Math.min(0, Math.max(boxH - ch, officialView.panY));
+      body.style.transform = `translate(${officialView.panX}px, ${officialView.panY}px) scale(${eff})`;
+      if (els.officialZoomLabel) els.officialZoomLabel.textContent = `${Math.round(eff * 100)}%`;
+    }
+
+    // 以视区坐标 (px,py) 为锚点缩放官方图, 保持锚点下的内容位置不动
+    function officialZoomAt(newZoom, px, py) {
+      if (!officialView.w) return;
+      const prevEff = officialView.fit * officialView.zoom;
+      officialView.zoom = Math.min(6, Math.max(1, Math.round(newZoom * 100) / 100));
+      const eff = officialView.fit * officialView.zoom;
+      if (eff !== prevEff) {
+        const ratio = eff / prevEff;
+        officialView.panX = px - (px - officialView.panX) * ratio;
+        officialView.panY = py - (py - officialView.panY) * ratio;
+      }
+      applyOfficialView();
+    }
+
+    function resetOfficialZoom() {
+      officialView.zoom = 1;
+      officialView.panX = 0;
+      officialView.panY = 0;
+      applyOfficialView();
+    }
+
+    // 官方图缩放交互: iframe 上盖一层透明手势层接管滚轮/拖动/捏合(iframe 内零脚本、仍只读),
+    // 与工具座位图缩放交互一致。
+    function bindOfficialZoom() {
+      const gest = els.officialGesture;
+      if (!gest || gest.dataset.zoomBound) return;
+      gest.dataset.zoomBound = "1";
+      const centerAnchor = () => {
+        const frame = els.officialFrame;
+        return frame ? [frame.clientWidth / 2, frame.clientHeight / 2] : [0, 0];
+      };
+      els.officialZoomIn?.addEventListener("click", () => { const [x, y] = centerAnchor(); officialZoomAt(officialView.zoom + 0.25, x, y); });
+      els.officialZoomOut?.addEventListener("click", () => { const [x, y] = centerAnchor(); officialZoomAt(officialView.zoom - 0.25, x, y); });
+      els.officialZoomReset?.addEventListener("click", resetOfficialZoom);
+      gest.addEventListener("wheel", (event) => {
+        event.preventDefault();
+        const rect = gest.getBoundingClientRect();
+        officialZoomAt(officialView.zoom * (event.deltaY < 0 ? 1.15 : 1 / 1.15), event.clientX - rect.left, event.clientY - rect.top);
+      }, { passive: false });
+      let pinch = null;
+      gest.addEventListener("touchstart", (event) => {
+        if (event.touches.length === 2) {
+          pinch = {
+            dist: Math.hypot(event.touches[0].clientX - event.touches[1].clientX, event.touches[0].clientY - event.touches[1].clientY),
+            zoom: officialView.zoom
+          };
+          event.preventDefault();
+        }
+      }, { passive: false });
+      gest.addEventListener("touchmove", (event) => {
+        if (!pinch || event.touches.length !== 2) return;
+        event.preventDefault();
+        const dist = Math.hypot(event.touches[0].clientX - event.touches[1].clientX, event.touches[0].clientY - event.touches[1].clientY);
+        if (pinch.dist > 0) {
+          const rect = gest.getBoundingClientRect();
+          const midX = (event.touches[0].clientX + event.touches[1].clientX) / 2 - rect.left;
+          const midY = (event.touches[0].clientY + event.touches[1].clientY) / 2 - rect.top;
+          officialZoomAt((pinch.zoom * dist) / pinch.dist, midX, midY);
+        }
+      }, { passive: false });
+      gest.addEventListener("touchend", () => { pinch = null; });
+      let drag = null;
+      gest.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0) return;
+        drag = { x: event.clientX, y: event.clientY, panX: officialView.panX, panY: officialView.panY };
+        try { gest.setPointerCapture(event.pointerId); } catch (e) { /* 忽略 */ }
+      });
+      gest.addEventListener("pointermove", (event) => {
+        if (!drag) return;
+        officialView.panX = drag.panX + event.clientX - drag.x;
+        officialView.panY = drag.panY + event.clientY - drag.y;
+        gest.classList.add("dragging");
+        applyOfficialView();
+      });
+      const endDrag = () => {
+        drag = null;
+        gest.classList.remove("dragging");
+      };
+      gest.addEventListener("pointerup", endDrag);
+      gest.addEventListener("pointercancel", endDrag);
     }
 
     async function loadSeats() {
