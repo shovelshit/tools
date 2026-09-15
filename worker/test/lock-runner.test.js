@@ -253,6 +253,135 @@ test("automation keeps no exact HH:mm match waiting without seat request", async
   assert.equal(seatsCalls, 0);
 });
 
+test("automation locks a same-hall show within thirty minutes and notifies with actual time", async () => {
+  const stored = rule({ hall: "1号激光IMAX厅", templateTime: "18:40" });
+  let notification;
+  let orderCalls = 0;
+  await runOneLockRule(await runtime(), tokenId, deps(stored, {
+    findShows: () => [],
+    findCompatibleShows: () => [{ seqNo: "250", tm: "18:50", th: "1号激光IMAX厅", showDate: stored.targetDate, timeDeltaMinutes: 10, matchMode: "fuzzy" }],
+    fetchSeats: async (_session, request) => ({
+      seqNo: request.seqNo, sectionId: "1", sectionName: "1号厅",
+      seats: [{ seatNo: "1-6-18", rowId: "6", columnId: "18", available: true }]
+    }),
+    createOrder: async () => { orderCalls++; return { orderId: "order-250", payLeftSecond: 600 }; },
+    notify: async (_config, title, content) => { notification = { title, content }; }
+  }));
+
+  assert.equal(stored.state, "locked");
+  assert.equal(stored.seqNo, "250");
+  assert.equal(stored.targetSeqNo, "250");
+  assert.equal(stored.targetTime, "18:50");
+  assert.equal(stored.matchMode, "fuzzy");
+  assert.equal(stored.timeDeltaMinutes, 10);
+  assert.equal(orderCalls, 1);
+  assert.equal(notification.title, "猫眼锁座成功");
+  assert.match(notification.content, /2026-09-12 18:50/);
+  assert.match(notification.content, /模板场次 18:40，实际场次偏差 \+10 分钟/);
+});
+
+test("automation keeps waiting when no same-hall nearby show exists", async () => {
+  const stored = rule({ hall: "1号激光IMAX厅", templateTime: "18:40" });
+  let notifications = 0;
+  let seatsCalls = 0;
+  await runOneLockRule(await runtime(), tokenId, deps(stored, {
+    findShows: () => [],
+    findCompatibleShows: () => [],
+    fetchSeats: async () => { seatsCalls++; return {}; },
+    notify: async () => { notifications++; }
+  }));
+
+  assert.equal(stored.state, "waiting_schedule");
+  assert.equal(seatsCalls, 0);
+  assert.equal(notifications, 0);
+});
+
+test("automation turns an ambiguous nearby show into a notified failure", async () => {
+  const stored = rule({ hall: "1号激光IMAX厅", templateTime: "18:40" });
+  let notification;
+  await runOneLockRule(await runtime(), tokenId, deps(stored, {
+    findShows: () => [],
+    findCompatibleShows: () => [
+      { seqNo: "250", tm: "18:30", th: "1号激光IMAX厅", timeDeltaMinutes: -10, matchMode: "fuzzy" },
+      { seqNo: "260", tm: "18:50", th: "1号激光IMAX厅", timeDeltaMinutes: 10, matchMode: "fuzzy" }
+    ],
+    createOrder: async () => { throw new Error("must not order ambiguous candidate"); },
+    notify: async (_config, title, content) => { notification = { title, content }; }
+  }));
+
+  assert.equal(stored.state, "failed");
+  assert.match(stored.lastError, /多个同厅型/);
+  assert.equal(notification.title, "猫眼锁座失败");
+});
+
+test("automation notifies when a selected nearby show cannot load its seat map", async () => {
+  const stored = rule({ hall: "1号激光IMAX厅", templateTime: "18:40" });
+  let notification;
+  await runOneLockRule(await runtime(), tokenId, deps(stored, {
+    findShows: () => [],
+    findCompatibleShows: () => [{ seqNo: "250", tm: "18:50", th: "1号激光IMAX厅", timeDeltaMinutes: 10, matchMode: "fuzzy" }],
+    fetchSeats: async () => { throw new Error("座位图暂不可用"); },
+    notify: async (_config, title, content) => { notification = { title, content }; }
+  }));
+
+  assert.equal(stored.state, "failed");
+  assert.equal(notification.title, "猫眼锁座失败");
+  assert.match(notification.content, /2026-09-12 18:50/);
+});
+
+test("automation accepts the inclusive thirty-minute boundary from the default matcher", async () => {
+  const stored = rule({ hall: "1号激光IMAX厅", templateTime: "18:40" });
+  const result = await runOneLockRule(await runtime(), tokenId, deps(stored, {
+    fetchCinema: async () => ({ showData: { movies: [{ id: "7", shows: [{ showDate: stored.targetDate, plist: [
+      { seqNo: "270", tm: "19:10", th: "1号激光IMAX厅", ticketStatus: 0 }
+    ] }] }] } }),
+    findShows: () => [],
+    fetchSeats: async (_session, request) => ({
+      seqNo: request.seqNo, sectionId: "1", sectionName: "1号厅",
+      seats: [{ seatNo: "1-6-18", rowId: "6", columnId: "18", available: true }]
+    }),
+    createOrder: async () => ({ orderId: "order-270", payLeftSecond: 600 })
+  }));
+
+  assert.equal(result.state, "locked");
+  assert.equal(stored.targetSeqNo, "270");
+  assert.equal(stored.timeDeltaMinutes, 30);
+});
+
+test("automation does not match a default nearby candidate beyond thirty minutes", async () => {
+  const stored = rule({ hall: "1号激光IMAX厅", templateTime: "18:40" });
+  let orderCalls = 0;
+  await runOneLockRule(await runtime(), tokenId, deps(stored, {
+    fetchCinema: async () => ({ showData: { movies: [{ id: "7", shows: [{ showDate: stored.targetDate, plist: [
+      { seqNo: "271", tm: "19:11", th: "1号激光IMAX厅", ticketStatus: 0 }
+    ] }] }] } }),
+    findShows: () => [],
+    createOrder: async () => { orderCalls++; return { orderId: "must-not-order", payLeftSecond: 600 }; }
+  }));
+
+  assert.equal(stored.state, "waiting_schedule");
+  assert.equal(orderCalls, 0);
+});
+
+test("automation notifies when a fuzzy order result is uncertain", async () => {
+  const stored = rule({ hall: "1号激光IMAX厅", templateTime: "18:40" });
+  let notification;
+  await runOneLockRule(await runtime(), tokenId, deps(stored, {
+    findShows: () => [],
+    findCompatibleShows: () => [{ seqNo: "280", tm: "18:50", th: "1号激光IMAX厅", timeDeltaMinutes: 10, matchMode: "fuzzy" }],
+    fetchSeats: async (_session, request) => ({
+      seqNo: request.seqNo, sectionId: "1", sectionName: "1号厅",
+      seats: [{ seatNo: "1-6-18", rowId: "6", columnId: "18", available: true }]
+    }),
+    createOrder: async () => { throw new OrderAttemptError("uncertain", true); },
+    notify: async (_config, title, content) => { notification = { title, content }; }
+  }));
+
+  assert.equal(stored.state, "unknown");
+  assert.equal(notification.title, "猫眼锁座失败");
+  assert.match(notification.content, /2026-09-12 18:50/);
+});
+
 test("automation fails ambiguous exact HH:mm schedules without an order", async () => {
   const stored = rule();
   let orderCalls = 0;
