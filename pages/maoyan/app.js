@@ -76,8 +76,30 @@ const DEFAULT_WORKER = SAME_ORIGIN ? "" : "https://ltools.asia";
 
 // ---------------- 基础 ----------------
 function normalizedWorkerUrl() {
-  const value = els.workerUrl.value.trim().replace(/\/+$/, "");
-  return value || (SAME_ORIGIN ? location.origin : "");
+  return normalizeWorkerProfile(els.workerUrl.value);
+}
+
+function normalizeWorkerProfile(value) {
+  try {
+    const url = new URL(String(value ?? "").trim() || (SAME_ORIGIN ? location.origin : ""));
+    if (!/^https?:$/.test(url.protocol) || url.username || url.password || url.search || url.hash) return "";
+    return url.toString().replace(/\/$/, "");
+  } catch { return ""; }
+}
+
+function webTokenKey(profileKey) {
+  return `token:${encodeURIComponent(profileKey)}`;
+}
+
+async function restoreWebToken(savedWorker, requestedWorker) {
+  const savedProfile = savedWorker === null ? "" : normalizeWorkerProfile(savedWorker);
+  // The legacy global token is usable only with its explicitly saved Worker.
+  const legacyToken = savedProfile ? await secureGet("token") : "";
+  if (legacyToken && !(await secureGet(webTokenKey(savedProfile)))) {
+    await secureSet(webTokenKey(savedProfile), legacyToken);
+  }
+  await secureSet("token", "");
+  return requestedWorker ? (await secureGet(webTokenKey(requestedWorker))) || "" : "";
 }
 
 async function api(path, options = {}) {
@@ -184,6 +206,18 @@ els.btnOpenUpdate?.addEventListener("click", async () => {
   });
   if (accepted) await window.maoyanRuntime.openExternal(releaseUrl);
 });
+
+function bindSetupLinks() {
+  document.querySelectorAll("a[data-external-link]").forEach((link) => {
+    link.addEventListener("click", async (event) => {
+      event.preventDefault();
+      try {
+        const result = await window.maoyanRuntime.openExternal(link.href);
+        if (result?.opened === false) showToast("无法打开外部链接", "error");
+      } catch { showToast("无法打开外部链接", "error"); }
+    });
+  });
+}
 
 function resetProfileUi(nextProfileKey) {
   profileGeneration.invalidate();
@@ -296,11 +330,8 @@ async function connect() {
   const profileChanged = Boolean(activeProfileKey && activeProfileKey !== workerUrl);
   if (profileChanged) {
     resetProfileUi(workerUrl);
-    if (tokenProfileKey !== workerUrl) {
-      els.token.value = "";
-      if (runtimeInfo.kind === "web") await secureSet("token", "");
-    }
   }
+  if (tokenProfileKey && tokenProfileKey !== workerUrl) els.token.value = "";
   const generation = profileGeneration.current();
   els.loginError.classList.add("hidden");
   if (els.loginHint) els.loginHint.classList.add("hidden");
@@ -319,7 +350,7 @@ async function connect() {
         activeProfileKey = workerUrl;
         tokenProfileKey = workerUrl;
         localStorage.setItem("workerUrl", els.workerUrl.value.trim());
-        if (runtimeInfo.kind === "web") await secureSet("token", typedToken);
+        if (runtimeInfo.kind === "web") await secureSet(webTokenKey(workerUrl), typedToken);
         else els.token.value = "";
         setConnectionState({ profileKey: profile?.id || profile?.baseUrl || workerUrl, workerUrl });
         lockServiceEnabled = st.lockServiceEnabled === true;
@@ -360,11 +391,15 @@ els.token.addEventListener("input", () => { tokenProfileKey = normalizedWorkerUr
 // 切换连接: 仅清除当前工具的连接信息，不影响同域管理页等其他本地数据
 els.btnLogout.addEventListener("click", async () => {
   resetProfileUi("");
+  const previousProfileKey = tokenProfileKey;
   realKeys.bark = "";
   realKeys.serverchan = "";
   localStorage.removeItem("workerUrl");
   localStorage.removeItem("authMode");
-  if (runtimeInfo.kind === "web") await secureSet("token", "");
+  if (runtimeInfo.kind === "web") {
+    if (previousProfileKey) await secureSet(webTokenKey(previousProfileKey), "");
+    await secureSet("token", "");
+  }
   els.workerUrl.value = "";
   els.token.value = "";
   activeProfileKey = "";
@@ -1153,6 +1188,7 @@ function syncCronInfo(data) {
   } catch {
     runtimeInfo = { kind: window.maoyanRuntime?.kind || "web", canLoginMaoyan: false, persistentTokenStorage: false };
   }
+  bindSetupLinks();
   void checkForDesktopUpdate();
   // 排查"刷新后回到登录页": 本机存储 / WebCrypto / 安全上下文 是否可用
   function probeEnv() {
@@ -1172,10 +1208,16 @@ function syncCronInfo(data) {
 
   const env = probeEnv();
   const openMode = localStorage.getItem("authMode") === "open";
+  const savedWorker = localStorage.getItem("workerUrl");
+  els.workerUrl.value = savedWorker ?? DEFAULT_WORKER;
+  // 令牌不接受 URL 参数，以免泄露到历史记录或日志。
+  const qs = new URLSearchParams(location.search);
+  if (qs.get("worker")) els.workerUrl.value = qs.get("worker");
+  tokenProfileKey = normalizedWorkerUrl();
   let savedToken = "";
   if (runtimeInfo.kind === "web") {
     try {
-      savedToken = (await secureGet("token")) || "";
+      savedToken = await restoreWebToken(savedWorker, tokenProfileKey);
     } catch (e) {
       savedToken = "";
     }
@@ -1190,12 +1232,7 @@ function syncCronInfo(data) {
     return h.toString(16).padStart(8, "0");
   }
 
-  els.workerUrl.value = localStorage.getItem("workerUrl") ?? DEFAULT_WORKER;
   els.token.value = savedToken;
-  // 仅支持通过 URL 指定 Worker 地址，令牌不接受 URL 参数以免泄露到历史记录或日志。
-  const qs = new URLSearchParams(location.search);
-  if (qs.get("worker")) els.workerUrl.value = qs.get("worker");
-  tokenProfileKey = normalizedWorkerUrl();
   const explicit = qs.has("worker"); // 带参数打开视为明确意图, 免令牌模式也能自动连
   const canAutoConnect = Boolean(els.token.value.trim() || explicit || openMode);
   console.warn("[maoyan init]", {

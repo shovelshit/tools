@@ -219,6 +219,16 @@
       if (typeof root.showToast === "function") root.showToast(message, type);
     }
 
+    function showNativeSessionResult(result, fallback, type) {
+      // Native IPC has already projected these messages; never display raw result fields.
+      const message = result?.ok === false && typeof result.message === "string" && result.message.trim()
+        ? result.message.slice(0, 1000) : fallback;
+      const warnings = Array.isArray(result?.warnings) ? result.warnings
+        .filter((warning) => warning?.code === "cleanup" && typeof warning.message === "string")
+        .slice(0, 1).map((warning) => warning.message.slice(0, 1000)) : [];
+      show([message, ...warnings].join("\n"), warnings.length && type !== "error" ? "warn" : type);
+    }
+
     function buttonLoading(btn, text, task) {
       if (typeof root.withButtonLoading === "function") return root.withButtonLoading(btn, text, task);
       return task();
@@ -995,21 +1005,24 @@
           const result = await runtime?.uploadSessionFile?.();
           if (!isCurrentProfileGeneration(generation)) return;
           if (result?.cancelled) {
-            show("已取消选择登录态文件", "info");
+            showNativeSessionResult(result, "已取消选择登录态文件", "info");
             return;
           }
-          if (!result?.session) throw new Error("上传登录态失败");
+          if (result?.ok === false || !result?.session) {
+            showNativeSessionResult(result, "上传登录态失败", "error");
+            return;
+          }
           state.session = publicSession(result.session);
           renderSession();
           renderSelection();
-          show("猫眼会话已加密保存", "success");
+          showNativeSessionResult(result, "猫眼会话已加密保存", "success");
           onLog?.("ok", "猫眼会话已上传，用于锁座（Beta）");
           await refreshRemoteState();
           if (!isCurrentProfileGeneration(generation)) return;
           await loadSeats();
-        } catch (error) {
+        } catch {
           if (!isCurrentProfileGeneration(generation)) return;
-          show(error.message || "上传失败", "error");
+          show("上传登录态失败", "error");
         } finally {
           if (isCurrentProfileGeneration(generation)) setSessionActionBusy(false);
         }
@@ -1029,21 +1042,24 @@
           const result = await runtime?.loginMaoyan?.(context.cinemaId);
           if (!isCurrentProfileGeneration(generation)) return;
           if (result?.cancelled) {
-            show("已取消猫眼登录", "info");
+            showNativeSessionResult(result, "已取消猫眼登录", "info");
             return;
           }
-          if (!result?.session) throw new Error("猫眼登录失败");
+          if (result?.ok === false || !result?.session) {
+            showNativeSessionResult(result, "猫眼登录失败", "error");
+            return;
+          }
           state.session = publicSession(result.session);
           renderSession();
           renderSelection();
-          show("猫眼登录态已保存", "success");
+          showNativeSessionResult(result, "猫眼登录态已保存", "success");
           onLog?.("ok", "猫眼一键登录已完成，用于锁座（Beta）");
           await refreshRemoteState();
           if (!isCurrentProfileGeneration(generation)) return;
           await loadSeats();
-        } catch (error) {
+        } catch {
           if (!isCurrentProfileGeneration(generation)) return;
-          show(error.message || "猫眼登录失败", "error");
+          show("猫眼登录失败", "error");
         } finally {
           if (isCurrentProfileGeneration(generation)) setSessionActionBusy(false);
         }

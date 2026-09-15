@@ -71,7 +71,7 @@ function requireRecord(value, label) {
 }
 
 function validateApiPath(requestPath) {
-  if (typeof requestPath !== "string" || !requestPath.startsWith("/api/") || requestPath.includes("#") || requestPath.includes("\\")) {
+  if (typeof requestPath !== "string" || !requestPath.startsWith("/api/") || requestPath.includes("#") || requestPath.includes("\\") || /[\u0000-\u0020\u007f]/.test(requestPath)) {
     throw new Error("API 路径无效");
   }
   const pathOnly = requestPath.slice(0, requestPath.indexOf("?") === -1 ? requestPath.length : requestPath.indexOf("?"));
@@ -81,7 +81,7 @@ function validateApiPath(requestPath) {
   } catch {
     throw new Error("API 路径无效");
   }
-  if (decodedPath.includes("\\") || decodedPath.split("/").includes("..") || /%2f|%5c/i.test(pathOnly)) throw new Error("API 路径无效");
+  if (decodedPath.includes("\\") || decodedPath.split("/").some((segment) => segment === "." || segment === "..") || /%2f|%5c/i.test(pathOnly)) throw new Error("API 路径无效");
   return { requestPath, pathname: pathOnly };
 }
 
@@ -120,7 +120,8 @@ function createWorkerClient({ app, safeStorage, fetchImpl = globalThis.fetch, co
   const profiles = readProfiles(profilesPath);
   let activeProfileKey = null;
   let profileGeneration = 0;
-  let pendingConnections = 0;
+  let connectionAttempt = 0;
+  let connecting = false;
 
   async function requireHttpConfirmation(profile, confirmed, operation) {
     if (!profile.requiresHttpConfirmation) return;
@@ -137,9 +138,8 @@ function createWorkerClient({ app, safeStorage, fetchImpl = globalThis.fetch, co
     writeProfiles(profilesPath, profiles);
   }
 
-  async function send(profile, requestPath, { method = "GET", body, signal, onSend, sessionUpload = false } = {}) {
+  async function send(profile, requestPath, { method = "GET", body, signal, onSend, sessionUpload = false, token = credentialStore.getToken(profile.baseUrl) ?? "" } = {}) {
     signal?.throwIfAborted();
-    const token = credentialStore.getToken(profile.baseUrl) ?? "";
     const headers = { "X-Token": token };
     const serializedBody = serializeJsonBody(body);
     if (serializedBody !== undefined) headers["Content-Type"] = "application/json";
@@ -170,7 +170,11 @@ function createWorkerClient({ app, safeStorage, fetchImpl = globalThis.fetch, co
       const normalized = normalizeWorkerUrl(connection.workerUrl);
       if (connection.token !== undefined && typeof connection.token !== "string") throw new Error("令牌无效");
       profileGeneration += 1;
-      pendingConnections += 1;
+      const attempt = ++connectionAttempt;
+      connecting = true;
+      const checkCurrentAttempt = () => {
+        if (attempt !== connectionAttempt) throw safeError("disconnected");
+      };
       try {
         const previousProfile = profiles[normalized.baseUrl];
         const candidate = {
@@ -180,40 +184,37 @@ function createWorkerClient({ app, safeStorage, fetchImpl = globalThis.fetch, co
           httpSessionUploadConfirmed: previousProfile?.httpSessionUploadConfirmed === true
         };
         const httpRiskConfirmed = await requireHttpConfirmation(candidate, connection.httpRiskConfirmed === true, "connect");
-
+        checkCurrentAttempt();
         const suppliedToken = typeof connection.token === "string";
-        if (suppliedToken) credentialStore.setToken(normalized.baseUrl, connection.token);
-        try {
-          const status = await send(normalized, "/api/status");
-          const profile = {
-            baseUrl: normalized.baseUrl,
-            updatedAt: new Date().toISOString(),
-            isLoopback: normalized.isLoopback,
-            requiresHttpConfirmation: normalized.requiresHttpConfirmation,
-            httpRiskConfirmed: normalized.requiresHttpConfirmation && (candidate.httpRiskConfirmed || httpRiskConfirmed === true),
-            httpSessionUploadConfirmed: normalized.requiresHttpConfirmation && candidate.httpSessionUploadConfirmed
-          };
-          persistProfile(profile);
-          activeProfileKey = normalized.baseUrl;
-          return { status, profile: status?.profile ?? null, httpRisk: normalized.requiresHttpConfirmation };
-        } catch (error) {
-          if (suppliedToken) credentialStore.clearToken(normalized.baseUrl);
-          throw error;
-        }
+        // Keep unverified credentials local to this attempt until it owns the commit.
+        const token = suppliedToken ? connection.token : credentialStore.getToken(normalized.baseUrl) ?? "";
+        const status = await send(normalized, "/api/status", { token });
+        checkCurrentAttempt();
+        const profile = {
+          baseUrl: normalized.baseUrl,
+          updatedAt: new Date().toISOString(),
+          isLoopback: normalized.isLoopback,
+          requiresHttpConfirmation: normalized.requiresHttpConfirmation,
+          httpRiskConfirmed: normalized.requiresHttpConfirmation && (candidate.httpRiskConfirmed || httpRiskConfirmed === true),
+          httpSessionUploadConfirmed: normalized.requiresHttpConfirmation && candidate.httpSessionUploadConfirmed
+        };
+        if (suppliedToken) credentialStore.setToken(normalized.baseUrl, token);
+        persistProfile(profile);
+        activeProfileKey = normalized.baseUrl;
+        return { status, profile: status?.profile ?? null, httpRisk: normalized.requiresHttpConfirmation };
       } finally {
-        profileGeneration += 1;
-        pendingConnections -= 1;
+        if (attempt === connectionAttempt) connecting = false;
       }
     },
 
     prepareSessionUpload() {
-      if (pendingConnections || !activeProfileKey || !profiles[activeProfileKey]) throw safeError("disconnected");
+      if (connecting || !activeProfileKey || !profiles[activeProfileKey]) throw safeError("disconnected");
       const profile = { ...profiles[activeProfileKey] };
       const generation = profileGeneration;
       return async (body, { signal, onSend } = {}) => {
         const checkCurrent = () => {
           signal?.throwIfAborted();
-          if (pendingConnections || profileGeneration !== generation || activeProfileKey !== profile.baseUrl) throw safeError("disconnected");
+          if (connecting || profileGeneration !== generation || activeProfileKey !== profile.baseUrl) throw safeError("disconnected");
         };
         checkCurrent();
         const uploadConfirmed = await requireHttpConfirmation(profile, true, "session-upload");

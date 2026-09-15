@@ -157,9 +157,36 @@ test("third-party CAPTCHA frame redirects remain allowed while top-level redirec
   await f.login.cancel(); await pending; assertClean(f);
 });
 
-test("missing captured signature fails validation without a Worker upload", async () => {
-  const f = fixture({ missingSignature: true }); const pending = f.login.start("25428"); await tick(); await f.authenticate();
-  assert.equal((await pending).code, "validation"); assert.equal(f.state.uploads.length, 0); assertClean(f);
+test("a delayed signature keeps the login window usable until capture succeeds", async () => {
+  const f = fixture({ missingSignature: true });
+  let settled = false;
+  const pending = f.login.start("25428").then((result) => { settled = true; return result; });
+  await tick(); await f.authenticate();
+  assert.equal(settled, false);
+  assert.equal(f.state.windows[0].destroyed, false);
+  assert.equal(f.state.uploads.length, 0);
+  f.state.requestListener({ url: "https://www.maoyan.com/ajax/cinemaDetail?yodaReady=h5", requestHeaders: { mtgsig: "delayed-signature" } }, () => {});
+  const [timerId, poll] = [...f.state.timers.entries()].find(([, timer]) => timer.ms === 500);
+  f.state.timers.delete(timerId); poll.fn(); await tick();
+  assert.deepEqual(await pending, { session: { uploaded: true, uidMasked: "UID 123***789" } });
+  assert.equal(f.state.uploads.length, 1);
+  assert.equal(f.state.uploads[0].mtgsig, "delayed-signature");
+  assert.equal(f.state.windows[0].urls.length, 2);
+  assertClean(f);
+});
+
+test("waiting for a missing signature still supports cancel and the ten-minute deadline", async () => {
+  for (const action of ["cancel", "timeout"]) {
+    const f = fixture({ missingSignature: true }); const original = f.state.session;
+    const pending = f.login.start("25428"); await tick(); await f.authenticate();
+    assert.equal(f.state.windows[0].destroyed, false);
+    if (action === "cancel") await f.login.cancel();
+    else [...f.state.timers.values()].find((timer) => timer.ms === 600000).fn();
+    const result = await pending;
+    if (action === "cancel") assert.equal(result.cancelled, true);
+    else assert.equal(result.code, "timeout");
+    assert.equal(f.state.session, original); assert.equal(f.state.uploads.length, 0); assertClean(f);
+  }
 });
 
 test("cancel before native approval completes prevents any POST", async () => {

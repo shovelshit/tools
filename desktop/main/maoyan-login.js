@@ -67,21 +67,28 @@ function createMaoyanLogin({ BrowserWindow, session, workerClient, clock = globa
     const fail = (code) => finish(sanitizeError(safeError(code)));
     state.cancel = () => state.uploadInFlight ? result : finish({ cancelled: true });
 
+    function hasLoginCookies(cookies) {
+      return cookies.some((c) => c.name === "uid" && /^\d+$/.test(c.value)) && cookies.some((c) => c.name === "_csrf" && c.value?.trim());
+    }
+
     async function checkLogin() {
-      if (state.finished || state.checking || state.phase !== "login") return;
+      if (state.finished || state.checking || !["login", "capture"].includes(state.phase)) return;
       state.checking = true;
       try {
         const cookies = await state.temporary.cookies.get({ url: ORIGIN });
         if (state.finished) return;
-        if (!cookies.some((c) => c.name === "uid" && /^\d+$/.test(c.value)) || !cookies.some((c) => c.name === "_csrf" && c.value?.trim())) return;
-        state.phase = "capture";
-        log("capture", "started", "login");
-        await state.window.loadURL(`${ORIGIN}/cinema/${cinemaId}`);
-        if (state.finished) return;
-        await state.window.webContents.executeJavaScript(`fetch("/ajax/cinemaDetail?cinemaId=${cinemaId}", { credentials: "include" }).then(() => undefined)`);
+        if (!hasLoginCookies(cookies)) return;
+        if (state.phase === "login") {
+          state.phase = "capture";
+          log("capture", "started", "login");
+          await state.window.loadURL(`${ORIGIN}/cinema/${cinemaId}`);
+          if (state.finished) return;
+          await state.window.webContents.executeJavaScript(`fetch("/ajax/cinemaDetail?cinemaId=${cinemaId}", { credentials: "include" }).then(() => undefined)`);
+        }
         if (state.finished) return;
         const capturedCookies = await state.temporary.cookies.get({ url: ORIGIN });
         if (state.finished) return;
+        if (!state.signature || !hasLoginCookies(capturedCookies)) return;
         let payload = captureSession({ cookies: capturedCookies, requestHeaders: { mtgsig: state.signature }, requestUrl: `${ORIGIN}/ajax/cinemaDetail?${new URLSearchParams(state.query)}`, userAgent: state.temporary.getUserAgent() });
         state.phase = "approval";
         let uploaded;

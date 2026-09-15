@@ -38,6 +38,69 @@ function closeServer(server) {
   return new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
 }
 
+test("session path aliases are rejected before upload or an HTTP confirmation", async () => {
+  const requests = []; const confirmations = [];
+  const fixture = makeFixture({
+    fetchImpl: async (url) => { requests.push(url); return { ok: true, json: async () => ({}) }; },
+    confirmHttp: async ({ operation }) => { confirmations.push(operation); return true; }
+  });
+  try {
+    const client = createWorkerClient(fixture);
+    await client.connectWorker({ workerUrl: "http://worker.example/prefix", token: "t", httpRiskConfirmed: true });
+    for (const alias of ["/api/lock/./session", "/api/lock/%2e/session", "/api/lock/%2E/session?x=1", "/api/lock/sess\tion"]) {
+      await assert.rejects(client.requestWorker(alias, { method: "POST", body: {}, httpRiskConfirmed: true }), /路径/);
+    }
+    assert.deepEqual(requests, ["http://worker.example/prefix/api/status"]);
+    assert.deepEqual(confirmations, ["connect"]);
+    await client.requestWorker("/api/lock/session", { method: "POST", body: {}, httpRiskConfirmed: true });
+    await client.requestWorker("/api/lock/session?x=1", { method: "POST", body: {} });
+    assert.deepEqual(confirmations, ["connect", "session-upload"]);
+    assert.equal(requests.length, 3);
+  } finally { fixture.cleanup(); }
+});
+
+test("a delayed older connection cannot replace a newer active Worker", async () => {
+  let releaseA; const requests = [];
+  const fixture = makeFixture({ fetchImpl: async (url, options) => {
+    requests.push({ url, token: options.headers["X-Token"] });
+    if (url === "https://a.example/api/status") await new Promise((resolve) => { releaseA = resolve; });
+    return { ok: true, json: async () => ({}) };
+  } });
+  try {
+    const client = createWorkerClient(fixture);
+    const older = client.connectWorker({ workerUrl: "https://a.example", token: "a" }).catch((error) => error);
+    await new Promise(setImmediate);
+    await client.connectWorker({ workerUrl: "https://b.example", token: "b" });
+    releaseA();
+    assert.equal((await older).code, "disconnected");
+    assert.equal(client.getProfile().baseUrl, "https://b.example");
+    await client.requestWorker("/api/config");
+    assert.deepEqual(requests.at(-1), { url: "https://b.example/api/config", token: "b" });
+  } finally { fixture.cleanup(); }
+});
+
+test("an older same-profile failure cannot erase newer accepted credentials", async () => {
+  let failOlder; const requests = [];
+  const fixture = makeFixture({ fetchImpl: async (url, options) => {
+    const token = options.headers["X-Token"];
+    requests.push({ url, token });
+    if (token === "older") await new Promise((_resolve, reject) => { failOlder = reject; });
+    return { ok: true, json: async () => ({}) };
+  } });
+  try {
+    const client = createWorkerClient(fixture);
+    const older = client.connectWorker({ workerUrl: "https://worker.example", token: "older" }).catch((error) => error);
+    await new Promise(setImmediate);
+    await client.connectWorker({ workerUrl: "https://worker.example", token: "newer" });
+    failOlder(new Error("older failed")); await older;
+    await client.requestWorker("/api/config");
+    assert.deepEqual(requests.at(-1), { url: "https://worker.example/api/config", token: "newer" });
+    const restored = createWorkerClient(fixture);
+    await restored.connectWorker({ workerUrl: "https://worker.example" });
+    assert.equal(requests.at(-1).token, "newer");
+  } finally { fixture.cleanup(); }
+});
+
 test("normalizes an HTTPS Worker and rejects credentials query fragment and non-HTTP URLs", () => {
   assert.deepEqual(normalizeWorkerUrl(" https://worker.example/api/ "), {
     baseUrl: "https://worker.example/api",

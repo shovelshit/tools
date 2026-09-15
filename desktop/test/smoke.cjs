@@ -40,6 +40,18 @@ async function main() {
     assert.ok(worker.requests.length >= 3);
     assert.ok(worker.requests.every(({ token }) => token === "one-token"));
     assert.equal(new URL(page.url()).protocol, "file:");
+    await application.evaluate(({ shell }) => {
+      globalThis.smokeOpenedUrls = [];
+      shell.openExternal = async (url) => { globalThis.smokeOpenedUrls.push(url); };
+    });
+    const setupLinks = ["https://apps.apple.com/cn/app/id1403753865", "https://sct.ftqq.com/sendkey"];
+    await page.locator(`a[href="${setupLinks[0]}"]`).click();
+    await page.locator('input[name="push-channel"][value="serverchan"]').check();
+    await page.locator(`a[href="${setupLinks[1]}"]`).click();
+    await page.waitForFunction(() => document.querySelector("#push-serverchan-row").classList.contains("hidden") === false);
+    assert.deepEqual(await application.evaluate(() => globalThis.smokeOpenedUrls), setupLinks);
+    assert.equal(application.windows().length, 1);
+    assert.equal(new URL(page.url()).protocol, "file:");
     assert.deepEqual(errors, []);
     const screenshot = path.join(desktop, "dist", `smoke-${process.platform}-${process.arch}${packaged ? "-packaged" : ""}.png`);
     fs.mkdirSync(path.dirname(screenshot), { recursive: true });

@@ -1,6 +1,7 @@
 const GITHUB_RELEASES_API = "https://api.github.com/repos/shovelshit/tools/releases/latest";
 const GITHUB_RELEASE_PREFIX = "/shovelshit/tools/releases/tag/";
 const MAX_RELEASE_NOTES_LENGTH = 4 * 1024;
+const SETUP_URLS = new Set(["https://apps.apple.com/cn/app/id1403753865", "https://sct.ftqq.com/sendkey"]);
 
 function normalizeVersion(value) {
   const match = typeof value === "string" && value.trim().match(/^v?(\d+)\.(\d+)\.(\d+)$/i);
@@ -63,7 +64,7 @@ function validateExternalUrl(value, { approvedUrls = [], workerProfile } = {}) {
   try { url = new URL(value); } catch { return null; }
   if (!/^https?:$/.test(url.protocol) || url.username || url.password) return null;
   const normalized = url.toString();
-  const approved = isOfficialReleaseUrl(normalized) || approvedUrls.includes(normalized);
+  const approved = isOfficialReleaseUrl(normalized) || SETUP_URLS.has(normalized) || approvedUrls.includes(normalized);
   if (!approved) return null;
   if (workerProfile?.baseUrl) {
     try {

@@ -64,7 +64,8 @@ function mountLock({
     addEventListener: () => {},
     removeEventListener: () => {}
   };
-  const root = { document, window: null };
+  const messages = [];
+  const root = { document, window: null, showToast: (message, type) => messages.push({ message, type }) };
   root.window = root;
   const source = fs.readFileSync(path.join(__dirname, "lock.js"), "utf8");
   const module = { exports: {} };
@@ -100,6 +101,7 @@ function mountLock({
   });
   return {
     controller,
+    messages,
     loginButton: elements["btn-lock-login"],
     uploadButton: elements["btn-lock-upload"],
     fileInput: elements["lock-session-file"]
@@ -204,6 +206,63 @@ test("cancelled electron login preserves the previous public session", async () 
   await dom.controller.loginMaoyan();
   await dom.controller.loginMaoyan();
   assert.deepEqual(JSON.parse(JSON.stringify(dom.controller.getSession())), session);
+});
+
+test("resolved native unknown errors preserve refresh guidance and the previous session", async () => {
+  const message = "The upload outcome is unknown. Refresh the remote session status before trying again.";
+  const cleanup = "Temporary login cleanup failed. Please restart the application.";
+  for (const [operation, method] of [["loginMaoyan", "loginMaoyan"], ["uploadSession", "uploadSessionFile"]]) {
+    let calls = 0;
+    const session = { uploaded: true, uidMasked: "UID 123***789" };
+    const dom = mountLock({
+      runtimeInfo: { kind: "electron", canLoginMaoyan: true },
+      runtime: { [method]: async () => ++calls === 1 ? { session } : {
+        ok: false, code: "unknown", message, cookies: "sensitive-cookie", error: "sensitive-error",
+        warnings: [{ code: "cleanup", message: cleanup, raw: "sensitive-warning" }]
+      } },
+      api: { "/api/lock/session/status": { session } }
+    });
+    await Promise.resolve(); await dom.controller[operation](); await dom.controller[operation]();
+    assert.match(dom.messages.at(-1).message, /Refresh the remote session status/);
+    assert.match(dom.messages.at(-1).message, /restart the application/);
+    assert.equal(dom.messages.at(-1).type, "error");
+    assert.doesNotMatch(JSON.stringify(dom.messages), /sensitive/);
+    assert.deepEqual(JSON.parse(JSON.stringify(dom.controller.getSession())), session);
+    assert.equal(dom.loginButton.disabled, false); assert.equal(dom.uploadButton.disabled, false);
+  }
+});
+
+test("native success and cancellation show cleanup warnings without leaking other result fields", async () => {
+  const session = { uploaded: true, uidMasked: "UID 123***789" };
+  for (const [operation, method] of [["loginMaoyan", "loginMaoyan"], ["uploadSession", "uploadSessionFile"]]) {
+    for (const cancelled of [false, true]) {
+      const dom = mountLock({
+        runtimeInfo: { kind: "electron", canLoginMaoyan: true },
+        runtime: { [method]: async () => ({
+          ...(cancelled ? { cancelled: true } : { session }),
+          warnings: [{ code: "cleanup", message: "Temporary login cleanup failed. Please restart the application." }, { code: "raw", message: "sensitive-warning" }],
+          mtgsig: "sensitive-signature"
+        }) },
+        api: { "/api/lock/session/status": { session } }
+      });
+      await Promise.resolve(); await dom.controller[operation]();
+      assert.ok(dom.messages.some(({ message, type }) => /restart the application/.test(message) && type === "warn"));
+      assert.doesNotMatch(JSON.stringify(dom.messages), /sensitive/);
+      assert.equal(dom.controller.getSession().uploaded, !cancelled);
+    }
+  }
+});
+
+test("native promise rejections cannot display unprojected sensitive error messages", async () => {
+  for (const [operation, method] of [["loginMaoyan", "loginMaoyan"], ["uploadSession", "uploadSessionFile"]]) {
+    const dom = mountLock({
+      runtimeInfo: { kind: "electron", canLoginMaoyan: true },
+      runtime: { [method]: async () => { throw new Error("sensitive-cookie _csrf=secret mtgsig=secret"); } }
+    });
+    await Promise.resolve(); await dom.controller[operation]();
+    assert.equal(dom.messages.at(-1).type, "error");
+    assert.doesNotMatch(dom.messages.at(-1).message, /sensitive|_csrf|mtgsig|secret/);
+  }
 });
 
 test("profile reset clears a pending web upload without a stale completion re-disabling actions", async () => {

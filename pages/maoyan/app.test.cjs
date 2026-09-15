@@ -33,6 +33,71 @@ function readSource(file) {
   return fs.readFileSync(path.join(__dirname, file), "utf8").replace(/\r\n/g, "\n");
 }
 
+async function startWebApp({ savedWorker, requestedWorker, savedToken = "token-a", tokens = {} }) {
+  const source = readSource("app.js");
+  const entries = new Map(Object.entries(tokens));
+  if (savedWorker !== undefined) entries.set("workerUrl", savedWorker);
+  entries.set("token", savedToken);
+  const requests = [];
+  const opened = [];
+  const links = ["https://apps.apple.com/cn/app/id1403753865", "https://sct.ftqq.com/sendkey"].map((href) => ({ href, addEventListener(event, callback) { this[event] = callback; } }));
+  const els = { workerUrl: { value: "" }, token: { value: "" } };
+  const location = { hostname: "page.example", origin: "https://page.example", protocol: "https:", search: requestedWorker ? `?worker=${encodeURIComponent(requestedWorker)}` : "" };
+  const window = loadRuntime();
+  window.maoyanRuntime = window.createWebRuntime({
+    getWorkerUrl: () => els.workerUrl.value, getToken: () => els.token.value,
+    fetchImpl: async (url, options) => { requests.push({ url, token: options.headers["X-Token"] }); return { ok: true, json: async () => ({}) }; }
+  });
+  window.maoyanRuntime.openExternal = async (url) => { opened.push(url); return { opened: true }; };
+  const context = {
+    window, URL, URLSearchParams, location, els, DEFAULT_WORKER: "https://ltools.asia", SAME_ORIGIN: false,
+    document: { querySelectorAll: () => links },
+    runtimeInfo: { kind: "web" }, tokenProfileKey: "", updateBatchTip() {}, checkForDesktopUpdate() {}, showLoginHint() {},
+    console: { warn() {} },
+    localStorage: { getItem: (key) => entries.get(key) ?? null, setItem: (key, value) => entries.set(key, value), removeItem: (key) => entries.delete(key) },
+    secureGet: async (key) => entries.get(key) ?? "",
+    secureSet: async (key, value) => value ? entries.set(key, value) : entries.delete(key)
+  };
+  const vm = require("node:vm");
+  const helpers = source.slice(source.indexOf("function normalizedWorkerUrl("), source.indexOf("\nasync function api("));
+  vm.runInNewContext(helpers, context);
+  const bindingStart = source.indexOf("function bindSetupLinks(");
+  if (bindingStart !== -1) vm.runInNewContext(source.slice(bindingStart, source.indexOf("\nfunction ", bindingStart + 1)), context);
+  context.connect = () => window.maoyanRuntime.connectWorker({ workerUrl: context.normalizedWorkerUrl(), token: els.token.value });
+  await vm.runInNewContext(source.slice(source.indexOf("(async function init()")), context);
+  return { requests, entries, els, opened, links };
+}
+
+test("Web startup URL override never sends another Worker's legacy token", async () => {
+  const app = await startWebApp({ savedWorker: "https://a.example", requestedWorker: "https://b.example" });
+  assert.deepEqual(app.requests, [{ url: "https://b.example/api/status", token: "" }]);
+  assert.equal(app.els.token.value, "");
+});
+
+test("Web startup restores only the requested profile and migrates bound legacy credentials", async () => {
+  const equivalent = await startWebApp({ savedWorker: "HTTPS://A.EXAMPLE:443/", requestedWorker: "https://a.example" });
+  assert.deepEqual(equivalent.requests, [{ url: "https://a.example/api/status", token: "token-a" }]);
+  assert.equal(equivalent.entries.get("token:https%3A%2F%2Fa.example"), "token-a");
+  assert.equal(equivalent.entries.has("token"), false);
+  const another = await startWebApp({ savedWorker: "https://a.example", requestedWorker: "https://b.example", tokens: { "token:https%3A%2F%2Fb.example": "token-b" } });
+  assert.deepEqual(another.requests, [{ url: "https://b.example/api/status", token: "token-b" }]);
+  assert.equal(another.entries.get("token:https%3A%2F%2Fa.example"), "token-a");
+  const unbound = await startWebApp({ requestedWorker: "https://b.example" });
+  assert.equal(unbound.requests[0].token, "");
+  assert.equal(unbound.entries.has("token"), false);
+});
+
+test("setup link clicks use runtime external navigation and suppress window creation", async () => {
+  const app = await startWebApp({ savedWorker: "https://a.example" });
+  for (const link of app.links) {
+    assert.equal(typeof link.click, "function");
+    let prevented = false;
+    await link.click({ preventDefault() { prevented = true; } });
+    assert.equal(prevented, true);
+  }
+  assert.deepEqual(app.opened, ["https://apps.apple.com/cn/app/id1403753865", "https://sct.ftqq.com/sendkey"]);
+});
+
 test("login markup exposes the Worker URL input", () => {
   const indexHtml = readSource("index.html");
   assert.doesNotMatch(indexHtml, /id="worker-url"[^>]*class="hidden"/);

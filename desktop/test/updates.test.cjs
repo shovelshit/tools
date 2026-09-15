@@ -134,6 +134,24 @@ test("manual release open accepts the checked official page but never opens a Wo
   assert.deepEqual(opened, [releaseUrl]);
 });
 
+test("fixed setup links open only their exact trusted HTTPS destinations", async () => {
+  const opened = [];
+  const shell = { openExternal: async (url) => opened.push(url) };
+  const links = ["https://apps.apple.com/cn/app/id1403753865", "https://sct.ftqq.com/sendkey"];
+  for (const link of links) assert.deepEqual(await openExternal(link, { shell }), { opened: true });
+  for (const link of [
+    "http://sct.ftqq.com/sendkey", "https://sct.ftqq.com/sendkey?redirect=https://evil.example", "https://sct.ftqq.com/sendkey#secret",
+    "https://sct.ftqq.com/sendkey/other", "https://sct.ftqq.com.evil.example/sendkey", "https://user@sct.ftqq.com/sendkey",
+    "https://sct.ftqq.com:8443/sendkey", "https://apps.apple.com/cn/app/id999999", "https://apps.apple.com.evil.example/cn/app/id1403753865",
+    "javascript:alert(1)", "file:///tmp/session.json", "https://worker.example/api/status"
+  ]) assert.deepEqual(await openExternal(link, { shell }), { opened: false }, link);
+  for (const link of links) {
+    assert.deepEqual(await openExternal(link, { shell, workerProfile: { baseUrl: new URL(link).origin } }), { opened: false });
+    assert.deepEqual(await openExternal(link, { shell, workerProfile: { baseUrl: link } }), { opened: false });
+  }
+  assert.deepEqual(opened, links);
+});
+
 test("native upload never returns file contents", async () => {
   const { result, uploaded } = await uploadSessionFileWithFixture();
 
