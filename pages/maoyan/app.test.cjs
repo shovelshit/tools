@@ -3,10 +3,45 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 
+function loadRuntime() {
+  const source = fs.readFileSync(path.join(__dirname, "runtime.js"), "utf8");
+  const window = { window: null };
+  window.window = window;
+  require("node:vm").runInNewContext(source, { window }, { filename: "runtime.js" });
+  return window;
+}
+
+function createAppStateFixture(initial = {}) {
+  return {
+    cinemaId: "",
+    selectedMovies: [],
+    lockOpen: true,
+    profileKey: "https://first.example",
+    ...initial
+  };
+}
+
 // 统一按 LF 读取: 源码在多平台检出时可能是 CRLF, 不能让行尾符决定测试结果
 function readSource(file) {
   return fs.readFileSync(path.join(__dirname, file), "utf8").replace(/\r\n/g, "\n");
 }
+
+test("login markup exposes the Worker URL input", () => {
+  const indexHtml = readSource("index.html");
+  assert.doesNotMatch(indexHtml, /id="worker-url"[^>]*class="hidden"/);
+});
+
+test("switching profiles clears cinema and lock state before reconnect", async () => {
+  const { switchWorkerProfile } = loadRuntime();
+  const state = createAppStateFixture({ cinemaId: "25428", selectedMovies: ["1"] });
+
+  await switchWorkerProfile(state, "https://second.example");
+
+  assert.equal(state.cinemaId, "");
+  assert.deepEqual(state.selectedMovies, []);
+  assert.equal(state.lockOpen, false);
+  assert.equal(state.profileKey, "https://second.example");
+});
 
 test("switching connections clears only the Maoyan user connection", () => {
   const source = readSource("app.js");

@@ -1,5 +1,5 @@
 // 猫眼影院场次监控 - 云端版前端
-// 与 Cloudflare Worker 的 /api/* 交互; Worker 地址和令牌存 localStorage
+// 与 Cloudflare Worker 的 /api/* 交互; 传输与凭据由运行时适配器管理
 // 首次进入显示登录层, 连接成功后进入主页面
 
 const $ = (id) => document.getElementById(id);
@@ -7,6 +7,7 @@ const els = {
   // 登录层
   loginOverlay: $("login-overlay"),
   mainPage: $("main-page"),
+  lockOverlay: $("lock-overlay"),
   workerUrl: $("worker-url"),
   token: $("token-input"),
   btnConnect: $("btn-connect"),
@@ -14,6 +15,8 @@ const els = {
   loginHint: $("login-hint"),
   // 顶栏
   statusLine: $("status-line"),
+  workerProfile: $("worker-profile"),
+  workerSecurity: $("worker-security"),
   btnLogout: $("btn-logout"),
   // 影院设置
   cityInput: $("city-input"),
@@ -45,6 +48,9 @@ const els = {
 
 let cinemaMovies = []; // [{id, nm, showCount, checked}]
 let connected = false;
+let activeProfileKey = "";
+let runtimeInfo = { kind: window.maoyanRuntime?.kind || "web", canLoginMaoyan: false, persistentTokenStorage: false };
+let tokenProfileKey = "";
 let lockServiceEnabled = false;
 let monitorEnabled = false; // 默认停止, 需显式「开始监控」
 let monitorDdl = null; // 监控截止时间(ISO), 每次开始监控刷新 30 天
@@ -65,21 +71,15 @@ const SAME_ORIGIN = SAME_ORIGIN_HOSTS.includes(location.hostname);
 const DEFAULT_WORKER = SAME_ORIGIN ? "" : "https://ltools.asia";
 
 // ---------------- 基础 ----------------
-// 安全: 令牌只通过 X-Token 请求头传递, 不再拼进 URL(避免进入日志/历史记录)
-function apiPath(path, params = "") {
-  const base = els.workerUrl.value.trim().replace(/\/+$/, "");
-  return `${base}${path}${params}`;
+function normalizedWorkerUrl() {
+  const value = els.workerUrl.value.trim().replace(/\/+$/, "");
+  return value || (SAME_ORIGIN ? location.origin : "");
 }
 
 async function api(path, options = {}) {
-  const headers = { "X-Token": els.token.value.trim() };
-  if (options.body) headers["Content-Type"] = "application/json";
   startTopProgress();
   try {
-    const res = await fetch(apiPath(path), { ...options, headers });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || "HTTP " + res.status);
-    return data;
+    return await window.maoyanRuntime.requestWorker(path, options);
   } finally {
     stopTopProgress();
   }
@@ -114,6 +114,53 @@ function setStatus(text, state = "off") {
   els.statusLine.className = `status-line st-${state}`;
   els.statusLine.innerHTML = '<span class="dot"></span><span></span>';
   els.statusLine.lastChild.textContent = text;
+}
+
+function setConnectionState({ profileKey = "", httpRisk = false } = {}) {
+  if (els.workerProfile) els.workerProfile.textContent = profileKey ? `配置：${profileKey}` : "配置：未连接";
+  if (els.workerSecurity) {
+    els.workerSecurity.textContent = httpRisk ? "不安全 HTTP 连接" : "HTTPS";
+    els.workerSecurity.classList.toggle("http-risk", httpRisk);
+  }
+}
+
+function resetProfileUi(nextProfileKey) {
+  window.switchWorkerProfile({
+    cinemaId: selectedCinemaId,
+    selectedMovies: getSelectedIds(),
+    lockOpen: !els.lockOverlay.classList.contains("hidden"),
+    profileKey: activeProfileKey
+  }, nextProfileKey);
+  connected = false;
+  lockServiceEnabled = false;
+  monitorEnabled = false;
+  monitorDdl = null;
+  pushVerified = false;
+  cinemaSelected = false;
+  selectedCity = null;
+  selectedCinema = null;
+  selectedCinemaId = "";
+  cinemaMovies = [];
+  allCities = [];
+  els.cityInput.value = "";
+  els.cinemaSearch.value = "";
+  els.cinemaName.textContent = "";
+  els.cinemaName.classList.add("hidden");
+  els.movieList.innerHTML = '<div class="muted empty-tip">连接云端后显示该影院在映影片</div>';
+  els.movieCount.textContent = "连接后自动加载影片";
+  els.logPanel.innerHTML = "";
+  setStatus("未连接");
+  lockController.close?.();
+  lockController.refreshTemplates?.();
+  lockController.syncAvailability();
+  updateMonitorBtn();
+}
+
+function connectionErrorMessage(error, workerUrl) {
+  if (runtimeInfo.kind === "web" && location.protocol === "https:" && /^http:/i.test(workerUrl)) {
+    return "浏览器阻止 HTTPS 页面连接 HTTP Worker，请改用 HTTPS Worker 或使用 Electron 客户端";
+  }
+  return error.message;
 }
 
 function fmtClock(ts) {
@@ -159,17 +206,34 @@ function enterMainPage() {
 }
 
 async function connect() {
-  if (!els.workerUrl.value.trim() && !SAME_ORIGIN) return showLoginError("请填写服务地址");
-  localStorage.setItem("workerUrl", els.workerUrl.value.trim());
-  await secureSet("token", els.token.value.trim());
+  const workerUrl = normalizedWorkerUrl();
+  if (!workerUrl) return showLoginError("请填写服务地址");
+  const profileChanged = Boolean(activeProfileKey && activeProfileKey !== workerUrl);
+  if (profileChanged) {
+    resetProfileUi(workerUrl);
+    if (tokenProfileKey !== workerUrl) {
+      els.token.value = "";
+      if (runtimeInfo.kind === "web") await secureSet("token", "");
+    }
+  }
   els.loginError.classList.add("hidden");
   if (els.loginHint) els.loginHint.classList.add("hidden");
   try {
     await withButtonLoading(els.btnConnect, "连接中...", async () => {
       showBlockOverlay("正在连接云端...");
       try {
-        const st = await api("/api/status");
+        const httpRiskConfirmed = !/^http:/i.test(workerUrl) || window.confirm("HTTP 服务连接可能泄露访问令牌，是否继续？");
+        const connection = { workerUrl, httpRiskConfirmed };
+        const typedToken = els.token.value.trim();
+        if (typedToken) connection.token = typedToken;
+        const { status: st, profile, httpRisk } = await window.maoyanRuntime.connectWorker(connection);
         connected = true;
+        activeProfileKey = workerUrl;
+        tokenProfileKey = workerUrl;
+        localStorage.setItem("workerUrl", els.workerUrl.value.trim());
+        if (runtimeInfo.kind === "web") await secureSet("token", typedToken);
+        else els.token.value = "";
+        setConnectionState({ profileKey: profile?.id || profile?.baseUrl || workerUrl, httpRisk });
         lockServiceEnabled = st.lockServiceEnabled === true;
         const openMode = st.authMode === "open";
         document.body.classList.toggle("open-mode", openMode);
@@ -191,7 +255,7 @@ async function connect() {
     connected = false;
     setStatus("连接失败", "stopped");
     // 令牌错误只做简短提示, 不暴露 Worker 名称与配置步骤(多人使用场景)
-    let msg = e.message;
+    let msg = connectionErrorMessage(e, workerUrl);
     if (msg.includes("访问令牌错误")) msg = "访问令牌无效，请检查令牌是否输入正确";
     showLoginError("连接失败：" + msg);
   }
@@ -201,6 +265,7 @@ els.btnConnect.addEventListener("click", connect);
 els.token.addEventListener("keydown", (e) => {
   if (e.key === "Enter") connect();
 });
+els.token.addEventListener("input", () => { tokenProfileKey = normalizedWorkerUrl(); });
 
 // 切换连接: 仅清除当前工具的连接信息，不影响同域管理页等其他本地数据
 els.btnLogout.addEventListener("click", async () => {
@@ -214,13 +279,16 @@ els.btnLogout.addEventListener("click", async () => {
   realKeys.serverchan = "";
   localStorage.removeItem("workerUrl");
   localStorage.removeItem("authMode");
-  await secureSet("token", "");
+  if (runtimeInfo.kind === "web") await secureSet("token", "");
   els.workerUrl.value = "";
   els.token.value = "";
   els.cinemaName.classList.add("hidden");
   els.cinemaName.textContent = "";
   cinemaMovies = [];
+  activeProfileKey = "";
+  tokenProfileKey = "";
   setStatus("未连接");
+  setConnectionState();
   els.mainPage.classList.add("hidden");
   els.loginOverlay.classList.remove("hidden");
   els.loginError.classList.add("hidden");
@@ -973,6 +1041,11 @@ function syncCronInfo(data) {
 
 (async function init() {
   updateBatchTip();
+  try {
+    runtimeInfo = await window.maoyanRuntime.getRuntimeInfo();
+  } catch {
+    runtimeInfo = { kind: window.maoyanRuntime?.kind || "web", canLoginMaoyan: false, persistentTokenStorage: false };
+  }
   // 排查"刷新后回到登录页": 本机存储 / WebCrypto / 安全上下文 是否可用
   function probeEnv() {
     let storageOk = true;
@@ -992,10 +1065,12 @@ function syncCronInfo(data) {
   const env = probeEnv();
   const openMode = localStorage.getItem("authMode") === "open";
   let savedToken = "";
-  try {
-    savedToken = (await secureGet("token")) || "";
-  } catch (e) {
-    savedToken = "";
+  if (runtimeInfo.kind === "web") {
+    try {
+      savedToken = (await secureGet("token")) || "";
+    } catch (e) {
+      savedToken = "";
+    }
   }
   // 令牌指纹: 与 worker 端 KV 键名 u:<指纹>:config 中的段一致, 便于核对是哪份配置
   function tokenFingerprint(t) {
@@ -1012,6 +1087,7 @@ function syncCronInfo(data) {
   // 仅支持通过 URL 指定 Worker 地址，令牌不接受 URL 参数以免泄露到历史记录或日志。
   const qs = new URLSearchParams(location.search);
   if (qs.get("worker")) els.workerUrl.value = qs.get("worker");
+  tokenProfileKey = normalizedWorkerUrl();
   const explicit = qs.has("worker"); // 带参数打开视为明确意图, 免令牌模式也能自动连
   const canAutoConnect = Boolean(els.token.value.trim() || explicit || openMode);
   console.warn("[maoyan init]", {

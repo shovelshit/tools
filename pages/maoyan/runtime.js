@@ -1,4 +1,11 @@
 (function (root) {
+  function switchWorkerProfile(state, normalizedUrl) {
+    state.cinemaId = "";
+    state.selectedMovies.length = 0;
+    state.lockOpen = false;
+    state.profileKey = normalizedUrl;
+  }
+
   function createWebRuntime({ fetchImpl = root.fetch, getWorkerUrl, getToken } = {}) {
     async function requestWorker(path, options = {}, connection = {}) {
       if (!/^\/api\//.test(path) || /^https?:/i.test(path)) throw new Error("API 路径无效");
@@ -13,7 +20,7 @@
 
     return {
       kind: "web",
-      getRuntimeInfo: async () => ({ kind: "web", canLoginMaoyan: false }),
+      getRuntimeInfo: async () => ({ kind: "web", canLoginMaoyan: false, persistentTokenStorage: true }),
       requestWorker,
       async connectWorker({ workerUrl, token, httpRiskConfirmed }) {
         const normalizedWorkerUrl = String(workerUrl || "").trim().replace(/\/+$/, "");
@@ -38,7 +45,11 @@
 
   function createElectronRuntime({ bridge = root.maoyanElectron } = {}) {
     if (!bridge) throw new Error("Electron bridge unavailable");
-    return { kind: "electron", ...bridge };
+    return {
+      kind: "electron",
+      ...bridge,
+      getRuntimeInfo: async () => ({ persistentTokenStorage: true, ...(await bridge.getRuntimeInfo()) })
+    };
   }
 
   function bridgeRuntime(scope) {
@@ -58,5 +69,6 @@
 
   root.createWebRuntime = createWebRuntime;
   root.createElectronRuntime = createElectronRuntime;
+  root.switchWorkerProfile = switchWorkerProfile;
   root.maoyanRuntime = bridgeRuntime(root);
 })(window);

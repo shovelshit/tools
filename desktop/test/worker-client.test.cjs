@@ -76,6 +76,28 @@ test("requestWorker cannot send absolute URLs or arbitrary headers", async () =>
   }
 });
 
+test("requestWorker permits query parameters only on an in-profile API path", async () => {
+  const requests = [];
+  const fixture = makeFixture({
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    }
+  });
+  try {
+    const client = createWorkerClient(fixture);
+    await client.connectWorker({ workerUrl: "https://worker.example/prefix", token: "t" });
+
+    await client.requestWorker("/api/cinemas?cityId=1&kw=imax");
+    assert.equal(requests[1].url, "https://worker.example/prefix/api/cinemas?cityId=1&kw=imax");
+    await assert.rejects(client.requestWorker("/api/cinemas#other"), /路径/);
+    await assert.rejects(client.requestWorker("/api/%2e%2e/admin?cityId=1"), /路径/);
+    await assert.rejects(client.requestWorker("https://evil.example/api/cinemas?cityId=1"), /路径/);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test("requestWorker rejects encoded traversal before attaching the profile token", async () => {
   const requests = [];
   const fixture = makeFixture({

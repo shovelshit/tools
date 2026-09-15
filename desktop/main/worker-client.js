@@ -68,16 +68,17 @@ function requireRecord(value, label) {
 }
 
 function validateApiPath(requestPath) {
-  if (typeof requestPath !== "string" || !requestPath.startsWith("/api/") || requestPath.includes("?") || requestPath.includes("#") || requestPath.includes("\\")) {
+  if (typeof requestPath !== "string" || !requestPath.startsWith("/api/") || requestPath.includes("#") || requestPath.includes("\\")) {
     throw new Error("API 路径无效");
   }
+  const pathOnly = requestPath.slice(0, requestPath.indexOf("?") === -1 ? requestPath.length : requestPath.indexOf("?"));
   let decodedPath;
   try {
-    decodedPath = decodeURIComponent(requestPath);
+    decodedPath = decodeURIComponent(pathOnly);
   } catch {
     throw new Error("API 路径无效");
   }
-  if (decodedPath.includes("\\") || decodedPath.split("/").includes("..") || /%2f|%5c/i.test(requestPath)) throw new Error("API 路径无效");
+  if (decodedPath.includes("\\") || decodedPath.split("/").includes("..") || /%2f|%5c/i.test(pathOnly)) throw new Error("API 路径无效");
   return requestPath;
 }
 
