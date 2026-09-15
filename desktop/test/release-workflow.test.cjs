@@ -27,10 +27,11 @@ test("master pushes publish installers directly to a GitHub Release", () => {
   assert.match(workflow, /Wait for earlier master releases[\s\S]*?actions\/workflows\/electron\.yml\/runs[\s\S]*?\.run_number < \$GITHUB_RUN_NUMBER[\s\S]*?\.status != \\"completed\\"/);
   assert.match(workflow, /\.run_number > \$GITHUB_RUN_NUMBER[\s\S]*?\.conclusion == \\"success\\"/);
   assert.match(workflow, /latest_flag="--latest=false"/);
+  assert.doesNotMatch(workflow, /--slurp/);
   assert.match(workflow, /cleanup_release:[\s\S]*?needs: \[prepare_release, package_release, publish_release\]/);
   assert.match(workflow, /cleanup_release:[\s\S]*?if: \$\{\{ always\(\) && needs\.prepare_release\.result != 'skipped' && needs\.prepare_release\.outputs\.tag != '' && needs\.publish_release\.result != 'success' \}\}/);
   const cleanup = workflow.split("\n  cleanup_release:")[1];
-  assert.match(cleanup, /gh api --method GET --paginate --slurp[\s\S]*?repos\/\$GITHUB_REPOSITORY\/releases/);
+  assert.match(cleanup, /gh api --method GET --paginate[\s\S]*?repos\/\$GITHUB_REPOSITORY\/releases/);
   assert.match(cleanup, /gh api --method DELETE "repos\/\$GITHUB_REPOSITORY\/releases\/\$release_id"/);
   assert.match(cleanup, /git\/matching-refs\/tags\/\$RELEASE_TAG[\s\S]*?git\/refs\/tags\/\$RELEASE_TAG/);
   assert.match(cleanup, /for attempt in 1 2 3 4/);
@@ -39,6 +40,10 @@ test("master pushes publish installers directly to a GitHub Release", () => {
 
 test("release workflow never stores installers as Actions artifacts", () => {
   assert.doesNotMatch(workflow, /actions\/upload-artifact/);
+  const packageJob = workflow.split("\n  package_release:")[1].split("\n  publish_release:")[0];
+  assert.doesNotMatch(packageJob, /CSC_IDENTITY_AUTO_DISCOVERY: "false"\s*\n\s+GH_TOKEN:/);
+  assert.match(packageJob, /Upload macOS release assets[\s\S]*?GH_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}/);
+  assert.match(packageJob, /Upload Windows release assets[\s\S]*?GH_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}/);
   assert.match(workflow, /permissions:\s*\n\s+contents: read/);
   assert.match(workflow, /prepare_release:[\s\S]*?permissions:\s*\n\s+contents: write/);
   assert.match(workflow, /package_release:[\s\S]*?permissions:\s*\n\s+contents: write/);
