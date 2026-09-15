@@ -803,7 +803,11 @@
       gest.addEventListener("pointercancel", endDrag);
     }
 
+    // 座位图加载序号: 快速切换日期/场次时, 先发慢回的过期响应会覆盖新场次渲染
+    // (症状: 选 9.19 却显示 9.17 的座位图; 与 app.js loadCinema 的 cinemaLoadSeq 同款防护)
+    let seatLoadSeq = 0;
     async function loadSeats() {
+      const loadSeq = ++seatLoadSeq;
       resetSeats();
       renderOfficialCompare(null); // 先隐藏旧对比区, 加载成功后再渲染新片段
       if (!state.templateSeqNo || !state.context?.cinemaId) return;
@@ -817,6 +821,8 @@
         renderSeatSource();
         const params = new URLSearchParams({ cinemaId: state.context.cinemaId, movieId: state.movieId, seqNo: state.templateSeqNo });
         const { seatMap } = await api(`/api/lock/template-seats?${params}`);
+        // 过期响应: 用户已切到其他场次, 丢弃, 不覆盖新渲染
+        if (loadSeq !== seatLoadSeq) return;
         // 座号段判别: 两种影厅口径(区-座-排 / 区-排-座)自动适配, 布局与文案保持票面语义
         state.seatSeg = seatSegmentOf(seatMap?.seats);
         if (state.seatMapIsTemplate && seatMap?.seats) {
@@ -828,6 +834,8 @@
         renderOfficialCompare(seatMap);
         els.seatFeedback?.classList.remove("attention");
       } catch (error) {
+        // 失败的也可能是过期请求: 不让旧报错覆盖新场次的渲染
+        if (loadSeq !== seatLoadSeq) return;
         state.seatMap = null;
         renderOfficialCompare(null);
         els.seatGrid.innerHTML = '<div class="lock-empty">座位表加载失败，请确认猫眼会话后重试</div>';

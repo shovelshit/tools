@@ -147,7 +147,8 @@ export async function handleLockApi(request, env, url, tokenId) {
       const movieId = exactDecimal(url.searchParams.get("movieId"), "movieId");
       const seqNo = exactDecimal(url.searchParams.get("seqNo"), "seqNo");
       const session = await requireSession(env, tokenId);
-      return response({ seatMap: publicSeatMap(await fetchSeatMap(session, { cinemaId, movieId, seqNo })) });
+      // 座位图实时变化, 显式禁缓存: 防止浏览器/中间层对 GET 响应做启发式缓存导致切场次时读到旧图
+      return response({ seatMap: publicSeatMap(await fetchSeatMap(session, { cinemaId, movieId, seqNo })) }, 200, { "Cache-Control": "no-store" });
     }
     if (url.pathname === "/api/lock/rule" && request.method === "POST") {
       let body;
