@@ -1229,12 +1229,35 @@ summary:focus-visible {
   body { overflow: auto; }
   .container { position: relative; min-height: 100vh; padding: 12px; }
   .app-workspace { width: 100%; height: auto; min-height: 0; }
-  .scene-bar { min-height: 40px; }
+  .scene-bar {
+    min-height: 40px;
+    display: grid;
+    grid-template-columns: 25px minmax(0, 1fr) auto;
+  }
+  .brand-mark { grid-column: 1; grid-row: 1; }
+  .title-block { grid-column: 2; grid-row: 1; }
   .subtitle,
   .scene-status .status-line span:last-child,
   .header-actions > a { display: none; }
-  .scene-status { margin-left: auto; }
-  .header-actions { margin-left: 0; }
+  .scene-status {
+    width: 100%;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-content: flex-end;
+    margin-left: 0;
+  }
+  #worker-security.http-risk {
+    max-width: none;
+    overflow: visible;
+    text-overflow: clip;
+  }
+  .update-status {
+    width: 100%;
+    grid-column: 1 / -1;
+    grid-row: 3;
+    justify-content: flex-end;
+  }
+  .header-actions { grid-column: 3; grid-row: 1; margin-left: 0; }
   .workflow-shell { min-height: 0; flex: 0 0 auto; grid-template-columns: 1fr; grid-template-rows: 70px auto; gap: 8px; }
   .workflow-progress { padding: 7px 9px; }
   .progress-heading { position: absolute; top: 7px; right: 9px; padding: 0; border: 0; }

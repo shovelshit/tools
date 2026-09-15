@@ -108,6 +108,32 @@ async function main() {
     }
 
     await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator("#worker-security").evaluate((element) => {
+      element.textContent = "不安全 HTTP 连接";
+      element.classList.add("http-risk");
+    });
+    await page.locator("#update-text").evaluate((element) => { element.textContent = "发现新版本 v0.1.1"; });
+    await page.locator("#update-status").evaluate((element) => element.classList.remove("hidden"));
+    const mobileHeaderLayout = await page.evaluate(() => {
+      const workspace = document.querySelector(".app-workspace").getBoundingClientRect();
+      const security = document.querySelector("#worker-security");
+      const switchButton = document.querySelector("#btn-logout").getBoundingClientRect();
+      return {
+        viewportWidth: innerWidth,
+        workspaceRight: workspace.right,
+        switchRight: switchButton.right,
+        securityClientWidth: security.clientWidth,
+        securityScrollWidth: security.scrollWidth,
+      };
+    });
+    assert.ok(mobileHeaderLayout.workspaceRight <= mobileHeaderLayout.viewportWidth, JSON.stringify(mobileHeaderLayout));
+    assert.ok(mobileHeaderLayout.switchRight <= mobileHeaderLayout.viewportWidth, JSON.stringify(mobileHeaderLayout));
+    assert.ok(mobileHeaderLayout.securityClientWidth >= mobileHeaderLayout.securityScrollWidth, JSON.stringify(mobileHeaderLayout));
+    await page.locator("#worker-security").evaluate((element) => {
+      element.textContent = "本机 HTTP";
+      element.classList.remove("http-risk");
+    });
+    await page.locator("#update-status").evaluate((element) => element.classList.add("hidden"));
     const mobileLayout = await page.evaluate(() => {
       const progress = document.querySelector(".workflow-progress").getBoundingClientRect();
       const main = document.querySelector(".workflow-main").getBoundingClientRect();
