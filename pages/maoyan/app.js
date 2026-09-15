@@ -139,10 +139,21 @@ function setStatus(text, state = "off") {
   els.statusLine.lastChild.textContent = text;
 }
 
-function setConnectionState({ profileKey = "", httpRisk = false } = {}) {
+function setConnectionState({ profileKey = "", workerUrl = "" } = {}) {
   if (els.workerProfile) els.workerProfile.textContent = profileKey ? `配置：${profileKey}` : "配置：未连接";
   if (els.workerSecurity) {
-    els.workerSecurity.textContent = httpRisk ? "不安全 HTTP 连接" : "HTTPS";
+    let label = "未连接";
+    let httpRisk = false;
+    try {
+      const url = new URL(workerUrl);
+      if (url.protocol === "https:") label = "HTTPS";
+      if (url.protocol === "http:") {
+        const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname.toLowerCase());
+        httpRisk = !loopback;
+        label = loopback ? "本机 HTTP" : "不安全 HTTP 连接";
+      }
+    } catch { /* No connection metadata is available yet. */ }
+    els.workerSecurity.textContent = label;
     els.workerSecurity.classList.toggle("http-risk", httpRisk);
   }
 }
@@ -302,7 +313,7 @@ async function connect() {
         const typedToken = els.token.value.trim();
         if (typedToken) connection.token = typedToken;
         if (runtimeInfo.kind === "electron") els.token.value = "";
-        const { status: st, profile, httpRisk } = await window.maoyanRuntime.connectWorker(connection);
+        const { status: st, profile } = await window.maoyanRuntime.connectWorker(connection);
         if (!profileGeneration.isCurrent(generation)) return;
         connected = true;
         activeProfileKey = workerUrl;
@@ -310,7 +321,7 @@ async function connect() {
         localStorage.setItem("workerUrl", els.workerUrl.value.trim());
         if (runtimeInfo.kind === "web") await secureSet("token", typedToken);
         else els.token.value = "";
-        setConnectionState({ profileKey: profile?.id || profile?.baseUrl || workerUrl, httpRisk });
+        setConnectionState({ profileKey: profile?.id || profile?.baseUrl || workerUrl, workerUrl });
         lockServiceEnabled = st.lockServiceEnabled === true;
         const openMode = st.authMode === "open";
         document.body.classList.toggle("open-mode", openMode);

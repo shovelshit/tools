@@ -38,6 +38,28 @@ test("login markup exposes the Worker URL input", () => {
   assert.doesNotMatch(indexHtml, /id="worker-url"[^>]*class="hidden"/);
 });
 
+test("connection security distinguishes HTTPS, loopback HTTP, and remote HTTP", () => {
+  const source = readSource("app.js");
+  const start = source.indexOf("function setConnectionState(");
+  const end = source.indexOf("\nfunction ", start + 1);
+  const security = { textContent: "", classList: { toggle(_name, enabled) { security.risk = enabled; } } };
+  const context = { URL, els: { workerProfile: {}, workerSecurity: security } };
+  require("node:vm").runInNewContext(source.slice(start, end), context);
+  for (const [workerUrl, httpRisk, label, risk] of [
+    ["https://worker.example", false, "HTTPS", false],
+    ["http://localhost:8787", false, "本机 HTTP", false],
+    ["http://127.0.0.1:8787", false, "本机 HTTP", false],
+    ["http://[::1]:8787", false, "本机 HTTP", false],
+    ["http://worker.example", true, "不安全 HTTP 连接", true],
+    ["http://localhost.evil.example", false, "不安全 HTTP 连接", true],
+    ["", false, "未连接", false]
+  ]) {
+    context.setConnectionState({ profileKey: "profile-id", workerUrl, httpRisk });
+    assert.equal(security.textContent, label, workerUrl);
+    assert.equal(security.risk, risk, workerUrl);
+  }
+});
+
 test("switching profiles clears cinema and lock state before reconnect", async () => {
   const { switchWorkerProfile } = loadRuntime();
   const state = createAppStateFixture({ cinemaId: "25428", selectedMovies: ["1"] });
