@@ -5,6 +5,17 @@ async function startMockWorker({ rejectUpload = false } = {}) {
   const uploads = [];
   const sessions = new Map(["one", "two"].map((key) => [key, { uploaded: true, uidMasked: "UID 987***321", sourceSavedAt: "2026-01-01T00:00:00.000Z" }]));
   const cron = { cronMinutes: 5, cronExprs: ["*/5 * * * *"], cronText: "Every 5 minutes", cronMinuteStep: true };
+  const configs = new Map(["one", "two"].map((key) => [key, {
+    enabled: false,
+    cinemaId: "",
+    selectedMovieIds: [],
+    monitorDdl: null,
+    notifyChannel: "bark",
+    hasBark: false,
+    hasServerChan: false,
+    notifyVerified: false,
+    ...cron,
+  }]));
   const server = http.createServer(async (request, response) => {
     const url = new URL(request.url, "http://localhost");
     const [, profile, ...parts] = url.pathname.split("/");
@@ -13,8 +24,34 @@ async function startMockWorker({ rejectUpload = false } = {}) {
     const reply = (data, code = 200) => { response.writeHead(code, { "Content-Type": "application/json" }); response.end(JSON.stringify(data)); };
     if (request.headers["x-token"] !== `${profile}-token`) return reply({ error: "Invalid token" }, 401);
     if (route === "/api/status") return reply({ ok: true, authMode: "token", lockServiceEnabled: true, status: { lastCheckTs: 0, lastCheck: null, lastError: null, cinemaName: "", newTotal: 0, enabled: false, monitorDdl: null }, changes: [], ...cron });
-    if (route === "/api/config") return reply({ ok: true, config: { enabled: false, cinemaId: "", selectedMovieIds: [], monitorDdl: null, notifyChannel: "bark", barkKey: "", serverChanKey: "", ...cron } });
-    if (route === "/api/cities") return reply({ ok: true, cities: [] });
+    if (route === "/api/config") {
+      if (request.method === "POST") {
+        let text = "";
+        for await (const chunk of request) text += chunk;
+        const input = JSON.parse(text || "{}");
+        const previous = configs.get(profile);
+        const next = { ...previous, ...input };
+        if (input.barkKey) next.hasBark = true;
+        if (input.serverChanKey) next.hasServerChan = true;
+        configs.set(profile, next);
+      }
+      return reply({ ok: true, config: configs.get(profile) });
+    }
+    if (route === "/api/cities") return reply({ ok: true, cities: [{ id: "10", name: "上海", pinyin: "shanghai" }] });
+    if (route === "/api/cinemas") return reply({ ok: true, cinemas: [{ id: "25428", nm: "寰映影城（大融城激光IMAX店）", addr: "上海市静安区" }] });
+    if (route === "/api/shows") return reply({
+      ok: true,
+      cinemaId: "25428",
+      cinemaName: "寰映影城（大融城激光IMAX店）",
+      movies: [{ id: "100", nm: "奥德赛", showCount: 1, shows: [{ showDate: "2026-09-19", plist: [{ seqNo: "900", tm: "18:40", lang: "英语", tp: "IMAX2D", th: "1号激光IMAX厅", ticketStatus: 0 }] }] }],
+    });
+    if (route === "/api/test-push" && request.method === "POST") {
+      const next = { ...configs.get(profile), notifyVerified: true };
+      configs.set(profile, next);
+      return reply({ ok: true, label: next.notifyChannel === "serverchan" ? "Server酱" : "Bark" });
+    }
+    if (route === "/api/check" && request.method === "POST") return reply({ ok: true, cinemaName: "寰映影城（大融城激光IMAX店）", newTotal: 0 });
+    if (route === "/api/lock/rule" && request.method === "GET") return reply({ ok: true, rule: null });
     if (route === "/api/lock/session/status") return reply({ session: sessions.get(profile) });
     if (route === "/api/lock/session/remove" && request.method === "POST") {
       sessions.set(profile, { uploaded: false });
