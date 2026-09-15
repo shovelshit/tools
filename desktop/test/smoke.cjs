@@ -46,6 +46,7 @@ async function main() {
     assert.equal(await page.locator("#main-page").isVisible(), true);
     assert.equal(await page.locator('[data-workflow-panel="1"]').getAttribute("aria-hidden"), "false");
     await page.locator("#btn-step-connection-next").click();
+    await page.setViewportSize({ width: 1200, height: 800 });
     const desktopLayout = await page.evaluate(() => {
       const workspace = document.querySelector(".app-workspace").getBoundingClientRect();
       const progress = document.querySelector(".workflow-progress").getBoundingClientRect();
