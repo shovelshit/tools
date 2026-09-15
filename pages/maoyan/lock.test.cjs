@@ -39,11 +39,15 @@ function fakeElement() {
     addEventListener: (name, listener) => listeners.set(name, listener),
     closest: () => fakeElement(),
     append: () => {},
+    removeAttribute: () => {},
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 1, height: 1 })
   };
 }
 
-function mountLock({ runtimeInfo, runtime: runtimeOverrides = {}, context: contextOverrides = {}, api: apiOverrides = {} } = {}) {
+function mountLock({
+  runtimeInfo, runtime: runtimeOverrides = {}, context: contextOverrides = {}, api: apiOverrides = {},
+  getProfileGeneration, isProfileGenerationCurrent
+} = {}) {
   const ids = [
     "btn-lock-seats", "lock-overlay", "btn-lock-close", "lock-cinema", "lock-movie", "lock-template",
     "lock-target-date", "lock-session-file", "btn-lock-login", "btn-lock-upload", "btn-lock-remove-session",
@@ -64,7 +68,10 @@ function mountLock({ runtimeInfo, runtime: runtimeOverrides = {}, context: conte
   root.window = root;
   const source = fs.readFileSync(path.join(__dirname, "lock.js"), "utf8");
   const module = { exports: {} };
-  vm.runInNewContext(source, { module, exports: module.exports, Intl, Date, Set, document, window: root }, { filename: "lock.js" });
+  vm.runInNewContext(source, {
+    module, exports: module.exports, Intl, Date, Set, document, window: root,
+    Option: function Option(text, value) { this.text = text; this.value = value; }
+  }, { filename: "lock.js" });
   const runtime = {
     kind: runtimeInfo?.kind,
     getRuntimeInfo: () => runtimeInfo,
@@ -84,6 +91,8 @@ function mountLock({ runtimeInfo, runtime: runtimeOverrides = {}, context: conte
   const controller = module.exports.createMaoyanLockController({
     api,
     runtime,
+    getProfileGeneration,
+    isProfileGenerationCurrent,
     getContext: () => ({
       connected: true, cinemaId: "25428", cinemaName: "测试影院", cinemaSelected: true,
       lockServiceEnabled: true, monitorEnabled: true, movies: [], ...contextOverrides
@@ -195,6 +204,91 @@ test("cancelled electron login preserves the previous public session", async () 
   await dom.controller.loginMaoyan();
   await dom.controller.loginMaoyan();
   assert.deepEqual(JSON.parse(JSON.stringify(dom.controller.getSession())), session);
+});
+
+test("profile reset clears a pending web upload without a stale completion re-disabling actions", async () => {
+  const fileText = deferred();
+  const replacementText = deferred();
+  let generation = 0;
+  const dom = mountLock({
+    runtimeInfo: { kind: "web", canLoginMaoyan: false },
+    getProfileGeneration: () => generation,
+    isProfileGenerationCurrent: (value) => value === generation
+  });
+  dom.fileInput.files = [{ size: 24, text: () => fileText.promise }];
+  const upload = dom.controller.uploadSession();
+  assert.equal(dom.uploadButton.disabled, true);
+  generation += 1;
+  dom.controller.reset();
+  assert.equal(dom.uploadButton.disabled, false);
+  dom.fileInput.files = [{ size: 24, text: () => replacementText.promise }];
+  const replacement = dom.controller.uploadSession();
+  assert.equal(dom.uploadButton.disabled, true);
+  fileText.resolve('{"cookies":["stale"]}');
+  await upload;
+  assert.equal(dom.uploadButton.disabled, true);
+  replacementText.resolve('{"cookies":["current"]}');
+  await replacement;
+  assert.equal(dom.uploadButton.disabled, false);
+});
+
+test("profile reset clears a pending electron login without a stale completion re-disabling actions", async () => {
+  const oldLogin = deferred();
+  const replacementLogin = deferred();
+  let attempts = 0;
+  let generation = 0;
+  const dom = mountLock({
+    runtimeInfo: { kind: "electron", canLoginMaoyan: true },
+    runtime: { loginMaoyan: () => ++attempts === 1 ? oldLogin.promise : replacementLogin.promise },
+    getProfileGeneration: () => generation,
+    isProfileGenerationCurrent: (value) => value === generation
+  });
+  await Promise.resolve();
+  const operation = dom.controller.loginMaoyan();
+  assert.equal(dom.loginButton.disabled, true);
+  generation += 1;
+  dom.controller.reset();
+  assert.equal(dom.loginButton.disabled, false);
+  const replacement = dom.controller.loginMaoyan();
+  assert.equal(dom.loginButton.disabled, true);
+  oldLogin.resolve({ session: { uploaded: true, uidMasked: "UID stale" } });
+  await operation;
+  assert.equal(dom.loginButton.disabled, true);
+  replacementLogin.resolve({ session: { uploaded: true, uidMasked: "UID current" } });
+  await replacement;
+  assert.equal(dom.loginButton.disabled, false);
+});
+
+test("rejected electron login preserves the previous public session and re-enables actions", async () => {
+  let attempts = 0;
+  const session = { uploaded: true, uidMasked: "UID 123***789", uploadedAt: "2026-09-15T10:01:00.000Z" };
+  const dom = mountLock({
+    runtimeInfo: { kind: "electron", canLoginMaoyan: true },
+    runtime: { loginMaoyan: async () => ++attempts === 1 ? { session } : Promise.reject(new Error("login rejected")) },
+    api: { "/api/lock/session/status": { session }, "/api/lock/rule": { rule: null } }
+  });
+  await Promise.resolve();
+  await dom.controller.loginMaoyan();
+  await dom.controller.loginMaoyan();
+  assert.deepEqual(JSON.parse(JSON.stringify(dom.controller.getSession())), session);
+  assert.equal(dom.loginButton.disabled, false);
+  assert.equal(dom.uploadButton.disabled, false);
+});
+
+test("rejected electron upload preserves the previous public session and re-enables actions", async () => {
+  let attempts = 0;
+  const session = { uploaded: true, uidMasked: "UID 789***123", uploadedAt: "2026-09-15T10:01:00.000Z" };
+  const dom = mountLock({
+    runtimeInfo: { kind: "electron", canLoginMaoyan: true },
+    runtime: { uploadSessionFile: async () => ++attempts === 1 ? { session } : Promise.reject(new Error("upload rejected")) },
+    api: { "/api/lock/session/status": { session }, "/api/lock/rule": { rule: null } }
+  });
+  await Promise.resolve();
+  await dom.controller.uploadSession();
+  await dom.controller.uploadSession();
+  assert.deepEqual(JSON.parse(JSON.stringify(dom.controller.getSession())), session);
+  assert.equal(dom.loginButton.disabled, false);
+  assert.equal(dom.uploadButton.disabled, false);
 });
 
 test("old lock refresh and seat responses cannot repopulate reset state", async () => {

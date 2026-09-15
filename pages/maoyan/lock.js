@@ -1151,6 +1151,7 @@
       close();
       state.context = null;
       state.session = { uploaded: false };
+      state.sessionActionBusy = false;
       state.movieId = "";
       state.templateSeqNo = "";
       state.rule = null;
