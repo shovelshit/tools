@@ -114,7 +114,7 @@ export async function runOneLockRule(env, tokenId, deps = {}) {
     if (!matches.length) return { ok: true, waiting: true };
     if (matches.length !== 1) return await terminal(env, tokenId, rule, "failed", { lastError: "目标日期存在多个相同时间场次" }, deps);
     show = matches[0];
-    matching = await saveRule(env, tokenId, rule, {
+    const matchingChanges = {
       state: "matching",
       attemptStartedAt: new Date(now).toISOString(),
       seqNo: String(show.seqNo),
@@ -124,18 +124,36 @@ export async function runOneLockRule(env, tokenId, deps = {}) {
       timeDeltaMinutes: matchMode === "fuzzy" ? Number(show.timeDeltaMinutes) : 0,
       lastError: null,
       hall: String(show.th || rule.hall || "")
-    }, deps);
-    if (shouldCancel()) return { ok: true, skipped: true };
-    const currentRule = await getRule(env, tokenId);
-    if (shouldCancel() || !currentRule || currentRule.id !== matching.id || currentRule.state !== "matching") {
-      return { ok: true, skipped: true };
+    };
+    // Fuzzy candidates must become terminal if preparation fails, so persist the
+    // actual show before loading the session or seat map. Exact matching retains
+    // the legacy waiting/seat-feedback behavior until preparation succeeds.
+    if (matchMode === "fuzzy") {
+      matching = await saveRule(env, tokenId, rule, matchingChanges, deps);
+      if (shouldCancel()) return { ok: true, skipped: true };
+      const currentRule = await getRule(env, tokenId);
+      if (shouldCancel() || !currentRule || currentRule.id !== matching.id || currentRule.state !== "matching") {
+        return { ok: true, skipped: true };
+      }
     }
     session = await loadSession(env, tokenId);
     if (shouldCancel()) return { ok: true, skipped: true };
     seatMap = await fetchSeats(session, { cinemaId: rule.cinemaId, movieId: rule.movieId, seqNo: String(show.seqNo) });
     if (shouldCancel()) return { ok: true, skipped: true };
     if (String(seatMap?.seqNo) !== String(show.seqNo) || !seatsMatch(rule, seatMap)) {
-      throw new Error("所选未来座位不可用或影厅布局已变化");
+      const error = new Error("所选未来座位不可用或影厅布局已变化");
+      if (matchMode === "exact") {
+        return await terminal(env, tokenId, rule, "failed", { lastError: error.message }, deps);
+      }
+      throw error;
+    }
+    if (!matching) {
+      matching = await saveRule(env, tokenId, rule, matchingChanges, deps);
+      if (shouldCancel()) return { ok: true, skipped: true };
+      const currentRule = await getRule(env, tokenId);
+      if (shouldCancel() || !currentRule || currentRule.id !== matching.id || currentRule.state !== "matching") {
+        return { ok: true, skipped: true };
+      }
     }
   } catch (error) {
     if (matching) {

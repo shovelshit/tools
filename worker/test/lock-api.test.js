@@ -96,6 +96,7 @@ test("API response secrecy: template seats expose the sanitized seat map only", 
       "token-a"
     );
     assert.equal(response.status, 200);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
     // officialHtml 为官方座位图片段(剥离脚本/埋点), 供前端沙箱 iframe 1:1 对比渲染
     const seatMapBody = (await body(response)).seatMap;
     assert.equal(typeof seatMapBody.officialHtml, "string");
