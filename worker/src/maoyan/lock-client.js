@@ -323,6 +323,37 @@ export function findExactShows(data, { movieId, targetDate, templateTime }) {
   });
 }
 
+function showMinutes(value) {
+  const match = /^(\d{2}):(\d{2})$/.exec(String(value || ""));
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour > 23 || minute > 59) return null;
+  return hour * 60 + minute;
+}
+
+export function findCompatibleShows(data, { movieId, targetDate, templateTime, templateHall, maxMinutes = 30 }) {
+  const movie = (data?.showData?.movies || []).find((item) => String(item.id) === String(movieId));
+  const templateMinutes = showMinutes(templateTime);
+  const hall = String(templateHall || "");
+  if (!movie || templateMinutes === null || !hall) return [];
+  const limit = Number(maxMinutes);
+  if (!Number.isFinite(limit) || limit < 0) return [];
+  return (movie.shows || []).flatMap((day) => {
+    const showDate = String(day.showDate || day.dt || "");
+    if (showDate !== String(targetDate)) return [];
+    return (day.plist || []).flatMap((show) => {
+      if (String(show.th || "") !== hall || (show.ticketStatus != null && Number(show.ticketStatus) !== 0)) return [];
+      const candidateMinutes = showMinutes(show.tm);
+      if (candidateMinutes === null) return [];
+      const timeDeltaMinutes = candidateMinutes - templateMinutes;
+      if (Math.abs(timeDeltaMinutes) > limit) return [];
+      return [{ ...show, showDate, timeDeltaMinutes, matchMode: "fuzzy" }];
+    });
+  }).sort((left, right) => Math.abs(left.timeDeltaMinutes) - Math.abs(right.timeDeltaMinutes) ||
+    String(left.seqNo || "").localeCompare(String(right.seqNo || "")));
+}
+
 export async function fetchSeatMap(session, { cinemaId, movieId, seqNo }) {
   const url = new URL(`${ORIGIN}/xseats/${assertId(seqNo)}`);
   const normalizedMovieId = assertId(movieId);
