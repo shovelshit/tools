@@ -269,3 +269,95 @@ test("requestWorker limits methods and JSON body size while constructing the fix
     fixture.cleanup();
   }
 });
+
+test("main-only upload confirms HTTP again and sends a bound payload with abort signal", async () => {
+  const requests = []; const confirmations = [];
+  const fixture = makeFixture({
+    fetchImpl: async (url, options) => { requests.push({ url, options }); return { ok: true, json: async () => ({ session: { uploaded: true } }) }; },
+    confirmHttp: async ({ operation }) => { confirmations.push(operation); return true; }
+  });
+  try {
+    const client = createWorkerClient(fixture);
+    await client.connectWorker({ workerUrl: "http://worker.example", token: "secret-token", httpRiskConfirmed: true });
+    const upload = client.prepareSessionUpload();
+    const controller = new AbortController();
+    await upload({ cookies: [], mtgsig: "signature" }, { signal: controller.signal });
+    assert.deepEqual(confirmations, ["connect", "session-upload"]);
+    assert.equal(requests[1].url, "http://worker.example/api/lock/session");
+    assert.equal(requests[1].options.signal, controller.signal);
+    assert.equal(requests[1].options.body, '{"cookies":[],"mtgsig":"signature"}');
+    assert.equal(requests[1].options.redirect, "error");
+  } finally { fixture.cleanup(); }
+});
+
+test("upload cannot follow a changed profile or continue after cancellation during confirmation", async () => {
+  const requests = []; let confirmUpload;
+  const fixture = makeFixture({
+    fetchImpl: async (url) => { requests.push(url); return { ok: true, json: async () => ({}) }; },
+    confirmHttp: async ({ operation }) => operation === "connect" ? true : new Promise((resolve) => { confirmUpload = resolve; })
+  });
+  try {
+    const client = createWorkerClient(fixture);
+    await client.connectWorker({ workerUrl: "http://worker.example", token: "a", httpRiskConfirmed: true });
+    const oldUpload = client.prepareSessionUpload();
+    await client.connectWorker({ workerUrl: "https://other.example", token: "b" });
+    await assert.rejects(oldUpload({}), { code: "disconnected" });
+    await client.connectWorker({ workerUrl: "http://worker.example", httpRiskConfirmed: true });
+    const controller = new AbortController();
+    const pending = client.prepareSessionUpload()({}, { signal: controller.signal });
+    await new Promise(setImmediate); controller.abort(); confirmUpload(true);
+    await assert.rejects(pending, { name: "AbortError" });
+    assert.equal(requests.length, 3);
+  } finally { fixture.cleanup(); }
+});
+
+test("profile changes during native HTTP confirmation cannot upload to an old Worker", async () => {
+  const requests = []; let confirmUpload;
+  const fixture = makeFixture({
+    fetchImpl: async (url) => { requests.push(url); return { ok: true, json: async () => ({}) }; },
+    confirmHttp: async ({ operation }) => operation === "connect" ? true : new Promise((resolve) => { confirmUpload = resolve; })
+  });
+  try {
+    const client = createWorkerClient(fixture);
+    await client.connectWorker({ workerUrl: "http://worker.example", httpRiskConfirmed: true });
+    const pending = client.prepareSessionUpload()({});
+    await new Promise(setImmediate);
+    await client.connectWorker({ workerUrl: "https://other.example" }); confirmUpload(true);
+    await assert.rejects(pending, { code: "disconnected" });
+    assert.equal(requests.length, 2);
+  } finally { fixture.cleanup(); }
+});
+
+test("lost upload response reconciles only an exact source timestamp and otherwise reports unknown", async () => {
+  for (const matches of [true, false]) {
+    const savedAt = "2026-09-15T00:00:00.000Z"; const requests = [];
+    const fixture = makeFixture({ fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      if (options.method === "POST") throw new Error("Cookie uid=123456789 mtgsig=secret");
+      return { ok: true, json: async () => ({ session: { uploaded: true, sourceSavedAt: matches ? savedAt : "2026-09-14T00:00:00.000Z", uidMasked: "UID 123***789" } }) };
+    } });
+    try {
+      const client = createWorkerClient(fixture); await client.connectWorker({ workerUrl: "https://worker.example" });
+      let sent = false; const pending = client.prepareSessionUpload()({ saved_at: savedAt }, { onSend: () => { sent = true; } });
+      if (matches) assert.equal((await pending).session.uploaded, true);
+      else await assert.rejects(pending, (error) => error.code === "unknown" && !/Cookie|123456789|mtgsig/.test(error.message));
+      assert.equal(sent, true); assert.equal(requests[2].url, "https://worker.example/api/lock/session/status");
+    } finally { fixture.cleanup(); }
+  }
+});
+
+test("server upload errors redact remote messages and treat server failures as ambiguous", async () => {
+  for (const status of [400, 500]) {
+    const requests = [];
+    const fixture = makeFixture({ fetchImpl: async (url, options) => {
+      requests.push(url);
+      if (options.method === "POST") return { ok: false, status, json: async () => ({ error: "Cookie uid=123456789 mtgsig=secret" }) };
+      return { ok: true, json: async () => ({ session: { uploaded: false } }) };
+    } });
+    try {
+      const client = createWorkerClient(fixture); await client.connectWorker({ workerUrl: "https://worker.example" });
+      await assert.rejects(client.prepareSessionUpload()({}), (error) => error.code === (status === 400 ? "upload" : "unknown") && !/Cookie|123456789|mtgsig/.test(error.message));
+      assert.equal(requests.length, status === 400 ? 2 : 3);
+    } finally { fixture.cleanup(); }
+  }
+});

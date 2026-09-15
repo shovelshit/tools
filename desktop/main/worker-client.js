@@ -2,6 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const { createCredentialStore } = require("./credential-store");
+const { safeError } = require("./session-validation");
 
 const MAX_JSON_BODY_BYTES = 256 * 1024;
 const ALLOWED_METHODS = new Set(["GET", "POST", "PUT", "DELETE"]);
@@ -116,6 +117,7 @@ function createWorkerClient({ app, safeStorage, fetchImpl = globalThis.fetch, co
   const profilesPath = path.join(app.getPath("userData"), "worker-profiles.json");
   const profiles = readProfiles(profilesPath);
   let activeProfileKey = null;
+  let profileGeneration = 0;
 
   async function requireHttpConfirmation(profile, confirmed, operation) {
     if (!profile.requiresHttpConfirmation) return;
@@ -124,19 +126,30 @@ function createWorkerClient({ app, safeStorage, fetchImpl = globalThis.fetch, co
     }
   }
 
-  async function send(profile, requestPath, { method = "GET", body } = {}) {
+  async function send(profile, requestPath, { method = "GET", body, signal, onSend, sessionUpload = false } = {}) {
+    signal?.throwIfAborted();
     const token = credentialStore.getToken(profile.baseUrl) ?? "";
     const headers = { "X-Token": token };
     const serializedBody = serializeJsonBody(body);
     if (serializedBody !== undefined) headers["Content-Type"] = "application/json";
-    const response = await fetchImpl(buildRequestUrl(profile, requestPath), {
-      method,
-      headers,
-      redirect: "error",
-      ...(serializedBody === undefined ? {} : { body: serializedBody })
-    });
+    const requestUrl = buildRequestUrl(profile, requestPath);
+    let response;
+    try {
+      signal?.throwIfAborted();
+      onSend?.();
+      response = await fetchImpl(requestUrl, {
+        method,
+        headers,
+        redirect: "error",
+        ...(signal ? { signal } : {}),
+        ...(serializedBody === undefined ? {} : { body: serializedBody })
+      });
+    } catch (error) {
+      if (sessionUpload) throw safeError("unknown");
+      throw error;
+    }
     const data = await responseJson(response);
-    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    if (!response.ok) throw sessionUpload ? safeError(response.status >= 500 ? "unknown" : "upload") : new Error(data.error || `HTTP ${response.status}`);
     return data;
   }
 
@@ -145,6 +158,7 @@ function createWorkerClient({ app, safeStorage, fetchImpl = globalThis.fetch, co
       const connection = requireRecord(input, "连接参数");
       const normalized = normalizeWorkerUrl(connection.workerUrl);
       if (connection.token !== undefined && typeof connection.token !== "string") throw new Error("令牌无效");
+      profileGeneration += 1;
       await requireHttpConfirmation(normalized, connection.httpRiskConfirmed === true, "connect");
 
       const suppliedToken = typeof connection.token === "string";
@@ -167,6 +181,36 @@ function createWorkerClient({ app, safeStorage, fetchImpl = globalThis.fetch, co
       }
     },
 
+    prepareSessionUpload() {
+      if (!activeProfileKey || !profiles[activeProfileKey]) throw safeError("disconnected");
+      const profile = { ...profiles[activeProfileKey] };
+      const generation = profileGeneration;
+      return async (body, { signal, onSend } = {}) => {
+        const checkCurrent = () => {
+          signal?.throwIfAborted();
+          if (profileGeneration !== generation || activeProfileKey !== profile.baseUrl) throw safeError("disconnected");
+        };
+        checkCurrent();
+        await requireHttpConfirmation(profile, true, "session-upload");
+        checkCurrent();
+        try {
+          const result = await send(profile, "/api/lock/session", { method: "POST", body, signal, onSend, sessionUpload: true });
+          if (result?.session?.uploaded !== true) throw safeError("unknown");
+          return result;
+        } catch (error) {
+          if (error?.code !== "unknown") throw error;
+          // A lost POST response is not proof that the old remote session survived.
+          // Reconcile only against this upload's source timestamp on the same profile.
+          try {
+            checkCurrent();
+            const status = await send(profile, "/api/lock/session/status", { signal });
+            if (body?.saved_at && status?.session?.uploaded === true && status.session.sourceSavedAt === body.saved_at) return status;
+          } catch { /* The original upload outcome remains unknown. */ }
+          throw safeError("unknown");
+        }
+      };
+    },
+
     async requestWorker(requestPath, input = {}) {
       const options = requireRecord(input, "请求参数");
       if (Object.hasOwn(options, "headers")) throw new Error("不允许自定义 Header");
@@ -187,6 +231,7 @@ function createWorkerClient({ app, safeStorage, fetchImpl = globalThis.fetch, co
 
     clearProfile(profileKey = activeProfileKey) {
       if (typeof profileKey !== "string" || !profiles[profileKey]) return false;
+      if (activeProfileKey === profileKey) profileGeneration += 1;
       delete profiles[profileKey];
       credentialStore.clearToken(profileKey);
       writeProfiles(profilesPath, profiles);
