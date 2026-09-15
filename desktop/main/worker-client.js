@@ -131,6 +131,7 @@ function createWorkerClient({ app, safeStorage, fetchImpl = globalThis.fetch, co
     const response = await fetchImpl(buildRequestUrl(profile, requestPath), {
       method,
       headers,
+      redirect: "error",
       ...(serializedBody === undefined ? {} : { body: serializedBody })
     });
     const data = await responseJson(response);

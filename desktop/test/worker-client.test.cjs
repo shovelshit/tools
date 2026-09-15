@@ -1,5 +1,6 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
@@ -20,6 +21,21 @@ function makeFixture({ encryptionAvailable = true, fetchImpl, confirmHttp } = {}
     userData,
     cleanup: () => fs.rmSync(userData, { recursive: true, force: true })
   };
+}
+
+function listen(handler) {
+  return new Promise((resolve) => {
+    const server = http.createServer(handler);
+    server.listen(0, "127.0.0.1", () => resolve(server));
+  });
+}
+
+function serverUrl(server) {
+  return `http://127.0.0.1:${server.address().port}`;
+}
+
+function closeServer(server) {
+  return new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
 }
 
 test("normalizes an HTTPS Worker and rejects credentials query fragment and non-HTTP URLs", () => {
@@ -77,6 +93,38 @@ test("requestWorker rejects encoded traversal before attaching the profile token
     assert.equal(requests.length, 1);
   } finally {
     fixture.cleanup();
+  }
+});
+
+test("requestWorker rejects cross-origin redirects before the token leaves the profile", async () => {
+  let redirectedRequests = 0;
+  let redirectedToken;
+  const redirectTarget = await listen((request, response) => {
+    redirectedRequests += 1;
+    redirectedToken = request.headers["x-token"];
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ ok: true }));
+  });
+  const worker = await listen((request, response) => {
+    if (request.url === "/api/status") {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ profile: {} }));
+      return;
+    }
+    response.writeHead(307, { Location: `${serverUrl(redirectTarget)}/stolen-token` });
+    response.end();
+  });
+  const fixture = makeFixture({ fetchImpl: fetch });
+  try {
+    const client = createWorkerClient(fixture);
+    await client.connectWorker({ workerUrl: serverUrl(worker), token: "redirect-secret" });
+
+    await assert.rejects(client.requestWorker("/api/redirect"));
+    assert.equal(redirectedRequests, 0);
+    assert.equal(redirectedToken, undefined);
+  } finally {
+    fixture.cleanup();
+    await Promise.all([closeServer(worker), closeServer(redirectTarget)]);
   }
 });
 
