@@ -47,3 +47,26 @@ test("main window keeps Node disabled, isolates context, sandboxes preload, and 
   calls.webContentsListener.listener({ preventDefault() { prevented = true; } }, "https://example.com");
   assert.equal(prevented, true);
 });
+
+test("remote HTTP IPC connection needs a native main-process approval", async () => {
+  const calls = { handlers: [] };
+  const electron = {
+    app: {
+      getPath: () => path.join(__dirname, "fixtures"),
+      whenReady: () => new Promise(() => {}),
+      on() {}
+    },
+    BrowserWindow: { getAllWindows: () => [] },
+    dialog: { showMessageBox: async () => ({ response: 1 }) },
+    ipcMain: { handle(channel, handler) { calls.handlers.push({ channel, handler }); } },
+    safeStorage: { isEncryptionAvailable: () => false }
+  };
+  const { registerIpcHandlers } = loadMain(electron);
+  registerIpcHandlers();
+  const connect = calls.handlers.find(({ channel }) => channel === "worker:connect").handler;
+
+  await assert.rejects(
+    connect(null, { workerUrl: "http://worker.example", token: "t", httpRiskConfirmed: true }),
+    /确认/
+  );
+});
