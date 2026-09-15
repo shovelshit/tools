@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { MemoryKV } from "./helpers.js";
+import { createDB } from "./helpers.js";
 import { handleAdminTokens, runScheduledChecks } from "../src/maoyan/tokens.js";
-import { userKey } from "../src/maoyan/user.js";
+import * as db from "../src/maoyan/db.js";
 
 // 固定窗口内时刻(北京 10:00), 使 runScheduledChecks 的监控窗口判断稳定通过
 const WINDOW_NOW = Date.parse("2026-09-14T02:00:00.000Z");
@@ -20,11 +20,11 @@ async function withMockFetch(mock, callback) {
 test("admin token listing masks short and long access tokens", async () => {
   const env = {
     ADMIN_TOKEN: "admin-secret",
-    MAOYAN_KV: new MemoryKV({
-      "meta:tokens": JSON.stringify([
+    DB: await createDB({
+      tokens: [
         { id: "short-id", token: "abcdef", remark: "short" },
         { id: "long-id", token: "abcdefghijklmnop", remark: "long" }
-      ])
+      ]
     })
   };
   const request = new Request("https://worker.example/api/admin/tokens", {
@@ -48,15 +48,16 @@ test("scheduled monitoring hands data off only after snapshot and status persist
       { seqNo: "200", tm: "20:00", ticketStatus: 0 }
     ] }] }]
   } };
+  const baseConfig = {
+    enabled: true,
+    cinemaId: "25428",
+    selectedMovieIds: ["7"],
+    monitorDdl: "2099-01-01T00:00:00.000Z"
+  };
   const env = {
-    MAOYAN_KV: new MemoryKV({
-      "meta:tokens": JSON.stringify([{ id: tokenId, token: "access-token" }]),
-      [userKey(tokenId, "config")]: JSON.stringify({
-        enabled: true,
-        cinemaId: "25428",
-        selectedMovieIds: ["7"],
-        monitorDdl: "2099-01-01T00:00:00.000Z"
-      })
+    DB: await createDB({
+      tokens: [{ id: tokenId, token: "access-token" }],
+      configs: { [tokenId]: baseConfig }
     })
   };
   let handoffs = 0;
@@ -71,24 +72,19 @@ test("scheduled monitoring hands data off only after snapshot and status persist
       handoffs++;
       assert.equal(id, tokenId);
       assert.deepEqual(monitoredCinema, cinema);
-      assert.ok(await env.MAOYAN_KV.get(userKey(tokenId, "snapshot"), "json"));
-      assert.ok(await env.MAOYAN_KV.get(userKey(tokenId, "status"), "json"));
+      assert.ok(Object.keys(await db.getSnapshot(env.DB, tokenId)).length > 0);
+      assert.ok(await db.getStatus(env.DB, tokenId));
     }, { now: WINDOW_NOW });
   });
 
   assert.equal(handoffs, 1);
 
-  await env.MAOYAN_KV.put(userKey(tokenId, "config"), JSON.stringify({ enabled: false, cinemaId: "25428" }));
+  await db.putConfig(env.DB, tokenId, { enabled: false, cinemaId: "25428" });
   await runScheduledChecks(env, async () => { handoffs++; }, { now: WINDOW_NOW });
   assert.equal(handoffs, 1);
 
-  await env.MAOYAN_KV.put(userKey(tokenId, "config"), JSON.stringify({
-    enabled: true,
-    cinemaId: "25428",
-    selectedMovieIds: ["7"],
-    monitorDdl: "2099-01-01T00:00:00.000Z"
-  }));
-  await env.MAOYAN_KV.delete(userKey(tokenId, "status"));
+  await db.putConfig(env.DB, tokenId, baseConfig);
+  await db.deleteStatus(env.DB, tokenId);
   await withMockFetch(async () => { throw new Error("provider unavailable"); }, async () => {
     await runScheduledChecks(env, async () => { handoffs++; }, { now: WINDOW_NOW });
   });

@@ -1,7 +1,7 @@
-// 座位解析失败反馈测试: 手动按钮 API / KV 记录与去重 / 管理端列表删除 / cron 与立即锁座自动留档
+// 座位解析失败反馈测试: 手动按钮 API / D1 记录与去重 / 管理端列表删除 / cron 与立即锁座自动留档
 import test from "node:test";
 import assert from "node:assert/strict";
-import { MemoryKV, testEncryptionKey, validSession } from "./helpers.js";
+import { MemoryD1, createDB, testEncryptionKey, validSession } from "./helpers.js";
 import {
   recordSeatFeedback, seatFeedbackKey, listSeatFeedback, deleteSeatFeedback, withSeatFeedback
 } from "../src/maoyan/seat-feedback.js";
@@ -9,7 +9,6 @@ import { handleLockApi } from "../src/maoyan/lock-api.js";
 import { handleAdminTokens } from "../src/maoyan/tokens.js";
 import { createLockRule } from "../src/maoyan/lock-rule.js";
 import { runOneLockRule } from "../src/maoyan/lock-runner.js";
-import { userKey } from "../src/maoyan/user.js";
 
 const tokenId = "11111111-1111-4111-8111-111111111111";
 // 固定"现在": 中国日期 2026-09-13(UTC 时间 09-12 晚)
@@ -18,13 +17,14 @@ const now = new Date("2026-09-12T20:00:00.000Z");
 // ---------------- recordSeatFeedback ----------------
 
 test("手动反馈写入纯标识记录, 同 key 覆盖更新", async () => {
-  const env = { MAOYAN_KV: new MemoryKV() };
+  const env = { DB: new MemoryD1() };
   assert.equal(await recordSeatFeedback(env, {
     tokenId, cinemaId: "25428", movieId: "7", seqNo: "100", source: "manual", now
   }), true);
   const key = seatFeedbackKey("25428", "100");
   assert.equal(key, "seatfb:25428:100");
-  assert.deepEqual(await env.MAOYAN_KV.get(key, "json"), {
+  assert.deepEqual(await listSeatFeedback(env), [{
+    key,
     reportedAt: "2026-09-12T20:00:00.000Z",
     day: "2026-09-13",
     tokenId,
@@ -32,7 +32,7 @@ test("手动反馈写入纯标识记录, 同 key 覆盖更新", async () => {
     movieId: "7",
     seqNo: "100",
     source: "manual"
-  });
+  }]);
   // 覆盖更新: 换个令牌再报, 只留最新一条
   await recordSeatFeedback(env, {
     tokenId: "22222222-2222-4222-8222-222222222222", cinemaId: "25428", movieId: "7", seqNo: "100",
@@ -45,7 +45,7 @@ test("手动反馈写入纯标识记录, 同 key 覆盖更新", async () => {
 });
 
 test("自动留档按中国日期当天去重, 手动反馈不受去重限制", async () => {
-  const env = { MAOYAN_KV: new MemoryKV() };
+  const env = { DB: new MemoryD1() };
   assert.equal(await recordSeatFeedback(env, { cinemaId: "25428", seqNo: "100", source: "auto", now }), true);
   // 同一天重复 cron → 跳过
   assert.equal(await recordSeatFeedback(env, { cinemaId: "25428", seqNo: "100", source: "auto", now }), false);
@@ -54,18 +54,18 @@ test("自动留档按中国日期当天去重, 手动反馈不受去重限制", 
   assert.equal((await listSeatFeedback(env)).length, 1);
 });
 
-test("反馈记录缺 cinemaId 或缺 KV 时静默失败", async () => {
-  assert.equal(await recordSeatFeedback({ MAOYAN_KV: new MemoryKV() }, { seqNo: "100" }), false);
+test("反馈记录缺 cinemaId 或缺 DB 时静默失败", async () => {
+  assert.equal(await recordSeatFeedback({ DB: new MemoryD1() }, { seqNo: "100" }), false);
   assert.equal(await recordSeatFeedback(null, { cinemaId: "25428" }), false);
-  // KV 抛错也不外泄
-  const broken = { MAOYAN_KV: { get: async () => { throw new Error("kv down"); }, put: async () => { throw new Error("kv down"); } } };
+  // DB 抛错也不外泄
+  const broken = { DB: { prepare: () => { throw new Error("db down"); } } };
   assert.equal(await recordSeatFeedback(broken, { cinemaId: "25428", source: "manual" }), false);
 });
 
 // ---------------- withSeatFeedback 包装 ----------------
 
 test("withSeatFeedback 只在座位图格式无效时留档, 并原样抛出错误", async () => {
-  const env = { MAOYAN_KV: new MemoryKV() };
+  const env = { DB: new MemoryD1() };
   const params = { cinemaId: "25428", movieId: "7", seqNo: "100" };
   const malformed = () => { throw new Error("猫眼座位图格式无效"); };
 
@@ -95,14 +95,15 @@ test("withSeatFeedback 只在座位图格式无效时留档, 并原样抛出错�
 
 function lockApiEnv(overrides = {}) {
   return {
-    MAOYAN_KV: new MemoryKV(),
+    DB: new MemoryD1(),
     SESSION_ENCRYPTION_KEY: testEncryptionKey(),
     LOCK_SERVICE_ENABLED: "true",
     ...overrides
   };
 }
 
-async function callLockApi(path, options, env = lockApiEnv()) {
+async function callLockApi(path, options, env = null) {
+  env = env || lockApiEnv();
   return await handleLockApi(
     new Request(`https://worker.example${path}`, options), env, new URL(`https://worker.example${path}`), tokenId
   );
@@ -146,11 +147,11 @@ test("座位反馈接口参数校验: 非数字/缺参 400, 方法不符 405", a
 
 // ---------------- 立即锁座: 默认取图失败自动留档 ----------------
 
-function createEnv(config = { cinemaId: "25428", selectedMovieIds: ["7"] }) {
+async function createEnv(config = { cinemaId: "25428", selectedMovieIds: ["7"] }) {
   return {
     LOCK_SERVICE_ENABLED: "true",
     SESSION_ENCRYPTION_KEY: testEncryptionKey(),
-    MAOYAN_KV: new MemoryKV({ [userKey("token-a", "config")]: JSON.stringify(config) })
+    DB: await createDB({ configs: { "token-a": config } })
   };
 }
 
@@ -181,7 +182,7 @@ function validInput(overrides = {}) {
 }
 
 test("立即锁座: 默认取图解析失败时自动留档并原样报错", async () => {
-  const env = createEnv();
+  const env = await createEnv();
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response("<html>登录页, 无座位块</html>", { status: 200 });
   try {
@@ -202,7 +203,7 @@ test("立即锁座: 默认取图解析失败时自动留档并原样报错", asy
 });
 
 test("立即锁座: 注入的 fetchSeats 失败不经留档包装", async () => {
-  const env = createEnv();
+  const env = await createEnv();
   await assert.rejects(
     createLockRule(env, "token-a", validInput(), createDeps({
       fetchSeats: async () => { throw new Error("猫眼座位图格式无效"); }
@@ -221,7 +222,7 @@ test("定时锁座: 默认取图解析失败时自动留档且规则回到等待
     seats: [{ seatNo: "1-6-18", rowId: "6", columnId: "18", type: "N" }],
     state: "waiting_schedule"
   };
-  const env = { MAOYAN_KV: new MemoryKV(), LOCK_SERVICE_ENABLED: "true" };
+  const env = { DB: new MemoryD1(), LOCK_SERVICE_ENABLED: "true" };
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response("<html>无座位块</html>", { status: 200 });
   try {
@@ -250,8 +251,8 @@ test("定时锁座: 默认取图解析失败时自动留档且规则回到等待
 
 // ---------------- 管理端 ----------------
 
-function adminEnv(kv) {
-  return { ADMIN_TOKEN: "admin-secret", MAOYAN_KV: kv };
+function adminEnv(d1) {
+  return { ADMIN_TOKEN: "admin-secret", DB: d1 };
 }
 
 async function callAdmin(path, options, env) {
@@ -262,7 +263,7 @@ async function callAdmin(path, options, env) {
 }
 
 test("管理端: 反馈列表按时间倒序, DELETE 清除, 非法 key 拒绝", async () => {
-  const env = adminEnv(new MemoryKV());
+  const env = adminEnv(new MemoryD1());
   await recordSeatFeedback(env, { tokenId, cinemaId: "25428", movieId: "7", seqNo: "100", source: "manual", now });
   await recordSeatFeedback(env, {
     tokenId, cinemaId: "39999", movieId: "8", seqNo: "", source: "auto",
@@ -290,14 +291,14 @@ test("管理端: 反馈列表按时间倒序, DELETE 清除, 非法 key 拒绝",
 });
 
 test("管理端: 反馈接口同样受 X-Admin-Token 保护", async () => {
-  const env = adminEnv(new MemoryKV());
+  const env = adminEnv(new MemoryD1());
   const request = new Request("https://worker.example/api/admin/seat-feedback", { method: "GET" });
   const response = await handleAdminTokens(request, env, new URL(request.url));
   assert.equal(response.status, 401);
 });
 
 test("deleteSeatFeedback 对合法 key 直删并返回 true", async () => {
-  const env = adminEnv(new MemoryKV());
+  const env = adminEnv(new MemoryD1());
   await recordSeatFeedback(env, { tokenId, cinemaId: "25428", movieId: "7", seqNo: "100", source: "manual", now });
   assert.equal(await deleteSeatFeedback(env, "seatfb:25428:100"), true);
   assert.equal(await deleteSeatFeedback(env, "seatfb:25428:100"), true);

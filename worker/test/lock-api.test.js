@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { MemoryKV, testEncryptionKey, validSession } from "./helpers.js";
+import { MemoryKV, createDB, testEncryptionKey, validSession } from "./helpers.js";
 import { publicCinemaShows } from "../src/maoyan/api.js";
 import { handleLockApi } from "../src/maoyan/lock-api.js";
 import { userKey } from "../src/maoyan/user.js";
@@ -8,11 +8,10 @@ import { LockCoordinator } from "../src/maoyan/lock-runner.js";
 
 const secretValues = ["cookie-secret", "signature-secret", "csrf-value", "123456789"];
 
-function env() {
+async function env() {
   return {
-    MAOYAN_KV: new MemoryKV({
-      [userKey("token-a", "config")]: JSON.stringify({ cinemaId: "25428", selectedMovieIds: ["7"] })
-    }),
+    DB: await createDB({ configs: { "token-a": { cinemaId: "25428", selectedMovieIds: ["7"] } } }),
+    MAOYAN_KV: new MemoryKV(),
     SESSION_ENCRYPTION_KEY: testEncryptionKey(),
     LOCK_SERVICE_ENABLED: "true"
   };
@@ -51,7 +50,7 @@ test("projection includes only public show identifiers", () => {
 });
 
 test("lock API is unavailable while the service switch is disabled", async () => {
-  const runtime = { ...env(), LOCK_SERVICE_ENABLED: "false" };
+  const runtime = { ...(await env()), LOCK_SERVICE_ENABLED: "false" };
   const response = await handleLockApi(
     request("/api/lock/session/status"),
     runtime,
@@ -63,7 +62,7 @@ test("lock API is unavailable while the service switch is disabled", async () =>
 });
 
 test("API response secrecy: session routes expose only masked session status", async () => {
-  const runtime = env();
+  const runtime = await env();
   const upload = await handleLockApi(request("/api/lock/session", {
     method: "POST",
     body: JSON.stringify(validSession())
@@ -82,7 +81,7 @@ test("API response secrecy: session routes expose only masked session status", a
 });
 
 test("API response secrecy: template seats expose the sanitized seat map only", async () => {
-  const runtime = env();
+  const runtime = await env();
   await handleLockApi(request("/api/lock/session", { method: "POST", body: JSON.stringify(validSession()) }), runtime, new URL("https://worker.example/api/lock/session"), "token-a");
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(`
@@ -112,7 +111,7 @@ test("API response secrecy: template seats expose the sanitized seat map only", 
 });
 
 test("API response secrecy: input, missing session, and active rule errors use safe status codes", async () => {
-  const runtime = env();
+  const runtime = await env();
   const invalid = await handleLockApi(request("/api/lock/template-seats?cinemaId=x&movieId=7&seqNo=100"), runtime, new URL("https://worker.example/api/lock/template-seats?cinemaId=x&movieId=7&seqNo=100"), "token-a");
   assert.equal(invalid.status, 400);
   await body(invalid);
@@ -123,7 +122,7 @@ test("API response secrecy: input, missing session, and active rule errors use s
 });
 
 test("API response secrecy: malformed lock rules are client errors", async () => {
-  const runtime = env();
+  const runtime = await env();
   const response = await handleLockApi(request("/api/lock/rule", {
     method: "POST",
     body: JSON.stringify({ cinemaId: "invalid" })
@@ -133,7 +132,7 @@ test("API response secrecy: malformed lock rules are client errors", async () =>
 });
 
 test("API serializes concurrent lock rule creation through the token coordinator", async () => {
-  const runtime = env();
+  const runtime = await env();
   let release;
   const delayed = new Promise((resolve) => { release = resolve; });
   let created = 0;
@@ -153,7 +152,7 @@ test("API serializes concurrent lock rule creation through the token coordinator
 });
 
 test("API response secrecy: provider redirects are upstream errors", async () => {
-  const runtime = env();
+  const runtime = await env();
   await handleLockApi(request("/api/lock/session", { method: "POST", body: JSON.stringify(validSession()) }), runtime, new URL("https://worker.example/api/lock/session"), "token-a");
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(null, { status: 302, headers: { location: "https://passport.maoyan.com/" } });

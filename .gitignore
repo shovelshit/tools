@@ -8,3 +8,6 @@ repro-order.cjs
 *.txt
 # 本地文档/报告目录: 只在本地留存, 不纳入版本控制
 /docs/
+
+# Wrangler 本地密钥(不入库)
+.dev.vars

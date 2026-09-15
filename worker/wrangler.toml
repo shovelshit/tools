@@ -37,10 +37,20 @@ crons = ["*/3 * * * *"]
 [observability]
 enabled = true
 
-# ============ KV 绑定(令牌/用户数据/影院缓存) ============
+# ============ KV 绑定(加密会话 + 影院缓存) ============
+# 用户状态(tokens/config/snapshot/changes/seatfb/lock-rule)已迁移 D1, KV 仅保留:
+#   maoyan-session 加密会话信封 / cache:cinemas:{cityId} 影院搜索缓存
 [[kv_namespaces]]
 binding = "MAOYAN_KV"
 id = "2027a99d8e934025b3b82ef203c4acff"
+
+# ============ D1 数据库(用户状态全链路) ============
+# 上线步骤见 worker/DEPLOY-D1.md: d1 create → d1 execute --file schema.sql → deploy →
+# POST /api/admin/migrate-kv-to-d1(迁移可重复执行, 不删 KV, 回滚=重新部署 KV 版)
+[[d1_databases]]
+binding = "DB"
+database_name = "tools-db"
+database_id = "REPLACE_WITH_REAL_D1_ID" # ← 上线前必须替换为 wrangler d1 create 输出的真实 ID
 
 [[durable_objects.bindings]]
 name = "LOCK_COORDINATOR"
