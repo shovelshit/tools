@@ -50,7 +50,7 @@ id = "2027a99d8e934025b3b82ef203c4acff"
 [[d1_databases]]
 binding = "DB"
 database_name = "tools-db"
-database_id = "REPLACE_WITH_REAL_D1_ID" # ← 上线前必须替换为 wrangler d1 create 输出的真实 ID
+database_id = "ee66c7c1-58b6-4d95-8f68-d0ff4b092bd2"
 
 [[durable_objects.bindings]]
 name = "LOCK_COORDINATOR"
