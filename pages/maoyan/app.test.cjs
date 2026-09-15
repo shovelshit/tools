@@ -51,6 +51,21 @@ test("switching connections clears only the Maoyan user connection", () => {
   assert.match(source, /secureSet\("token", ""\)/);
 });
 
+test("logout resets Worker-scoped UI before another profile can connect", () => {
+  const source = readSource("app.js");
+  assert.match(source, /els\.btnLogout\.addEventListener\("click", async \(\) => \{\s*resetProfileUi\(""\);/);
+  assert.match(source, /function resetProfileUi[\s\S]*?selectedCity = null;/);
+  assert.match(source, /function resetProfileUi[\s\S]*?allCities = \[\];/);
+  assert.match(source, /function resetProfileUi[\s\S]*?monitorEnabled = false;/);
+  assert.match(source, /function resetProfileUi[\s\S]*?monitorDdl = null;/);
+  assert.match(source, /function resetProfileUi[\s\S]*?lockController\.reset\?\.\(\);/);
+});
+
+test("Electron clears a typed token even when Worker connection fails", () => {
+  const source = readSource("app.js");
+  assert.match(source, /if \(runtimeInfo\.kind === "electron"\) els\.token\.value = "";[\s\S]{0,300}?await window\.maoyanRuntime\.connectWorker\(connection\)/);
+});
+
 test("lock submission restores disabled state after the loading button resets", () => {
   const source = readSource("lock.js");
   assert.match(source, /await buttonLoading\(els\.submit,[\s\S]*?\n\s*renderSelection\(\);\n\s*}/);

@@ -135,23 +135,40 @@ function resetProfileUi(nextProfileKey) {
   lockServiceEnabled = false;
   monitorEnabled = false;
   monitorDdl = null;
+  pushSaved = false;
   pushVerified = false;
+  realKeys.bark = "";
+  realKeys.serverchan = "";
+  keyStored.bark = false;
+  keyStored.serverchan = false;
   cinemaSelected = false;
   selectedCity = null;
   selectedCinema = null;
   selectedCinemaId = "";
   cinemaMovies = [];
+  cinemaLoadSeq += 1;
+  clearTimeout(cinemaSearchTimer);
+  cinemaSearchTimer = null;
   allCities = [];
   els.cityInput.value = "";
+  els.cityInput.disabled = false;
   els.cinemaSearch.value = "";
+  els.cinemaSearch.disabled = false;
+  els.btnSearchCinema.disabled = false;
+  els.cityDropdown.innerHTML = "";
+  els.cityDropdown.classList.add("hidden");
+  els.cinemaDropdown.innerHTML = "";
+  els.cinemaDropdown.classList.add("hidden");
   els.cinemaName.textContent = "";
   els.cinemaName.classList.add("hidden");
+  els.barkInput.value = "";
+  els.serverChanInput.value = "";
+  setChannel("bark");
   els.movieList.innerHTML = '<div class="muted empty-tip">连接云端后显示该影院在映影片</div>';
   els.movieCount.textContent = "连接后自动加载影片";
   els.logPanel.innerHTML = "";
   setStatus("未连接");
-  lockController.close?.();
-  lockController.refreshTemplates?.();
+  lockController.reset?.();
   lockController.syncAvailability();
   updateMonitorBtn();
 }
@@ -226,6 +243,7 @@ async function connect() {
         const connection = { workerUrl, httpRiskConfirmed };
         const typedToken = els.token.value.trim();
         if (typedToken) connection.token = typedToken;
+        if (runtimeInfo.kind === "electron") els.token.value = "";
         const { status: st, profile, httpRisk } = await window.maoyanRuntime.connectWorker(connection);
         connected = true;
         activeProfileKey = workerUrl;
@@ -269,12 +287,7 @@ els.token.addEventListener("input", () => { tokenProfileKey = normalizedWorkerUr
 
 // 切换连接: 仅清除当前工具的连接信息，不影响同域管理页等其他本地数据
 els.btnLogout.addEventListener("click", async () => {
-  connected = false;
-  lockServiceEnabled = false;
-  pushVerified = false;
-  cinemaSelected = false;
-  selectedCinemaId = "";
-  selectedCinema = null;
+  resetProfileUi("");
   realKeys.bark = "";
   realKeys.serverchan = "";
   localStorage.removeItem("workerUrl");
@@ -282,18 +295,12 @@ els.btnLogout.addEventListener("click", async () => {
   if (runtimeInfo.kind === "web") await secureSet("token", "");
   els.workerUrl.value = "";
   els.token.value = "";
-  els.cinemaName.classList.add("hidden");
-  els.cinemaName.textContent = "";
-  cinemaMovies = [];
   activeProfileKey = "";
   tokenProfileKey = "";
-  setStatus("未连接");
   setConnectionState();
   els.mainPage.classList.add("hidden");
   els.loginOverlay.classList.remove("hidden");
   els.loginError.classList.add("hidden");
-  lockController.close?.();
-  lockController.syncAvailability();
   els.btnLockSeats.disabled = true;
 });
 

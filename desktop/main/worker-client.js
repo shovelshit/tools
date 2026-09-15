@@ -79,7 +79,7 @@ function validateApiPath(requestPath) {
     throw new Error("API 路径无效");
   }
   if (decodedPath.includes("\\") || decodedPath.split("/").includes("..") || /%2f|%5c/i.test(pathOnly)) throw new Error("API 路径无效");
-  return requestPath;
+  return { requestPath, pathname: pathOnly };
 }
 
 function buildRequestUrl(profile, requestPath) {
@@ -175,10 +175,10 @@ function createWorkerClient({ app, safeStorage, fetchImpl = globalThis.fetch, co
       if (!ALLOWED_METHODS.has(method)) throw new Error("请求方法无效");
       if (!activeProfileKey || !profiles[activeProfileKey]) throw new Error("尚未连接服务");
       const profile = profiles[activeProfileKey];
-      if (method === "POST" && pathValue === "/api/lock/session") {
+      if (method === "POST" && pathValue.pathname === "/api/lock/session") {
         await requireHttpConfirmation(profile, options.httpRiskConfirmed === true, "session-upload");
       }
-      return send(profile, pathValue, { method, body: options.body });
+      return send(profile, pathValue.requestPath, { method, body: options.body });
     },
 
     getProfile() {

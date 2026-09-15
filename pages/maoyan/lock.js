@@ -998,6 +998,25 @@
       document.removeEventListener("keydown", onKeydown);
     }
 
+    function reset() {
+      close();
+      state.context = null;
+      state.session = { uploaded: false };
+      state.movieId = "";
+      state.templateSeqNo = "";
+      state.rule = null;
+      state.automationEnabled = false;
+      state.templates = [];
+      state.seatFeedback = { seqNo: "", at: 0 };
+      if (els.file) els.file.value = "";
+      if (els.cinema) els.cinema.value = "";
+      if (els.risk) els.risk.checked = false;
+      renderTemplates();
+      renderSession();
+      renderRule();
+      renderOfficialCompare(null);
+    }
+
     function onKeydown(event) { if (event.key === "Escape") close(); }
 
     function syncAvailability() {
@@ -1123,7 +1142,7 @@
     }
     resetSeats({ clearSource: true });
 
-    return { syncAvailability, open, refreshTemplates: renderTemplates, close };
+    return { syncAvailability, open, refreshTemplates: renderTemplates, close, reset };
   }
 
   const exported = {

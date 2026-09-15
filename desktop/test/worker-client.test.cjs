@@ -220,6 +220,34 @@ test("remote HTTP session upload requires a second explicit confirmation before 
   }
 });
 
+test("remote HTTP session upload with query parameters still needs a second confirmation", async () => {
+  const requests = [];
+  const confirmations = [];
+  const fixture = makeFixture({
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      return { ok: true, status: 200, json: async () => ({ profile: {} }) };
+    },
+    confirmHttp: async ({ operation }) => {
+      confirmations.push(operation);
+      return operation === "connect";
+    }
+  });
+  try {
+    const client = createWorkerClient(fixture);
+    await client.connectWorker({ workerUrl: "http://worker.example", token: "t", httpRiskConfirmed: true });
+
+    await assert.rejects(
+      client.requestWorker("/api/lock/session?bypass=1", { method: "POST", body: "{}", httpRiskConfirmed: true }),
+      /确认/
+    );
+    assert.deepEqual(confirmations, ["connect", "session-upload"]);
+    assert.equal(requests.length, 1);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test("requestWorker limits methods and JSON body size while constructing the fixed headers", async () => {
   const requests = [];
   const fixture = makeFixture({
