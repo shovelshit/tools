@@ -118,6 +118,7 @@ function createWorkerClient({ app, safeStorage, fetchImpl = globalThis.fetch, co
   const profiles = readProfiles(profilesPath);
   let activeProfileKey = null;
   let profileGeneration = 0;
+  let pendingConnections = 0;
 
   async function requireHttpConfirmation(profile, confirmed, operation) {
     if (!profile.requiresHttpConfirmation) return;
@@ -159,36 +160,42 @@ function createWorkerClient({ app, safeStorage, fetchImpl = globalThis.fetch, co
       const normalized = normalizeWorkerUrl(connection.workerUrl);
       if (connection.token !== undefined && typeof connection.token !== "string") throw new Error("令牌无效");
       profileGeneration += 1;
-      await requireHttpConfirmation(normalized, connection.httpRiskConfirmed === true, "connect");
-
-      const suppliedToken = typeof connection.token === "string";
-      if (suppliedToken) credentialStore.setToken(normalized.baseUrl, connection.token);
+      pendingConnections += 1;
       try {
-        const status = await send(normalized, "/api/status");
-        const profile = {
-          baseUrl: normalized.baseUrl,
-          updatedAt: new Date().toISOString(),
-          isLoopback: normalized.isLoopback,
-          requiresHttpConfirmation: normalized.requiresHttpConfirmation
-        };
-        profiles[normalized.baseUrl] = profile;
-        writeProfiles(profilesPath, profiles);
-        activeProfileKey = normalized.baseUrl;
-        return { status, profile: status?.profile ?? null, httpRisk: normalized.requiresHttpConfirmation };
-      } catch (error) {
-        if (suppliedToken) credentialStore.clearToken(normalized.baseUrl);
-        throw error;
+        await requireHttpConfirmation(normalized, connection.httpRiskConfirmed === true, "connect");
+
+        const suppliedToken = typeof connection.token === "string";
+        if (suppliedToken) credentialStore.setToken(normalized.baseUrl, connection.token);
+        try {
+          const status = await send(normalized, "/api/status");
+          const profile = {
+            baseUrl: normalized.baseUrl,
+            updatedAt: new Date().toISOString(),
+            isLoopback: normalized.isLoopback,
+            requiresHttpConfirmation: normalized.requiresHttpConfirmation
+          };
+          profiles[normalized.baseUrl] = profile;
+          writeProfiles(profilesPath, profiles);
+          activeProfileKey = normalized.baseUrl;
+          return { status, profile: status?.profile ?? null, httpRisk: normalized.requiresHttpConfirmation };
+        } catch (error) {
+          if (suppliedToken) credentialStore.clearToken(normalized.baseUrl);
+          throw error;
+        }
+      } finally {
+        profileGeneration += 1;
+        pendingConnections -= 1;
       }
     },
 
     prepareSessionUpload() {
-      if (!activeProfileKey || !profiles[activeProfileKey]) throw safeError("disconnected");
+      if (pendingConnections || !activeProfileKey || !profiles[activeProfileKey]) throw safeError("disconnected");
       const profile = { ...profiles[activeProfileKey] };
       const generation = profileGeneration;
       return async (body, { signal, onSend } = {}) => {
         const checkCurrent = () => {
           signal?.throwIfAborted();
-          if (profileGeneration !== generation || activeProfileKey !== profile.baseUrl) throw safeError("disconnected");
+          if (pendingConnections || profileGeneration !== generation || activeProfileKey !== profile.baseUrl) throw safeError("disconnected");
         };
         checkCurrent();
         await requireHttpConfirmation(profile, true, "session-upload");

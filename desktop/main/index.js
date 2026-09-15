@@ -3,7 +3,7 @@ const { pathToFileURL } = require("node:url");
 const { app, BrowserWindow, dialog, ipcMain, safeStorage, session } = require("electron");
 const { createWorkerClient } = require("./worker-client");
 const { createMaoyanLogin } = require("./maoyan-login");
-const { sanitizeError, safeError, publicSessionStatus } = require("./session-validation");
+const { sanitizeError, safeError, publicLoginResult } = require("./session-validation");
 
 const pagePath = path.join(__dirname, "..", "..", "pages", "maoyan", "index.html");
 
@@ -62,17 +62,14 @@ function registerIpcHandlers({ workerClient, createLogin = createMaoyanLogin } =
     entry.busy = true;
     try {
       const result = await entry.controller.start(input?.cinemaId);
-      if (result?.cancelled === true) return { cancelled: true };
-      if (result?.session) return { session: publicSessionStatus(result.session) };
-      return sanitizeError(result);
+      return publicLoginResult(result);
     } catch (error) { return sanitizeError(error); }
     finally { entry.busy = false; }
   });
   ipcMain.handle("maoyan:cancel", async (event) => {
     if (!trustedSender(event)) return sanitizeError(safeError("unavailable"));
     const result = await logins.get(event.sender)?.controller.cancel();
-    if (result?.session) return { session: publicSessionStatus(result.session) };
-    return result?.ok === false ? sanitizeError(result) : { cancelled: true };
+    return publicLoginResult(result ?? { cancelled: true });
   });
   ipcMain.handle("maoyan:upload-file", () => notReady("maoyan-upload-file"));
   ipcMain.handle("updates:check", () => notReady("updates-check"));

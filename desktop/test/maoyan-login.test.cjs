@@ -137,9 +137,10 @@ test("navigation, upload and loading errors remain safe and always clean up", as
   }
 });
 
-test("cleanup failure still clears other layers and returns a safe error", async () => {
+test("cleanup failure still clears other layers and reports a safe warning without changing cancellation", async () => {
   const f = fixture({ cleanupError: new Error("Cookie secret") }); const pending = f.login.start("25428"); await tick();
-  await f.login.cancel(); assert.equal((await pending).code, "cleanup"); assertClean(f);
+  await f.login.cancel(); const result = await pending;
+  assert.equal(result.cancelled, true); assert.equal(result.warnings[0].code, "cleanup"); assertClean(f);
 });
 
 test("invalid cinema IDs never allocate a session", async () => {
@@ -188,4 +189,22 @@ test("deadline after sending reports unknown outcome and aborts outstanding tran
   [...f.state.timers.values()].find((t) => t.ms === 600000).fn();
   assert.equal((await pending).code, "unknown"); assert.equal(f.state.signal.aborted, true);
   f.state.accept(); await tick(); assertClean(f);
+});
+
+test("cleanup failure preserves confirmed upload success and adds a safe warning", async () => {
+  const f = fixture({ cleanupError: new Error("Cookie _csrf=csrf-secret uid=123456789") });
+  const pending = f.login.start("25428"); await tick(); await f.authenticate(); const result = await pending;
+  assert.deepEqual(result.session, { uploaded: true, uidMasked: "UID 123***789" });
+  assert.equal(result.ok, undefined); assert.equal(result.warnings[0].code, "cleanup");
+  assert.match(result.warnings[0].message, /restart/i);
+  assert.doesNotMatch(JSON.stringify(result), /Cookie|_csrf|123456789|csrf-secret/);
+  assert.equal((await f.login.start("25428")).code, "unavailable"); assertClean(f);
+});
+
+test("cleanup failure preserves unknown upload outcome and refresh-status guidance", async () => {
+  const f = fixture({ uploadError: Object.assign(new Error("mtgsig=signature-secret"), { code: "unknown" }), cleanupError: new Error("Cookie secret") });
+  const pending = f.login.start("25428"); await tick(); await f.authenticate(); const result = await pending;
+  assert.equal(result.code, "unknown"); assert.match(result.message, /Refresh the remote session status/);
+  assert.equal(result.warnings[0].code, "cleanup");
+  assert.doesNotMatch(JSON.stringify(result), /Cookie|mtgsig|signature-secret/); assertClean(f);
 });

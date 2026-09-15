@@ -52,4 +52,13 @@ function publicSessionStatus(value) {
   return status;
 }
 
-module.exports = { captureSession, sanitizeError, safeError, safeQuery, publicSessionStatus };
+function publicLoginResult(value) {
+  const result = value?.cancelled === true ? { cancelled: true }
+    : value?.session ? { session: publicSessionStatus(value.session) } : sanitizeError(value);
+  if (Array.isArray(value?.warnings) && value.warnings.some((warning) => warning?.code === "cleanup")) {
+    result.warnings = [{ code: "cleanup", message: MESSAGES.cleanup }];
+  }
+  return result;
+}
+
+module.exports = { captureSession, sanitizeError, safeError, safeQuery, publicSessionStatus, publicLoginResult };

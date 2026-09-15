@@ -91,18 +91,23 @@ test("login IPC enforces trusted main frame, one active login, public results an
   assert.equal((await handlers.get("maoyan:login")({ sender, senderFrame: {} }, { cinemaId: "25428" })).ok, false);
   const pending = handlers.get("maoyan:login")(event, { cinemaId: "25428" });
   assert.equal((await handlers.get("maoyan:login")(event, { cinemaId: "25428" })).code, "busy");
-  controllers[0].resolve({ session: { uploaded: true, uidMasked: "UID 123***789", mtgsig: "signature-secret", cookies: [{ value: "123456789" }] } });
+  controllers[0].resolve({ session: { uploaded: true, uidMasked: "UID 123***789", mtgsig: "signature-secret", cookies: [{ value: "123456789" }] }, warnings: [{ code: "cleanup", message: "Cookie 123456789" }] });
   const success = await pending;
-  assert.deepEqual(success, { session: { uploaded: true, uidMasked: "UID 123***789" } });
+  assert.deepEqual(success.session, { uploaded: true, uidMasked: "UID 123***789" });
+  assert.equal(success.warnings[0].code, "cleanup");
+  assert.match(success.warnings[0].message, /restart/i);
   const cancelPending = handlers.get("maoyan:login")(event, { cinemaId: "25428" });
   assert.deepEqual(await handlers.get("maoyan:cancel")(event), { cancelled: true });
   assert.deepEqual(await cancelPending, { cancelled: true });
   const crashPending = handlers.get("maoyan:login")(event, { cinemaId: "25428" }); sender.emit("render-process-gone");
   assert.deepEqual(await crashPending, { cancelled: true }); assert.equal(controllers[0].disposed, true);
   const failurePending = handlers.get("maoyan:login")(event, { cinemaId: "25428" });
-  controllers[1].resolve({ ok: false, code: "upload", message: "Cookie mtgsig signature-secret _csrf csrf-secret 123456789 token-secret ?token=secret" });
+  controllers[1].resolve({ ok: false, code: "unknown", message: "Cookie mtgsig signature-secret _csrf csrf-secret 123456789 token-secret ?token=secret", warnings: [{ code: "cleanup", message: "Cookie 123456789" }, { code: "mtgsig", message: "signature-secret" }] });
   const failure = await failurePending;
-  assert.equal(failure.code, "upload");
+  assert.equal(failure.code, "unknown");
+  assert.match(failure.message, /Refresh the remote session status/);
+  assert.equal(failure.warnings.length, 1);
+  assert.equal(failure.warnings[0].code, "cleanup");
   assert.doesNotMatch(JSON.stringify([success, failure]), /mtgsig|Cookie|_csrf|123456789|token-secret|signature-secret|\?token/);
 });
 

@@ -361,3 +361,35 @@ test("server upload errors redact remote messages and treat server failures as a
     } finally { fixture.cleanup(); }
   }
 });
+
+test("same-URL token replacement blocks login preparation throughout approval and status wait", async () => {
+  const requests = []; let approveReconnect; let completeStatus; let connectionCount = 0;
+  const fixture = makeFixture({
+    confirmHttp: async ({ operation }) => {
+      if (operation !== "connect" || ++connectionCount === 1) return true;
+      return new Promise((resolve) => { approveReconnect = resolve; });
+    },
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      if (url.endsWith("/api/status") && options.headers["X-Token"] === "token-b") {
+        await new Promise((resolve) => { completeStatus = resolve; });
+      }
+      return { ok: true, json: async () => ({ session: { uploaded: true } }) };
+    }
+  });
+  try {
+    const client = createWorkerClient(fixture);
+    await client.connectWorker({ workerUrl: "http://worker.example", token: "token-a", httpRiskConfirmed: true });
+    const uploadUnderA = client.prepareSessionUpload();
+    const reconnect = client.connectWorker({ workerUrl: "http://worker.example/", token: "token-b", httpRiskConfirmed: true });
+    assert.throws(() => client.prepareSessionUpload(), { code: "disconnected" });
+    await assert.rejects(uploadUnderA({}), { code: "disconnected" });
+    approveReconnect(true); await new Promise(setImmediate);
+    assert.throws(() => client.prepareSessionUpload(), { code: "disconnected" });
+    completeStatus(); await reconnect;
+    await assert.rejects(uploadUnderA({}), { code: "disconnected" });
+    assert.equal(requests.filter(({ options }) => options.method === "POST").length, 0);
+    await client.prepareSessionUpload()({});
+    assert.equal(requests[2].options.headers["X-Token"], "token-b");
+  } finally { fixture.cleanup(); }
+});

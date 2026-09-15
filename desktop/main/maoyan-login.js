@@ -54,7 +54,10 @@ function createMaoyanLogin({ BrowserWindow, session, workerClient, clock = globa
       state.signature = "";
       state.query = {};
       state.listeners = [];
-      if (cleanupFailed) { disposed = true; value = sanitizeError(safeError("cleanup")); }
+      if (cleanupFailed) {
+        disposed = true;
+        value = { ...value, warnings: [{ code: "cleanup", message: safeError("cleanup").message }] };
+      }
       log("cleanup", cleanupFailed ? "failed" : "complete", value.code || (value.cancelled ? "cancelled" : "success"));
       active = null;
       resolve(value);
