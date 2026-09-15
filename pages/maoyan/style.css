@@ -501,6 +501,34 @@ summary {
   margin-right: auto;
 }
 
+.connection-panel-content {
+  display: grid;
+  place-items: center;
+}
+
+.connection-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text);
+}
+
+.connection-summary p {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.connection-indicator {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  border: 1px solid rgba(8, 127, 122, 0.42);
+  border-radius: 50%;
+  background: rgba(8, 127, 122, 0.12);
+  box-shadow: inset 0 0 0 7px rgba(247, 250, 251, 0.76);
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: 104px minmax(0, 1fr);
@@ -1122,6 +1150,71 @@ summary:focus-visible {
 .link-btn { padding: 2px 5px; border: 0; background: transparent; color: var(--success); font-size: 11px; cursor: pointer; }
 .link-btn.danger { color: var(--danger); }
 
+.admin-page {
+  overflow: auto;
+}
+
+.admin-page #admin-main.container {
+  position: relative;
+  inset: auto;
+  width: min(1120px, 100%);
+  height: 100vh;
+  min-height: 560px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+.admin-page #admin-main > header,
+.admin-page .header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-page #admin-main > header {
+  justify-content: space-between;
+}
+
+.admin-page .header-right {
+  flex-wrap: wrap;
+}
+
+.admin-page .header-right a {
+  text-decoration: none;
+}
+
+.admin-page .card {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  padding: 14px 16px;
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+  background: var(--surface-glass);
+  box-shadow: var(--glass-shadow);
+}
+
+.admin-page .card.grow {
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.admin-page .card h2 {
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.admin-page .card > .row input {
+  min-width: 180px;
+  flex: 1 1 220px;
+}
+
 ::-webkit-scrollbar { width: 7px; height: 7px; }
 ::-webkit-scrollbar-thumb { border-radius: 4px; background: rgba(92, 111, 122, 0.3); }
 ::-webkit-scrollbar-thumb:hover { background: rgba(92, 111, 122, 0.46); }
@@ -1129,7 +1222,7 @@ summary:focus-visible {
 @media (max-width: 1100px) {
   .app-workspace { width: min(860px, calc(100vw - 32px)); }
   .workflow-shell { grid-template-columns: 176px minmax(0, 1fr); }
-  .connection-state { display: none; }
+  #worker-profile { display: none; }
 }
 
 @media (max-width: 760px) {
@@ -1160,6 +1253,50 @@ summary:focus-visible {
   .panel-heading h2 { font-size: 16px; }
   .panel-heading p:not(.eyebrow) { display: none; }
   .panel-step-count { font-size: 10px; }
+
+  .admin-page #admin-main.container {
+    width: 100%;
+    height: auto;
+    min-height: 100vh;
+    padding: 12px;
+  }
+
+  .admin-page #admin-main > header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .admin-page .header-right {
+    width: 100%;
+  }
+
+  .admin-page .card > .row:not(.space-between) {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .admin-page .card > .row input {
+    min-width: 0;
+  }
+
+  .admin-page .token-table {
+    table-layout: fixed;
+  }
+
+  .admin-page .token-table th:nth-child(1),
+  .admin-page .token-table td:nth-child(1) { width: 44%; }
+  .admin-page .token-table th:nth-child(2),
+  .admin-page .token-table td:nth-child(2) { width: 34%; }
+  .admin-page .token-table th:nth-child(3),
+  .admin-page .token-table td:nth-child(3),
+  .admin-page .token-table th:nth-child(4),
+  .admin-page .token-table td:nth-child(4) { display: none; }
+  .admin-page .token-table th:nth-child(5),
+  .admin-page .token-table td:nth-child(5) { width: 22%; }
+  .admin-page .token-table td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 
 @media (max-width: 640px) {

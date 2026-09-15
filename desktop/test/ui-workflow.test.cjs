@@ -103,6 +103,20 @@ test("workflow allows returning to available steps and clamps invalid requests",
   assert.equal(deriveWorkflowState({ ...input, requestedStep: "" }).activeStep, 4);
 });
 
+test("running monitor keeps the stop controls reachable after configuration becomes unavailable", () => {
+  const state = deriveWorkflowState({
+    connected: true,
+    cinemaSelected: false,
+    selectedMovieCount: 0,
+    pushVerified: true,
+    monitorEnabled: true,
+    requestedStep: 4,
+  });
+
+  assert.equal(state.activeStep, 4);
+  assert.equal(state.steps[3].available, true);
+});
+
 test("ambient motion pauses while hidden or unfocused and cleanup removes listeners", () => {
   const windowTarget = new FakeEventTarget();
   const documentTarget = new FakeEventTarget();

@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 const { _electron: electron } = require("playwright-core");
 const { startMockWorker } = require("./support/worker.cjs");
 
@@ -28,6 +29,7 @@ async function main() {
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.waitForFunction(() => window.maoyanRuntime?.kind === "electron");
+    const mainPageUrl = page.url();
     assert.match(page.url(), /file:.*\/pages\/maoyan\/index\.html$/);
     if (packaged) assert.match(page.url(), /app\.asar\/pages\/maoyan\/index\.html$/);
     assert.deepEqual(await page.evaluate(() => ({ node: typeof require, process: typeof process, cookieApi: typeof window.maoyanElectron.cookies, tokenApi: typeof window.maoyanElectron.getToken })), { node: "undefined", process: "undefined", cookieApi: "undefined", tokenApi: "undefined" });
@@ -40,6 +42,10 @@ async function main() {
     assert.equal(await page.locator("#ambient-background").count(), 1);
     assert.equal(await page.locator("[data-workflow-step]").count(), 4);
     assert.equal(await page.locator(".workflow-shell > .glass-panel").count(), 2);
+    await page.locator('[data-workflow-step="1"]').click();
+    assert.equal(await page.locator("#main-page").isVisible(), true);
+    assert.equal(await page.locator('[data-workflow-panel="1"]').getAttribute("aria-hidden"), "false");
+    await page.locator("#btn-step-connection-next").click();
     const desktopLayout = await page.evaluate(() => {
       const workspace = document.querySelector(".app-workspace").getBoundingClientRect();
       const progress = document.querySelector(".workflow-progress").getBoundingClientRect();
@@ -86,6 +92,9 @@ async function main() {
 
     for (const viewport of [{ width: 1024, height: 720 }, { width: 768, height: 1024 }]) {
       await page.setViewportSize(viewport);
+      await page.locator("#worker-security").evaluate((element) => element.classList.add("http-risk"));
+      assert.equal(await page.locator("#worker-security").isVisible(), true, JSON.stringify(viewport));
+      await page.locator("#worker-security").evaluate((element) => element.classList.remove("http-risk"));
       const layout = await page.evaluate(() => {
         const progress = document.querySelector(".workflow-progress").getBoundingClientRect();
         const main = document.querySelector(".workflow-main").getBoundingClientRect();
@@ -185,6 +194,12 @@ async function main() {
     assert.equal(mobileLockLayout.toastOverlapsTitle, false, JSON.stringify(mobileLockLayout));
     await page.screenshot({ path: path.join(screenshotDirectory, "ui-lock-mobile.png") });
     await page.locator("#btn-lock-close").click();
+    await page.locator('[data-workflow-step="3"]').click();
+    await page.locator("#movie-list input[type=checkbox]").first().uncheck();
+    assert.equal(await page.locator('[data-workflow-step="4"]').isEnabled(), true);
+    await page.locator('[data-workflow-step="4"]').click();
+    assert.equal(await page.locator("#btn-toggle-monitor").isVisible(), true);
+    assert.equal(await page.locator("#btn-toggle-monitor").isEnabled(), true);
     assert.equal(application.windows().length, 1);
     assert.equal(new URL(page.url()).protocol, "file:");
     assert.deepEqual(errors, []);
@@ -192,6 +207,24 @@ async function main() {
     await page.screenshot({ path: path.join(screenshotDirectory, "ui-desktop.png") });
     const screenshot = path.join(screenshotDirectory, `smoke-${process.platform}-${process.arch}${packaged ? "-packaged" : ""}.png`);
     await page.screenshot({ path: screenshot });
+    if (!packaged) {
+      await page.goto(pathToFileURL(path.resolve(desktop, "../pages/maoyan/admin.html")).href);
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.locator("#admin-login").evaluate((element) => element.classList.add("hidden"));
+      await page.locator("#admin-main").evaluate((element) => element.classList.remove("hidden"));
+      await page.locator("#token-tbody").evaluate((element) => {
+        element.innerHTML = '<tr><td class="token-cell">0123456789abcdef0123456789abcdef</td><td>手机端测试账号</td><td><span class="badge in-use">使用中</span></td><td>2026-09-15 23:30</td><td><button class="link-btn danger">删除</button></td></tr>';
+      });
+      const adminLayout = await page.evaluate(() => ({
+        viewportWidth: innerWidth,
+        scrollWidth: document.documentElement.scrollWidth,
+        mainRight: document.querySelector("#admin-main").getBoundingClientRect().right,
+        deleteRight: document.querySelector("#token-tbody .danger").getBoundingClientRect().right,
+      }));
+      assert.ok(adminLayout.scrollWidth <= adminLayout.viewportWidth, JSON.stringify(adminLayout));
+      assert.ok(adminLayout.mainRight <= adminLayout.viewportWidth, JSON.stringify(adminLayout));
+      assert.ok(adminLayout.deleteRight <= adminLayout.viewportWidth, JSON.stringify(adminLayout));
+    }
     if (packaged) {
       const entries = await application.evaluate(({ app }) => {
         const fs = process.getBuiltinModule("node:fs");
@@ -209,7 +242,7 @@ async function main() {
       for (const entry of entries) assert.match(entry, /^(package\.json|desktop\/(main|preload)\/[\w-]+\.js|pages\/maoyan\/(index\.html|[\w-]+\.(js|css)))$/);
       console.log(`Packaged asar allowlist verified: ${entries.length} files`);
     }
-    console.log(`Electron smoke passed: ${page.url()}; Worker URL visible; token isolated; screenshot ${screenshot}`);
+    console.log(`Electron smoke passed: ${mainPageUrl}; Worker URL visible; token isolated; screenshot ${screenshot}`);
   } finally {
     await application?.close();
     await worker.close();

@@ -8,20 +8,23 @@
     cinemaSelected = false,
     selectedMovieCount = 0,
     pushVerified = false,
+    monitorEnabled = false,
     requestedStep,
   } = {}) {
     const hasConnection = connected === true;
     const hasCinema = hasConnection && cinemaSelected === true;
     const hasMovies = hasCinema && Number(selectedMovieCount) > 0;
     const hasNotification = hasMovies && pushVerified === true;
-    const completion = [hasConnection, hasCinema, hasMovies, hasNotification];
-    const availability = [true, hasConnection, hasCinema, hasMovies];
+    const monitorRunning = hasConnection && monitorEnabled === true;
+    const completion = [hasConnection, hasCinema, hasMovies, hasNotification || monitorRunning];
+    const availability = [true, hasConnection, hasCinema, hasMovies || monitorRunning];
     const maxAvailableStep = availability.lastIndexOf(true) + 1;
     const hasRequestedStep = requestedStep !== null && requestedStep !== undefined && String(requestedStep).trim() !== "";
     const requested = hasRequestedStep && Number.isInteger(Number(requestedStep))
       ? Number(requestedStep)
       : maxAvailableStep;
-    const activeStep = Math.min(maxAvailableStep, Math.max(1, requested));
+    const clampedStep = Math.min(maxAvailableStep, Math.max(1, requested));
+    const activeStep = availability[clampedStep - 1] ? clampedStep : maxAvailableStep;
 
     return {
       activeStep,

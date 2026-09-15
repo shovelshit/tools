@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>猫眼影院场次监控</title>
-  <link rel="stylesheet" href="style.css?v=20260915c" />
+  <link rel="stylesheet" href="style.css?v=20260915d" />
 </head>
 <body>
   <div id="ambient-background" class="ambient-background" aria-hidden="true">
@@ -91,6 +91,27 @@
         </aside>
 
         <section class="workflow-main glass-panel" aria-live="polite">
+          <section class="workflow-view" data-workflow-panel="1" aria-labelledby="connection-step-title" aria-hidden="true">
+            <header class="panel-heading">
+              <div>
+                <p class="eyebrow">STEP 01</p>
+                <h2 id="connection-step-title">连接服务</h2>
+                <p>当前连接可用，可以继续配置或从顶部切换连接。</p>
+              </div>
+              <span class="panel-step-count">第 1 步，共 4 步</span>
+            </header>
+            <div class="panel-content connection-panel-content">
+              <div class="connection-summary" role="status">
+                <span class="connection-indicator" aria-hidden="true"></span>
+                <div><strong>监控服务已连接</strong><p>Worker 地址和访问令牌已通过验证。</p></div>
+              </div>
+            </div>
+            <footer class="panel-actions">
+              <span class="autosave-state">连接状态正常</span>
+              <button id="btn-step-connection-next" class="btn primary" type="button">继续配置</button>
+            </footer>
+          </section>
+
           <section class="workflow-view is-active" data-workflow-panel="2" aria-labelledby="cinema-step-title">
             <header class="panel-heading">
               <div>
@@ -294,8 +315,8 @@
   <script src="runtime.js?v=20260915b"></script>
   <script src="secure-store.js?v=20260912b"></script>
   <script src="ui.js?v=20260915c"></script>
-  <script src="workflow.js?v=20260915c"></script>
+  <script src="workflow.js?v=20260915d"></script>
   <script src="lock.js?v=20260914h"></script>
-  <script src="app.js?v=20260915c"></script>
+  <script src="app.js?v=20260915d"></script>
 </body>
 </html>

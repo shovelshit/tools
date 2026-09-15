@@ -28,6 +28,7 @@ const els = {
   cinemaDropdown: $("cinema-dropdown"),
   btnSearchCinema: $("btn-search-cinema"),
   cinemaName: $("cinema-name"),
+  btnStepConnectionNext: $("btn-step-connection-next"),
   btnStepCinemaNext: $("btn-step-cinema-next"),
   btnStepMovieBack: $("btn-step-movie-back"),
   btnStepMovieNext: $("btn-step-movie-next"),
@@ -86,6 +87,7 @@ function syncWorkflowUi(requestedStep = workflowStep) {
     cinemaSelected,
     selectedMovieCount: getSelectedIds().length,
     pushVerified,
+    monitorEnabled,
     requestedStep,
   });
   workflowStep = state.activeStep;
@@ -93,17 +95,13 @@ function syncWorkflowUi(requestedStep = workflowStep) {
   if (els.btnStepCinemaNext) els.btnStepCinemaNext.disabled = !state.steps[1].complete;
   if (els.btnStepMovieNext) els.btnStepMovieNext.disabled = !state.steps[2].complete;
   if (els.workflowReadyState) {
-    els.workflowReadyState.textContent = pushVerified
-      ? (monitorEnabled ? "监控已启动" : "推送已验证")
-      : "请先测试推送";
+    els.workflowReadyState.textContent = monitorEnabled
+      ? "监控已启动"
+      : (pushVerified ? "推送已验证" : "请先测试推送");
   }
 }
 
 function navigateWorkflow(step) {
-  if (step === 1) {
-    els.btnLogout.click();
-    return;
-  }
   workflowStep = step;
   syncWorkflowUi();
 }
@@ -111,6 +109,7 @@ function navigateWorkflow(step) {
 document.querySelectorAll("[data-workflow-step]").forEach((button) => {
   button.addEventListener("click", () => navigateWorkflow(Number(button.dataset.workflowStep)));
 });
+els.btnStepConnectionNext?.addEventListener("click", () => navigateWorkflow(2));
 els.btnStepCinemaNext?.addEventListener("click", () => navigateWorkflow(3));
 els.btnStepMovieBack?.addEventListener("click", () => navigateWorkflow(2));
 els.btnStepMovieNext?.addEventListener("click", () => navigateWorkflow(4));
