@@ -1,0 +1,11 @@
+{
+  "name": "maoyan-electron",
+  "private": true,
+  "main": "main/index.js",
+  "scripts": {
+    "test": "node --test test/*.test.cjs"
+  },
+  "devDependencies": {
+    "electron": "^37.2.6"
+  }
+}
