@@ -23,7 +23,7 @@ export const RULE_KNOWN_ERRORS = [
 export const LOCK_RULE_TERMINAL_STATES = new Set(["locked", "expired", "failed", "completed", "cancelled"]);
 const PUBLIC_FIELDS = [
   "id", "cinemaId", "cinemaName", "movieId", "movieName", "hall", "targetDate",
-  "templateDate", "templateTime", "templateSeqNo", "targetSeqNo", "seats", "state",
+  "templateDate", "templateTime", "targetTime", "matchMode", "timeDeltaMinutes", "templateSeqNo", "targetSeqNo", "seats", "state",
   "createdAt", "updatedAt", "lastError", "orderId", "payLeftSecond"
 ];
 
@@ -159,7 +159,12 @@ export function lockNotificationContent(rule) {
   const fallbackSegment = seatSegmentOf(seats);
   const labels = seats.map((seat) => seat?.label || seatDisplayLabel(seat, fallbackSegment)).join("、");
   const hall = rule?.hall ? `${rule.hall}\n` : "";
-  return `${rule.cinemaName} ${rule.movieName}\n${hall}${rule.targetDate} ${rule.templateTime}\n${labels}` +
+  const targetTime = rule?.targetTime || rule?.templateTime || "";
+  const delta = Number(rule?.timeDeltaMinutes);
+  const fuzzyTime = rule?.matchMode === "fuzzy" && Number.isFinite(delta)
+    ? `\n模板场次 ${rule.templateTime}，实际场次偏差 ${delta >= 0 ? "+" : ""}${delta} 分钟`
+    : "";
+  return `${rule.cinemaName} ${rule.movieName}\n${hall}${rule.targetDate} ${targetTime}${fuzzyTime}\n${labels}` +
     (rule.state === "locked" && rule.payLeftSecond !== null ? `\n剩余支付时间 ${rule.payLeftSecond} 秒` : "");
 }
 

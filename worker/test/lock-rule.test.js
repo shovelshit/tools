@@ -6,6 +6,7 @@ import { getLockRuleRow, putConfig } from "../src/maoyan/db.js";
 import {
   createLockRule,
   getLockRule,
+  lockNotificationContent,
   publicLockRule,
   putLockRule,
   removeLockRule
@@ -291,6 +292,47 @@ test("projects only public rule fields and removes token-scoped rule", async () 
   assert.equal(Object.hasOwn(projected, "session"), false);
   await removeLockRule(env, "token-a");
   assert.equal(await getLockRule(env, "token-a"), null);
+});
+
+test("projects fuzzy target show details and renders the actual time in notifications", () => {
+  const rule = {
+    cinemaName: "测试影院",
+    movieName: "测试电影",
+    hall: "1号激光IMAX厅",
+    targetDate: "2026-09-12",
+    templateTime: "18:40",
+    targetTime: "18:50",
+    matchMode: "fuzzy",
+    timeDeltaMinutes: 10,
+    seats: [{ label: "6排18座" }],
+    state: "failed",
+    lastError: "所选未来座位不可用或影厅布局已变化"
+  };
+
+  const projected = publicLockRule({ ...rule, secret: "hidden" }, true);
+  assert.equal(projected.targetTime, "18:50");
+  assert.equal(projected.matchMode, "fuzzy");
+  assert.equal(projected.timeDeltaMinutes, 10);
+  assert.equal(Object.hasOwn(projected, "secret"), false);
+  assert.equal(
+    lockNotificationContent(rule),
+    "测试影院 测试电影\n1号激光IMAX厅\n2026-09-12 18:50\n模板场次 18:40，实际场次偏差 +10 分钟\n6排18座"
+  );
+});
+
+test("legacy exact rules keep using the template time in notifications", () => {
+  assert.equal(
+    lockNotificationContent({
+      cinemaName: "测试影院",
+      movieName: "测试电影",
+      hall: "1号厅",
+      targetDate: "2026-09-12",
+      templateTime: "18:40",
+      seats: [{ label: "6排18座" }],
+      state: "failed"
+    }),
+    "测试影院 测试电影\n1号厅\n2026-09-12 18:40\n6排18座"
+  );
 });
 
 test("cleanup deletes the encrypted session (KV) and the lock rule (D1)", async () => {
