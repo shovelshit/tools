@@ -71,4 +71,4 @@
 - [x] 检查连接页、步骤 2-4、运行态和锁座弹窗，无横向溢出、文字遮挡或不可达按钮。
 - [x] 运行 `git diff --check`、Electron 全量测试、Worker 全量测试和 Electron smoke。
 - [x] 检查 `git status`，只提交源码、测试和计划，不提交 `dist`、登录态、`.DS_Store` 或 `.superpowers`。
-- [ ] 提交并推送 `codex/maoyan-compact-glass-ui`。
+- [x] 提交并推送 `codex/maoyan-compact-glass-ui`。
