@@ -173,12 +173,21 @@
     }
   }
 
-  function createMaoyanLockController({ api, getContext, onLog, getProfileGeneration, isProfileGenerationCurrent }) {
+  function publicSession(session) {
+    if (!session?.uploaded) return { uploaded: false };
+    const result = { uploaded: true };
+    for (const key of ["uidMasked", "sourceSavedAt", "uploadedAt"]) {
+      if (typeof session[key] === "string") result[key] = session[key];
+    }
+    return result;
+  }
+
+  function createMaoyanLockController({ api, runtime, getContext, onLog, getProfileGeneration, isProfileGenerationCurrent }) {
     const $ = (id) => document.getElementById(id);
     const els = {
       button: $("btn-lock-seats"), overlay: $("lock-overlay"), close: $("btn-lock-close"),
       cinema: $("lock-cinema"), movie: $("lock-movie"), template: $("lock-template"), date: $("lock-target-date"),
-      file: $("lock-session-file"), upload: $("btn-lock-upload"), removeSession: $("btn-lock-remove-session"),
+      file: $("lock-session-file"), login: $("btn-lock-login"), upload: $("btn-lock-upload"), removeSession: $("btn-lock-remove-session"),
       sessionStatus: $("lock-session-status"), seatGrid: $("lock-seat-grid"), seatCount: $("lock-seat-count"),
       risk: $("lock-risk-accepted"), ruleStatus: $("lock-rule-status"), cancelRule: $("btn-lock-cancel-rule"),
       templateLabel: $("lock-template-label"),
@@ -202,7 +211,8 @@
     const state = {
       context: null, session: { uploaded: false }, movieId: "", templateSeqNo: "", seatMap: null,
       selectedSeatNos: new Set(), rule: null, automationEnabled: false, templates: [], dateBounds: lockDateBounds(),
-      seatSeg: 2, zoom: 1, panX: 0, panY: 0, seatFeedback: { seqNo: "", at: 0 }
+      seatSeg: 2, zoom: 1, panX: 0, panY: 0, seatFeedback: { seqNo: "", at: 0 },
+      runtimeInfo: { kind: "web", canLoginMaoyan: false }, sessionActionBusy: false
     };
 
     function show(message, type = "info") {
@@ -227,6 +237,46 @@
     }
 
     function setHidden(el, hidden) { el?.classList.toggle("hidden", hidden); }
+
+    function renderSessionActions() {
+      const info = state.runtimeInfo || { kind: "web", canLoginMaoyan: false };
+      const isElectron = info.kind === "electron";
+      const context = state.context || getContext?.() || {};
+      const loginAvailable = isElectron && info.canLoginMaoyan === true && context.connected && context.cinemaId && context.cinemaSelected;
+      if (els.login) {
+        els.login.textContent = isElectron
+          ? (info.canLoginMaoyan ? "一键登录猫眼" : "桌面端暂不支持一键登录")
+          : "Web端不支持一键登录";
+        els.login.disabled = !loginAvailable || state.sessionActionBusy;
+        els.login.title = loginAvailable ? "在桌面端登录猫眼" : (isElectron ? "请先连接 Worker 并选择影院" : "Web端不支持一键登录");
+      }
+      if (els.upload) {
+        els.upload.textContent = "手动上传登录态";
+        els.upload.disabled = state.sessionActionBusy;
+      }
+      if (els.file) setHidden(els.file, isElectron);
+    }
+
+    async function refreshRuntimeInfo() {
+      const generation = capturedProfileGeneration();
+      try {
+        const info = await runtime?.getRuntimeInfo?.();
+        if (!isCurrentProfileGeneration(generation)) return;
+        state.runtimeInfo = {
+          kind: info?.kind === "electron" ? "electron" : "web",
+          canLoginMaoyan: info?.canLoginMaoyan === true
+        };
+      } catch {
+        if (!isCurrentProfileGeneration(generation)) return;
+        state.runtimeInfo = { kind: "web", canLoginMaoyan: false };
+      }
+      renderSessionActions();
+    }
+
+    function setSessionActionBusy(busy) {
+      state.sessionActionBusy = busy;
+      renderSessionActions();
+    }
 
     function templateForCurrent() {
       return state.templates.find((item) => item.seqNo === state.templateSeqNo && item.movieId === state.movieId) || null;
@@ -310,6 +360,7 @@
     function renderSession() {
       const session = state.session || { uploaded: false };
       if (!els.sessionStatus) return;
+      renderSessionActions();
       const gated = !session.uploaded;
       renderGate(gated);
       if (gated) {
@@ -895,7 +946,7 @@
         api("/api/lock/session/status"), api("/api/lock/rule")
       ]);
       if (!isCurrentProfileGeneration(generation)) return;
-      state.session = sessionResult.status === "fulfilled" ? (sessionResult.value.session || { uploaded: false }) : { uploaded: false };
+      state.session = sessionResult.status === "fulfilled" ? publicSession(sessionResult.value.session) : { uploaded: false };
       state.rule = ruleResult.status === "fulfilled" ? (ruleResult.value.rule || null) : null;
       state.automationEnabled = Boolean(state.rule?.automationEnabled);
       renderSession();
@@ -904,6 +955,8 @@
 
     async function uploadSession() {
       const generation = capturedProfileGeneration();
+      if (state.sessionActionBusy) return;
+      if (state.runtimeInfo.kind === "electron") return uploadElectronSession(generation);
       const file = els.file.files?.[0];
       if (!file) return show("请选择猫眼会话文件", "warn");
       if (file.size > 256 * 1024) {
@@ -912,12 +965,13 @@
       }
       await buttonLoading(els.upload, "上传中...", async () => {
         let sessionText = "";
+        setSessionActionBusy(true);
         try {
           sessionText = await file.text();
           if (!isCurrentProfileGeneration(generation)) return;
           const { session } = await api("/api/lock/session", { method: "POST", body: sessionText });
           if (!isCurrentProfileGeneration(generation)) return;
-          state.session = session || { uploaded: false };
+          state.session = publicSession(session);
           renderSession();
           renderSelection();
           show("猫眼会话已加密保存", "success");
@@ -929,6 +983,69 @@
         } finally {
           sessionText = "";
           els.file.value = "";
+          if (isCurrentProfileGeneration(generation)) setSessionActionBusy(false);
+        }
+      });
+    }
+
+    async function uploadElectronSession(generation = capturedProfileGeneration()) {
+      await buttonLoading(els.upload, "上传中...", async () => {
+        setSessionActionBusy(true);
+        try {
+          const result = await runtime?.uploadSessionFile?.();
+          if (!isCurrentProfileGeneration(generation)) return;
+          if (result?.cancelled) {
+            show("已取消选择登录态文件", "info");
+            return;
+          }
+          if (!result?.session) throw new Error("上传登录态失败");
+          state.session = publicSession(result.session);
+          renderSession();
+          renderSelection();
+          show("猫眼会话已加密保存", "success");
+          onLog?.("ok", "猫眼会话已上传，用于锁座（Beta）");
+          await refreshRemoteState();
+          if (!isCurrentProfileGeneration(generation)) return;
+          await loadSeats();
+        } catch (error) {
+          if (!isCurrentProfileGeneration(generation)) return;
+          show(error.message || "上传失败", "error");
+        } finally {
+          if (isCurrentProfileGeneration(generation)) setSessionActionBusy(false);
+        }
+      });
+    }
+
+    async function loginMaoyan() {
+      const generation = capturedProfileGeneration();
+      if (state.sessionActionBusy) return;
+      const context = state.context || getContext?.() || {};
+      if (state.runtimeInfo.kind !== "electron" || state.runtimeInfo.canLoginMaoyan !== true || !context.connected || !context.cinemaId || !context.cinemaSelected) {
+        return;
+      }
+      await buttonLoading(els.login, "登录中...", async () => {
+        setSessionActionBusy(true);
+        try {
+          const result = await runtime?.loginMaoyan?.(context.cinemaId);
+          if (!isCurrentProfileGeneration(generation)) return;
+          if (result?.cancelled) {
+            show("已取消猫眼登录", "info");
+            return;
+          }
+          if (!result?.session) throw new Error("猫眼登录失败");
+          state.session = publicSession(result.session);
+          renderSession();
+          renderSelection();
+          show("猫眼登录态已保存", "success");
+          onLog?.("ok", "猫眼一键登录已完成，用于锁座（Beta）");
+          await refreshRemoteState();
+          if (!isCurrentProfileGeneration(generation)) return;
+          await loadSeats();
+        } catch (error) {
+          if (!isCurrentProfileGeneration(generation)) return;
+          show(error.message || "猫眼登录失败", "error");
+        } finally {
+          if (isCurrentProfileGeneration(generation)) setSessionActionBusy(false);
         }
       });
     }
@@ -1064,6 +1181,7 @@
           : context?.monitorEnabled === false
             ? "监控已停止，开始监控后才能锁座"
             : "请先在影院设置中选择影院";
+      renderSessionActions();
       return available;
     }
 
@@ -1071,6 +1189,8 @@
       const generation = capturedProfileGeneration();
       if (!syncAvailability()) return show("请先在影院设置中选择影院", "warn");
       state.context = getContext();
+      await refreshRuntimeInfo();
+      if (!isCurrentProfileGeneration(generation)) return;
       els.cinema.value = state.context.cinemaName || `影院 ${state.context.cinemaId}`;
       els.risk.checked = false;
       renderTemplates();
@@ -1105,6 +1225,7 @@
       await loadSeats();
     });
     els.risk.addEventListener("change", renderSelection);
+    els.login?.addEventListener("click", loginMaoyan);
     els.upload.addEventListener("click", uploadSession);
     els.removeSession.addEventListener("click", removeSession);
     els.submit.addEventListener("click", createRule);
@@ -1177,15 +1298,20 @@
       }, true);
     }
     resetSeats({ clearSource: true });
+    renderSessionActions();
+    void refreshRuntimeInfo();
 
-    return { syncAvailability, open, refreshTemplates: renderTemplates, close, reset };
+    return {
+      syncAvailability, open, refreshTemplates: renderTemplates, close, reset,
+      loginMaoyan, uploadSession, getSession: () => publicSession(state.session)
+    };
   }
 
   const exported = {
     createMaoyanLockController,
     lockUtils: {
       templatesFromMovies, chinaDateBounds, lockDateBounds, seatPosition, seatDisplayLabel, seatSegmentOf, couplePartnerOf,
-      isReadyToSubmit, isLockAvailable, lockAction, changeMovieSelection, preferredTargetShow, clearSeatSelection
+      isReadyToSubmit, isLockAvailable, lockAction, changeMovieSelection, preferredTargetShow, clearSeatSelection, publicSession
     }
   };
   if (typeof module !== "undefined" && module.exports) module.exports = exported;

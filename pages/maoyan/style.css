@@ -707,6 +707,7 @@ input[type="password"]:focus { border-color: var(--primary); }
 }
 .lock-upload-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .lock-upload-row input[type="file"] { min-width: 0; max-width: 100%; font-size: 12px; }
+.lock-upload-row .btn { white-space: nowrap; }
 
 .lock-form-grid {
   display: grid;

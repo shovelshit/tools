@@ -104,6 +104,7 @@ function isStaleProfileError(error) {
 
 const lockController = window.createMaoyanLockController({
   api,
+  runtime: window.maoyanRuntime,
   getProfileGeneration: () => profileGeneration.current(),
   isProfileGenerationCurrent: (generation) => profileGeneration.isCurrent(generation),
   getContext: () => ({

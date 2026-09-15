@@ -11,6 +11,92 @@ function loadLockModule() {
   return context.module.exports;
 }
 
+function fakeElement() {
+  const listeners = new Map();
+  const classes = new Set();
+  return {
+    disabled: false,
+    dataset: {},
+    files: [],
+    innerHTML: "",
+    textContent: "",
+    title: "",
+    value: "",
+    checked: false,
+    selectedOptions: [],
+    classList: {
+      add: (...names) => names.forEach((name) => classes.add(name)),
+      remove: (...names) => names.forEach((name) => classes.delete(name)),
+      toggle: (name, force) => {
+        if (force === undefined) {
+          if (classes.has(name)) classes.delete(name);
+          else classes.add(name);
+        } else if (force) classes.add(name);
+        else classes.delete(name);
+      },
+      contains: (name) => classes.has(name)
+    },
+    addEventListener: (name, listener) => listeners.set(name, listener),
+    closest: () => fakeElement(),
+    append: () => {},
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 1, height: 1 })
+  };
+}
+
+function mountLock({ runtimeInfo, runtime: runtimeOverrides = {}, context: contextOverrides = {}, api: apiOverrides = {} } = {}) {
+  const ids = [
+    "btn-lock-seats", "lock-overlay", "btn-lock-close", "lock-cinema", "lock-movie", "lock-template",
+    "lock-target-date", "lock-session-file", "btn-lock-login", "btn-lock-upload", "btn-lock-remove-session",
+    "lock-session-status", "lock-seat-grid", "lock-seat-count", "lock-risk-accepted", "lock-rule-status",
+    "btn-lock-cancel-rule", "lock-template-label", "lock-seat-source", "btn-lock-seat-feedback",
+    "lock-official-wrap", "lock-official-frame", "btn-official-zoom-in", "btn-official-zoom-out",
+    "btn-official-zoom-reset", "official-zoom-label", "lock-official-gesture", "lock-gate-hint",
+    "lock-section-schedule", "lock-section-seats", "lock-section-risk", "lock-section-rules", "btn-lock-cancel",
+    "btn-lock-submit", "btn-lock-zoom-in", "btn-lock-zoom-out", "btn-lock-zoom-reset", "lock-zoom-label"
+  ];
+  const elements = Object.fromEntries(ids.map((id) => [id, fakeElement()]));
+  const document = {
+    getElementById: (id) => elements[id] || null,
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  };
+  const root = { document, window: null };
+  root.window = root;
+  const source = fs.readFileSync(path.join(__dirname, "lock.js"), "utf8");
+  const module = { exports: {} };
+  vm.runInNewContext(source, { module, exports: module.exports, Intl, Date, Set, document, window: root }, { filename: "lock.js" });
+  const runtime = {
+    kind: runtimeInfo?.kind,
+    getRuntimeInfo: () => runtimeInfo,
+    loginMaoyan: async () => ({ cancelled: true }),
+    uploadSessionFile: async () => ({ cancelled: true }),
+    ...runtimeOverrides
+  };
+  const api = async (path, options) => {
+    if (Object.hasOwn(apiOverrides, path)) {
+      const result = apiOverrides[path];
+      return typeof result === "function" ? result(options) : result;
+    }
+    if (path === "/api/lock/session/status") return { session: { uploaded: false } };
+    if (path === "/api/lock/rule") return { rule: null };
+    return {};
+  };
+  const controller = module.exports.createMaoyanLockController({
+    api,
+    runtime,
+    getContext: () => ({
+      connected: true, cinemaId: "25428", cinemaName: "测试影院", cinemaSelected: true,
+      lockServiceEnabled: true, monitorEnabled: true, movies: [], ...contextOverrides
+    })
+  });
+  return {
+    controller,
+    loginButton: elements["btn-lock-login"],
+    uploadButton: elements["btn-lock-upload"],
+    fileInput: elements["lock-session-file"]
+  };
+}
+
 function loadRuntime() {
   const source = fs.readFileSync(path.join(__dirname, "runtime.js"), "utf8");
   const window = { window: null };
@@ -25,6 +111,91 @@ function deferred() {
   const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
   return { promise, resolve, reject };
 }
+
+test("web mode disables one-click login and keeps manual upload", async () => {
+  const dom = mountLock({ runtimeInfo: { kind: "web", canLoginMaoyan: false } });
+  await Promise.resolve();
+  assert.equal(dom.loginButton.disabled, true);
+  assert.match(dom.loginButton.textContent, /Web.*不支持/);
+  assert.match(dom.uploadButton.textContent, /手动上传登录态/);
+  assert.equal(dom.fileInput.classList.contains("hidden"), false);
+});
+
+test("electron login updates only the masked session state", async () => {
+  const session = {
+    uploaded: true,
+    uidMasked: "UID 123***789",
+    sourceSavedAt: "2026-09-15T10:00:00.000Z",
+    uploadedAt: "2026-09-15T10:01:00.000Z",
+    cookies: [{ name: "_m_h5_tk", value: "secret" }]
+  };
+  const dom = mountLock({
+    runtimeInfo: { kind: "electron", canLoginMaoyan: true },
+    runtime: { loginMaoyan: async () => ({ session }) },
+    api: {
+      "/api/lock/session/status": { session },
+      "/api/lock/rule": { rule: null }
+    }
+  });
+  await Promise.resolve();
+  await dom.controller.loginMaoyan();
+  assert.equal(dom.controller.getSession().uidMasked, "UID 123***789");
+  assert.equal(dom.controller.getSession().cookies, undefined);
+});
+
+test("web upload keeps the file in the renderer only for the upload request", async () => {
+  const uploaded = [];
+  const dom = mountLock({
+    runtimeInfo: { kind: "web", canLoginMaoyan: false },
+    api: {
+      "/api/lock/session": ({ body }) => {
+        uploaded.push(body);
+        return { session: { uploaded: true, uidMasked: "UID 456***321", cookies: ["secret"] } };
+      }
+    }
+  });
+  dom.fileInput.files = [{ size: 24, text: async () => '{"cookies":["secret"]}' }];
+  await dom.controller.uploadSession();
+  assert.deepEqual(uploaded, ['{"cookies":["secret"]}']);
+  assert.equal(dom.fileInput.value, "");
+  assert.equal(dom.controller.getSession().uidMasked, "UID 456***321");
+  assert.equal(dom.controller.getSession().cookies, undefined);
+});
+
+test("electron manual upload delegates file selection to the runtime", async () => {
+  let uploads = 0;
+  const session = { uploaded: true, uidMasked: "UID 789***123", sourceSavedAt: "2026-09-15T10:00:00.000Z" };
+  const dom = mountLock({
+    runtimeInfo: { kind: "electron", canLoginMaoyan: true },
+    runtime: { uploadSessionFile: async () => { uploads += 1; return { session }; } },
+    api: {
+      "/api/lock/session/status": { session },
+      "/api/lock/rule": { rule: null }
+    }
+  });
+  await Promise.resolve();
+  await dom.controller.uploadSession();
+  assert.equal(uploads, 1);
+  assert.equal(dom.fileInput.classList.contains("hidden"), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(dom.controller.getSession())), session);
+});
+
+test("cancelled electron login preserves the previous public session", async () => {
+  let calls = 0;
+  const session = { uploaded: true, uidMasked: "UID 123***789", uploadedAt: "2026-09-15T10:01:00.000Z" };
+  const dom = mountLock({
+    runtimeInfo: { kind: "electron", canLoginMaoyan: true },
+    runtime: { loginMaoyan: async () => ++calls === 1 ? { session } : { cancelled: true } },
+    api: {
+      "/api/lock/session/status": { session },
+      "/api/lock/rule": { rule: null }
+    }
+  });
+  await Promise.resolve();
+  await dom.controller.loginMaoyan();
+  await dom.controller.loginMaoyan();
+  assert.deepEqual(JSON.parse(JSON.stringify(dom.controller.getSession())), session);
+});
 
 test("old lock refresh and seat responses cannot repopulate reset state", async () => {
   const { createProfileGeneration } = loadRuntime();
