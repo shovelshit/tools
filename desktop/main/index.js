@@ -1,5 +1,6 @@
 const path = require("node:path");
-const fs = require("node:fs/promises");
+const fs = require("node:fs");
+const fsPromises = require("node:fs/promises");
 const { pathToFileURL } = require("node:url");
 const { app, BrowserWindow, dialog, ipcMain, safeStorage, session, shell } = require("electron");
 const { createWorkerClient } = require("./worker-client");
@@ -9,6 +10,9 @@ const { checkForUpdates, openExternal } = require("./updates");
 
 const pagePath = path.join(__dirname, "..", "..", "pages", "maoyan", "index.html");
 const MAX_SESSION_FILE_BYTES = 256 * 1024;
+const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const QUERY_KEYS = ["yodaReady", "csecplatform", "csecversion"];
+const SAFE_QUERY_VALUE = /^[A-Za-z0-9._:-]{1,64}$/;
 
 function notReady(feature) {
   return { ok: false, code: "not-ready", feature };
@@ -27,14 +31,42 @@ function confirmRemoteHttp({ operation }) {
   }).then(({ response }) => response === 0);
 }
 
+function normalizeUploadedSession(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw safeError("validation");
+  const cookies = (Array.isArray(value.cookies) ? value.cookies : [])
+    .filter((cookie) => cookie && /^\.?([a-z0-9-]+\.)*maoyan\.com$/i.test(String(cookie.domain || ".maoyan.com")))
+    .map((cookie) => ({ name: String(cookie.name || "").trim(), value: String(cookie.value || "") }))
+    .filter((cookie) => /^[A-Za-z0-9_-]{1,128}$/.test(cookie.name) && cookie.value.length <= 4096)
+    .slice(0, 64);
+  const uid = cookies.find((cookie) => cookie.name === "uid")?.value || "";
+  const csrf = String(value.csrf || "");
+  const mtgsig = String(value.mtgsig || "");
+  const userAgent = String(value.user_agent || "");
+  if (!cookies.length || !/^\d+$/.test(uid) || !csrf || !mtgsig || !userAgent) throw safeError("validation");
+  const sourceQuery = value.create_order_query && typeof value.create_order_query === "object" && !Array.isArray(value.create_order_query)
+    ? value.create_order_query : {};
+  const createOrderQuery = Object.fromEntries(QUERY_KEYS
+    .map((key) => [key, String(sourceQuery[key] || "")])
+    .filter(([, queryValue]) => queryValue && SAFE_QUERY_VALUE.test(queryValue)));
+  return {
+    cookies,
+    csrf,
+    mtgsig,
+    user_agent: userAgent,
+    create_order_query: createOrderQuery,
+    saved_at: String(value.saved_at || "")
+  };
+}
+
 function manualSessionPayload(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw safeError("validation");
+  if (Array.isArray(value.cookies) || Object.hasOwn(value, "create_order_query")) return normalizeUploadedSession(value);
   const uid = typeof value.uid === "number" && Number.isSafeInteger(value.uid) ? String(value.uid) : value.uid;
   if (!/^\d+$/.test(uid || "") || typeof value._csrf !== "string" || typeof value.mtgsig !== "string" || typeof value.user_agent !== "string") {
     throw safeError("validation");
   }
   const query = new URLSearchParams();
-  for (const key of ["yodaReady", "csecplatform", "csecversion"]) {
+  for (const key of QUERY_KEYS) {
     if (typeof value[key] === "string") query.set(key, value[key]);
   }
   return captureSession({
@@ -48,24 +80,55 @@ function manualSessionPayload(value) {
   });
 }
 
-async function uploadSessionFile({ dialog: fileDialog = dialog, workerClient, fs: fileSystem = fs } = {}) {
+async function readSessionFile(fileSystem, filePath) {
+  let handle;
+  let buffer;
+  try {
+    handle = await fileSystem.open(filePath, "r");
+    const stats = await handle.stat();
+    if (!stats?.isFile?.() || !Number.isSafeInteger(stats.size) || stats.size > MAX_SESSION_FILE_BYTES) throw safeError("validation");
+    buffer = Buffer.allocUnsafe(MAX_SESSION_FILE_BYTES + 1);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    if (!Number.isSafeInteger(bytesRead) || bytesRead < 0 || bytesRead > MAX_SESSION_FILE_BYTES) throw safeError("validation");
+    return buffer.subarray(0, bytesRead).toString("utf8");
+  } finally {
+    buffer?.fill(0);
+    await handle?.close?.().catch(() => {});
+  }
+}
+
+function createUpdatePreference({ filePath, fileSystem = fs } = {}) {
+  return {
+    read() {
+      try {
+        const value = JSON.parse(fileSystem.readFileSync(filePath, "utf8"));
+        return Number.isSafeInteger(value?.lastAutomaticCheckAt) && value.lastAutomaticCheckAt > 0 ? value.lastAutomaticCheckAt : 0;
+      } catch { return 0; }
+    },
+    write(lastAutomaticCheckAt) {
+      try {
+        fileSystem.mkdirSync(path.dirname(filePath), { recursive: true });
+        const temporaryPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+        fileSystem.writeFileSync(temporaryPath, JSON.stringify({ lastAutomaticCheckAt }), { mode: 0o600 });
+        fileSystem.renameSync(temporaryPath, filePath);
+      } catch { /* The next automatic check can safely retry if preferences cannot be saved. */ }
+    }
+  };
+}
+
+async function uploadSessionFile({ dialog: fileDialog = dialog, workerClient, fs: fileSystem = fsPromises } = {}) {
   let fileText = "";
   let payload;
   try {
+    const upload = workerClient?.prepareSessionUpload?.();
+    if (typeof upload !== "function") throw safeError("disconnected");
     const selected = await fileDialog.showOpenDialog({
       properties: ["openFile"],
       filters: [{ name: "JSON", extensions: ["json"] }]
     });
     if (selected?.canceled || !Array.isArray(selected?.filePaths) || selected.filePaths.length !== 1) return { cancelled: true };
-    const filePath = selected.filePaths[0];
-    const stats = await fileSystem.stat(filePath);
-    if (!stats?.isFile?.() && stats?.isFile !== undefined) throw safeError("validation");
-    if (!Number.isSafeInteger(stats?.size) || stats.size > MAX_SESSION_FILE_BYTES) throw safeError("validation");
-    fileText = await fileSystem.readFile(filePath, "utf8");
-    if (Buffer.byteLength(fileText, "utf8") > MAX_SESSION_FILE_BYTES) throw safeError("validation");
+    fileText = await readSessionFile(fileSystem, selected.filePaths[0]);
     payload = manualSessionPayload(JSON.parse(fileText));
-    const upload = workerClient?.prepareSessionUpload?.();
-    if (typeof upload !== "function") throw safeError("disconnected");
     const result = await upload(payload);
     if (result?.session?.uploaded !== true) throw safeError("unknown");
     return { session: publicSessionStatus(result.session) };
@@ -77,11 +140,13 @@ async function uploadSessionFile({ dialog: fileDialog = dialog, workerClient, fs
   }
 }
 
-function registerIpcHandlers({ workerClient, createLogin = createMaoyanLogin, updateChecker = checkForUpdates } = {}) {
+function registerIpcHandlers({ workerClient, createLogin = createMaoyanLogin, updateChecker = checkForUpdates, updatePreference, clock = Date.now } = {}) {
   const client = workerClient ?? createWorkerClient({ app, safeStorage, confirmHttp: confirmRemoteHttp });
   const logins = new Map();
+  const preference = updatePreference ?? (typeof app.getPath === "function"
+    ? createUpdatePreference({ filePath: path.join(app.getPath("userData"), "update-preferences.json") }) : null);
   let latestReleaseUrl = "";
-  let lastUpdateCheckAt = 0;
+  let lastUpdateCheckAt = preference?.read?.() || 0;
   let lastUpdateResult = { available: false };
   let quitting = false;
   let cleanupComplete = false;
@@ -133,8 +198,10 @@ function registerIpcHandlers({ workerClient, createLogin = createMaoyanLogin, up
   });
   ipcMain.handle("updates:check", async (event) => {
     if (!trustedSender(event)) return { available: false };
-    if (Date.now() - lastUpdateCheckAt >= 24 * 60 * 60 * 1000) {
-      lastUpdateCheckAt = Date.now();
+    const currentTime = clock();
+    if (!lastUpdateCheckAt || currentTime - lastUpdateCheckAt >= UPDATE_CHECK_INTERVAL_MS) {
+      lastUpdateCheckAt = currentTime;
+      preference?.write?.(lastUpdateCheckAt);
       lastUpdateResult = await updateChecker({ currentVersion: app.getVersion?.() || "0.0.0" });
       latestReleaseUrl = lastUpdateResult.available === true ? lastUpdateResult.releaseUrl : "";
     }
@@ -188,4 +255,4 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-module.exports = { createMainWindow, registerIpcHandlers, uploadSessionFile, manualSessionPayload };
+module.exports = { createMainWindow, registerIpcHandlers, uploadSessionFile, manualSessionPayload, normalizeUploadedSession, createUpdatePreference };

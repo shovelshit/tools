@@ -7,17 +7,15 @@ const test = require("node:test");
 
 const { checkForUpdates, GITHUB_RELEASES_API, isOfficialReleaseUrl, openExternal } = require("../main/updates");
 
-function loadMain() {
+function loadMain(electron = {
+  app: { whenReady: () => new Promise(() => {}), on() {} },
+  BrowserWindow: {}, dialog: {}, ipcMain: {}, safeStorage: {}, session: {}, shell: {}
+}) {
   const mainPath = path.join(__dirname, "..", "main", "index.js");
   delete require.cache[mainPath];
   const originalLoad = Module._load;
   Module._load = function (request, parent, isMain) {
-    if (request === "electron") {
-      return {
-        app: { whenReady: () => new Promise(() => {}), on() {} },
-        BrowserWindow: {}, dialog: {}, ipcMain: {}, safeStorage: {}, session: {}, shell: {}
-      };
-    }
+    if (request === "electron") return electron;
     return originalLoad.call(this, request, parent, isMain);
   };
   try {
@@ -58,8 +56,15 @@ async function uploadSessionFileWithFixture({ json = validSessionJson(), cancell
         }
       },
       fs: {
-        stat: async () => ({ size: fileSize ?? fs.statSync(filePath).size }),
-        readFile: fs.promises.readFile
+        open: async () => {
+          const handle = await fs.promises.open(filePath, "r");
+          if (fileSize === undefined) return handle;
+          return {
+            stat: async () => ({ size: fileSize, isFile: () => true }),
+            read: handle.read.bind(handle),
+            close: handle.close.bind(handle)
+          };
+        }
       }
     });
     return { result, uploaded };
@@ -139,6 +144,32 @@ test("native upload never returns file contents", async () => {
   assert.deepEqual(uploaded[0].create_order_query, { yodaReady: "h5", csecplatform: "4", csecversion: "2.6.0" });
 });
 
+test("native upload accepts the local Python session export and drops untrusted fields", async () => {
+  const { result, uploaded } = await uploadSessionFileWithFixture({ json: JSON.stringify({
+    cookies: [
+      { domain: ".maoyan.com", name: "uid", value: "123456789" },
+      { domain: ".maoyan.com", name: "_csrf", value: "csrf-secret" },
+      { domain: "evil.example", name: "drop", value: "no" }
+    ],
+    csrf: "csrf-secret",
+    mtgsig: "signature-secret",
+    user_agent: "Mozilla/5.0",
+    create_order_query: { yodaReady: "h5", csecplatform: "4", csecversion: "2.6.0", injected: "drop" },
+    saved_at: "2026-09-15T00:00:00.000Z",
+    extra: "drop"
+  }) });
+
+  assert.deepEqual(result, { session: { uploaded: true, uidMasked: "UID 123***789" } });
+  assert.deepEqual(uploaded, [{
+    cookies: [{ name: "uid", value: "123456789" }, { name: "_csrf", value: "csrf-secret" }],
+    csrf: "csrf-secret",
+    mtgsig: "signature-secret",
+    user_agent: "Mozilla/5.0",
+    create_order_query: { yodaReady: "h5", csecplatform: "4", csecversion: "2.6.0" },
+    saved_at: "2026-09-15T00:00:00.000Z"
+  }]);
+});
+
 test("native upload leaves the cloud session untouched on cancel, oversize, or invalid JSON", async () => {
   const cancelled = await uploadSessionFileWithFixture({ cancelled: true });
   assert.deepEqual(cancelled, { result: { cancelled: true }, uploaded: [] });
@@ -158,11 +189,102 @@ test("native upload rejects a file that grows beyond 256 KiB after stat", async 
     dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: ["/tmp/session.json"] }) },
     workerClient: { prepareSessionUpload: () => async (payload) => uploaded.push(payload) },
     fs: {
-      stat: async () => ({ size: 2 }),
-      readFile: async () => " ".repeat(256 * 1024) + validSessionJson()
+      open: async () => ({
+        stat: async () => ({ size: 2, isFile: () => true }),
+        read: async (buffer) => {
+          const data = Buffer.from(" ".repeat(256 * 1024) + validSessionJson());
+          data.copy(buffer);
+          return { bytesRead: buffer.length };
+        },
+        close: async () => {}
+      })
     }
   });
 
   assert.equal(result.code, "validation");
   assert.deepEqual(uploaded, []);
+});
+
+test("native upload reads only the opened regular file and rejects special files", async () => {
+  let opened = 0;
+  const special = await uploadSessionFile({
+    dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: ["/tmp/session.json"] }) },
+    workerClient: { prepareSessionUpload: () => async () => assert.fail("must not upload") },
+    fs: {
+      open: async () => {
+        opened += 1;
+        return { stat: async () => ({ size: 0, isFile: () => false }), read: async () => assert.fail("must not read"), close: async () => {} };
+      },
+      stat: () => assert.fail("must not stat a path"),
+      readFile: () => assert.fail("must not read a path")
+    }
+  });
+
+  assert.equal(opened, 1);
+  assert.equal(special.code, "validation");
+});
+
+test("prepared upload rejects a Worker profile switch while the picker is open", async () => {
+  let resolvePicker;
+  let profile = "a";
+  const uploads = [];
+  const pending = uploadSessionFile({
+    dialog: { showOpenDialog: () => new Promise((resolve) => { resolvePicker = resolve; }) },
+    workerClient: {
+      prepareSessionUpload: () => {
+        const bound = profile;
+        return async () => {
+          if (profile !== bound) {
+            const error = new Error("disconnected");
+            error.code = "disconnected";
+            throw error;
+          }
+          uploads.push(bound);
+          return { session: { uploaded: true } };
+        };
+      }
+    },
+    fs: {
+      open: async () => ({
+        stat: async () => ({ size: Buffer.byteLength(validSessionJson()), isFile: () => true }),
+        read: async (buffer) => {
+          const data = Buffer.from(validSessionJson()); data.copy(buffer); return { bytesRead: data.length };
+        },
+        close: async () => {}
+      })
+    }
+  });
+  await new Promise(setImmediate);
+  profile = "b";
+  resolvePicker({ canceled: false, filePaths: ["/tmp/session.json"] });
+
+  assert.equal((await pending).code, "disconnected");
+  assert.deepEqual(uploads, []);
+});
+
+test("automatic update checks persist their 24-hour timestamp across main instances", async () => {
+  let now = 1_000_000;
+  let checked = 0;
+  const preference = { lastAutomaticCheckAt: 0, read() { return this.lastAutomaticCheckAt; }, write(value) { this.lastAutomaticCheckAt = value; } };
+  const sender = Object.assign(new (require("node:events").EventEmitter)(), {
+    mainFrame: {}, getURL: () => require("node:url").pathToFileURL(path.join(__dirname, "../../pages/maoyan/index.html")).href
+  });
+  const event = { sender, senderFrame: sender.mainFrame };
+  const makeHandler = () => {
+    const handlers = new Map();
+    const electron = {
+      app: { whenReady: () => new Promise(() => {}), on() {}, getVersion: () => "1.0.0" },
+      BrowserWindow: {}, dialog: {}, ipcMain: { handle: (name, handler) => handlers.set(name, handler) }, safeStorage: {}, session: {}, shell: {}
+    };
+    const { registerIpcHandlers } = loadMain(electron);
+    registerIpcHandlers({ workerClient: {}, updatePreference: preference, clock: () => now, updateChecker: async () => { checked += 1; return { available: false }; } });
+    return handlers.get("updates:check");
+  };
+
+  await makeHandler()(event);
+  now += 23 * 60 * 60 * 1000;
+  await makeHandler()(event);
+  now += 60 * 60 * 1000 + 1;
+  await makeHandler()(event);
+  assert.equal(checked, 2);
 });
