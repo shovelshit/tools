@@ -50,10 +50,19 @@ test("monitoring cannot start without a configured and tested current notificati
 
 test("a successful test verifies only the current channel and credential", async () => {
   const env = await runtime({ notifyChannel: "bark", barkKey: "test-key", enabled: false });
+  let notification;
 
-  await withMockFetch(async () => new Response("ok", { status: 200 }), async () => {
+  await withMockFetch(async (input) => {
+    const [, , title, content] = new URL(String(input)).pathname.split("/");
+    notification = { title: decodeURIComponent(title), content: decodeURIComponent(content) };
+    return new Response("ok", { status: 200 });
+  }, async () => {
     const testResponse = await worker.fetch(request("/api/test-push", {}), env);
     assert.equal(testResponse.status, 200);
+  });
+  assert.deepEqual(notification, {
+    title: "🔔 猫眼监控｜通知测试",
+    content: "✅ 这是一条测试消息\n📡 收到此消息，说明当前通知通道可用"
   });
 
   const verifiedConfig = await getConfig(env.DB, tokenId);

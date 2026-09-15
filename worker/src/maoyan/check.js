@@ -7,6 +7,7 @@ import { pushNotify } from "./notify.js";
 import { minBatchMinutes, resolveCronExprs } from "./cron.js";
 import { isExpired } from "./ddl.js";
 import { monitorError } from "./log.js";
+import { newShowsNotification } from "./notification-copy.js";
 
 function fmtShow(s) {
   const parts = [`${s.showDate || s.dt || ""} ${s.tm || ""}`, s.lang || "", s.tp || "", s.th || ""];
@@ -85,11 +86,10 @@ export async function runCheck(env, manual, token, options = {}) {
     if (selected.has(idStr) && !isFirst && added.length > 0) {
       const lines = added.slice(0, 20).map(fmtShow);
       if (added.length > 20) lines.push(`...等共 ${added.length} 场`);
-      const title = `🎬新增场次: ${movie.nm}`;
-      const content = `【${cinemaName}】\n${lines.join("\n")}`;
+      const notification = newShowsNotification({ cinemaName, movieName: movie.nm, shows: added });
       await appendChange(env, token, { type: "new", text: `新增 ${added.length} 场《${movie.nm}》: ${lines[0]}` });
       try {
-        const label = await pushNotify(cfg, title, content);
+        const label = await pushNotify(cfg, notification.title, notification.content);
         newTotal += added.length;
         await appendChange(env, token, { type: "ok", text: `已推送 ${label}(${movie.nm}, ${added.length} 场)` });
       } catch (e) {

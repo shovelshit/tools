@@ -65,6 +65,11 @@ function upstreamMock(cinema, counters) {
     if (url.includes("/ajax/cinemaDetail")) return new Response(JSON.stringify(cinema), { status: 200 });
     if (url.includes("api.day.app")) {
       counters.pushCalls += 1;
+      const [, , title, content] = new URL(url).pathname.split("/");
+      counters.notification = {
+        title: decodeURIComponent(title),
+        content: decodeURIComponent(content)
+      };
       return new Response("ok", { status: 200 });
     }
     return new Response("ok", { status: 200 });
@@ -116,6 +121,8 @@ test("新增场次: snapshot+changes+status 全落盘, 推送恰好一次", asyn
   assert.equal(res.ok, true);
   assert.equal(res.newTotal, 1);
   assert.equal(counters.pushCalls, 1);
+  assert.equal(counters.notification.title, "🎬 新增 1 场｜片X");
+  assert.equal(counters.notification.content, "🏢 测试影院\n🎞 片X\n\n🗓 新增场次\n• 2026-09-15 19:00 · 1号厅 · 国语 2D\n\n🔎 进入监控页查看并选择场次");
   assert.equal(env.DB.writeCount(SNAP), 1);
   assert.deepEqual((await db.getSnapshot(env.DB, tokenId))["900"], ["A1", "A2"]);
   assert.equal(env.DB.writeCount(CHG), 2); // new + ok 两条

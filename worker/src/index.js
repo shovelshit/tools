@@ -6,6 +6,7 @@ import { getUserConfig } from "./maoyan/user.js";
 import * as db from "./maoyan/db.js";
 import { CITY_LIST, fetchCinemaDetail, publicCinemaShows, searchCinemasByKw, runCheck, appendChange, pushNotify, currentChannel, currentCredential, isNotificationVerified, notificationVerification, minBatchMinutes, describeCrons, isMinuteStepCrons, resolveCronExprs, ddlFromNow, checkAuthFull, handleAdminTokens, handleLockApi, runScheduledChecks, runScheduledLockAfterMonitor, MONITOR_WINDOW_LABEL } from "./maoyan/index.js";
 import { handleStoreApi, handleStoreFile } from "./store/proxy.js";
+import { testNotification } from "./maoyan/notification-copy.js";
 
 export { LockCoordinator } from "./maoyan/lock-runner.js";
 
@@ -153,8 +154,9 @@ export default {
       if (url.pathname === "/api/test-bark" && request.method === "POST") {
         // 遗留接口: 前端已改用 /api/test-push, 这里仅保留兼容
         const cfg = await getUserConfig(env, token);
+        const notification = testNotification();
         try {
-          await pushBark(cfg.barkKey, "猫眼场次监控", "这是一条测试推送, 云端 Bark 配置成功 ✅");
+          await pushBark(cfg.barkKey, notification.title, notification.content);
         } catch (e) {
           return json({ ok: false, error: e.message }, upstreamStatus(e.message));
         }
@@ -165,9 +167,10 @@ export default {
       // ---- 按当前选中渠道发送测试推送 ----
       if (url.pathname === "/api/test-push" && request.method === "POST") {
         const cfg = await getUserConfig(env, token);
+        const notification = testNotification();
         let label;
         try {
-          label = await pushNotify(cfg, "猫眼场次监控", "这是一条测试推送, 云端推送配置成功 ✅");
+          label = await pushNotify(cfg, notification.title, notification.content);
         } catch (e) {
           return json({ ok: false, error: e.message }, upstreamStatus(e.message));
         }

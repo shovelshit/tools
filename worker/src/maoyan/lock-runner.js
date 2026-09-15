@@ -3,12 +3,13 @@ import { findExactShows, findCompatibleShows, fetchSeatMap, createUnpaidOrder, O
 import { getLockSessionStatus, loadLockSession, removeLockSession } from "./lock-session.js";
 import {
   createLockRule, getLockRule, isLockRuleTerminal, putLockRule, removeLockRule,
-  RULE_KNOWN_ERRORS, lockNotificationContent
+  RULE_KNOWN_ERRORS
 } from "./lock-rule.js";
 import { getUserConfig } from "./user.js";
 import { pushNotify } from "./notify.js";
 import { lockError, lockLog } from "./log.js";
 import { withSeatFeedback } from "./seat-feedback.js";
+import { lockNotification } from "./notification-copy.js";
 
 const TOKEN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -43,9 +44,9 @@ async function notifyTerminal(env, tokenId, rule, deps) {
   const notify = deps.notify || pushNotify;
   const config = await (deps.getConfig || getUserConfig)(env, tokenId);
   // 与立即锁座共用同一份正文(座位渲染成「几排几座」), 避免两处副本各自漂移
-  const content = lockNotificationContent(rule);
+  const notification = lockNotification(rule);
   try {
-    await notify(config, rule.state === "locked" ? "猫眼锁座成功" : "猫眼锁座失败", content);
+    await notify(config, notification.title, notification.content);
   } catch {
     await saveRule(env, tokenId, rule, { notifyError: "通知发送失败" }, deps);
   }

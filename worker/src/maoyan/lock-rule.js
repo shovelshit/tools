@@ -9,6 +9,7 @@ import * as db from "./db.js";
 import { getUserConfig } from "./user.js";
 import { pushNotify } from "./notify.js";
 import { lockError, lockLog } from "./log.js";
+import { lockNotification } from "./notification-copy.js";
 
 // 这些错误会原样透传给前端(而不是笼统的"锁座参数无效")
 // 注意: 与上游(猫眼)相关的文案直接引用 lock-client 导出的常量, 避免文案漂移
@@ -154,22 +155,12 @@ function selectedSeats(seatMap, seatNos, { ignoreAvailability = false } = {}) {
 // 座位一律渲染成人看的「几排几座」(排号=rowId, 座号段按影厅口径自动判别), 不能直接扔内部标识。
 // 影厅名(rule.hall, 来自场次 th 字段)是用户核对座位的关键信息, 缺失时跳过该行。
 export function lockNotificationContent(rule) {
-  // 优先用创建时持久化的 label(全图普查定段, 见 selectedSeats); 旧规则无 label 才二次判别
-  const seats = rule?.seats || [];
-  const fallbackSegment = seatSegmentOf(seats);
-  const labels = seats.map((seat) => seat?.label || seatDisplayLabel(seat, fallbackSegment)).join("、");
-  const hall = rule?.hall ? `${rule.hall}\n` : "";
-  const targetTime = rule?.targetTime || rule?.templateTime || "";
-  const delta = Number(rule?.timeDeltaMinutes);
-  const fuzzyTime = rule?.matchMode === "fuzzy" && Number.isFinite(delta)
-    ? `\n模板场次 ${rule.templateTime}，实际场次偏差 ${delta >= 0 ? "+" : ""}${delta} 分钟`
-    : "";
-  return `${rule.cinemaName} ${rule.movieName}\n${hall}${rule.targetDate} ${targetTime}${fuzzyTime}\n${labels}` +
-    (rule.state === "locked" && rule.payLeftSecond !== null ? `\n剩余支付时间 ${rule.payLeftSecond} 秒` : "");
+  return lockNotification(rule).content;
 }
 
 async function notifyLockedRule(config, rule, notify = pushNotify) {
-  await notify(config, "猫眼锁座成功", lockNotificationContent(rule));
+  const notification = lockNotification(rule);
+  await notify(config, notification.title, notification.content);
 }
 
 export async function getLockRule(env, tokenId) {

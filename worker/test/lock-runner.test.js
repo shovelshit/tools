@@ -214,9 +214,9 @@ test("scheduled lock push renders hall row/seat instead of the internal identifi
 
   assert.equal(result.ok, true);
   assert.equal(stored.state, "locked");
-  assert.equal(notification.title, "猫眼锁座成功");
+  assert.equal(notification.title, "✅ 锁座成功｜测试电影");
   // 实测样本: 1-12-1 是 1 区第 1 排第 12 号座 => 票面「1排12座」
-  assert.equal(notification.content, "测试影院 测试电影\n2026-09-12 20:00\n1排12座\n剩余支付时间 600 秒");
+  assert.equal(notification.content, "🏢 测试影院\n📅 2026-09-12 20:00\n💺 1排12座\n\n💳 已创建待支付订单，请尽快前往猫眼付款\n⏳ 猫眼返回剩余支付时间：600 秒");
   assert.equal(notification.content.includes("1-12-1"), false);
 });
 
@@ -224,14 +224,18 @@ test("scheduled lock failure push keeps the readable seat label", async () => {
   const stored = rule({ seats: [{ seatNo: "1-12-1", rowId: "1", columnId: "10", type: "N" }] });
   let notification;
   await runOneLockRule(await runtime(), tokenId, deps(stored, {
+    fetchSeats: async () => ({
+      seqNo: "200", sectionId: "1", sectionName: "1号厅",
+      seats: [{ seatNo: "1-12-1", rowId: "1", columnId: "10", available: true }]
+    }),
     createOrder: async () => { throw new OrderAttemptError("rejected", false); },
     notify: async (_config, title, content) => { notification = { title, content }; }
   }));
 
   assert.equal(stored.state, "failed");
-  assert.equal(notification.title, "猫眼锁座失败");
+  assert.equal(notification.title, "❌ 锁座失败｜测试电影");
   // 失败通知没有支付倒计时
-  assert.equal(notification.content, "测试影院 测试电影\n2026-09-12 20:00\n1排12座");
+  assert.equal(notification.content, "🏢 测试影院\n📅 2026-09-12 20:00\n💺 1排12座\n📌 原因：猫眼拒绝创建订单\n\n👉 请查看当前座位，重新选择");
 });
 
 test("automation marks a past China target date expired before provider calls", async () => {
@@ -275,9 +279,9 @@ test("automation locks a same-hall show within thirty minutes and notifies with 
   assert.equal(stored.matchMode, "fuzzy");
   assert.equal(stored.timeDeltaMinutes, 10);
   assert.equal(orderCalls, 1);
-  assert.equal(notification.title, "猫眼锁座成功");
+  assert.equal(notification.title, "✅ 锁座成功｜测试电影");
   assert.match(notification.content, /2026-09-12 18:50/);
-  assert.match(notification.content, /模板场次 18:40，实际场次偏差 \+10 分钟/);
+  assert.match(notification.content, /🔄 场次匹配：18:40 → 18:50（\+10分钟）/);
 });
 
 test("automation keeps waiting when no same-hall nearby show exists", async () => {
@@ -311,7 +315,7 @@ test("automation turns an ambiguous nearby show into a notified failure", async 
 
   assert.equal(stored.state, "failed");
   assert.match(stored.lastError, /多个同厅型/);
-  assert.equal(notification.title, "猫眼锁座失败");
+  assert.equal(notification.title, "❌ 锁座失败｜测试电影");
 });
 
 test("automation notifies when a selected nearby show cannot load its seat map", async () => {
@@ -325,7 +329,7 @@ test("automation notifies when a selected nearby show cannot load its seat map",
   }));
 
   assert.equal(stored.state, "failed");
-  assert.equal(notification.title, "猫眼锁座失败");
+  assert.equal(notification.title, "❌ 锁座失败｜测试电影");
   assert.match(notification.content, /2026-09-12 18:50/);
 });
 
@@ -378,7 +382,7 @@ test("automation notifies when a fuzzy order result is uncertain", async () => {
   }));
 
   assert.equal(stored.state, "unknown");
-  assert.equal(notification.title, "猫眼锁座失败");
+  assert.equal(notification.title, "⚠️ 订单结果待确认｜测试电影");
   assert.match(notification.content, /2026-09-12 18:50/);
 });
 

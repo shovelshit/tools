@@ -185,11 +185,19 @@ test("an immediate successful lock sends the same terminal notification after pe
 
   assert.equal(locked.state, "locked");
   assert.equal(notification.config.barkKey, "test-key");
-  assert.equal(notification.title, "猫眼锁座成功");
+  assert.equal(notification.title, "✅ 锁座成功｜测试电影");
   // 推送里必须是人看的「几排几座」, 不能是内部座位标识; 座号取创建时全图普查持久化的 label
   // (夹具数据为「区-排-座」: seg2=rowId 恒定、seg3 逐座变化 → 6排18座)。
   // 影厅名也要带上, 便于用户核对(如 2号杜比巨幕厅)
-  assert.equal(notification.content, "测试影院 测试电影\n2号杜比巨幕厅-1.3米以下儿童需要购票\n2026-09-11 20:00\n6排18座\n剩余支付时间 600 秒");
+  assert.equal(notification.content, [
+    "🏢 测试影院",
+    "🎞 2号杜比巨幕厅-1.3米以下儿童需要购票",
+    "📅 2026-09-11 20:00",
+    "💺 6排18座",
+    "",
+    "💳 已创建待支付订单，请尽快前往猫眼付款",
+    "⏳ 猫眼返回剩余支付时间：600 秒"
+  ].join("\n"));
 });
 
 test("an immediate notification failure keeps the successful order locked", async () => {
@@ -316,7 +324,7 @@ test("projects fuzzy target show details and renders the actual time in notifica
   assert.equal(Object.hasOwn(projected, "secret"), false);
   assert.equal(
     lockNotificationContent(rule),
-    "测试影院 测试电影\n1号激光IMAX厅\n2026-09-12 18:50\n模板场次 18:40，实际场次偏差 +10 分钟\n6排18座"
+    "🏢 测试影院\n🎞 1号激光IMAX厅\n📅 2026-09-12 18:50\n💺 6排18座\n🔄 场次匹配：18:40 → 18:50（+10分钟）\n📌 原因：所选未来座位不可用或影厅布局已变化\n\n👉 请查看当前座位，重新选择"
   );
 });
 
@@ -331,7 +339,7 @@ test("legacy exact rules keep using the template time in notifications", () => {
       seats: [{ label: "6排18座" }],
       state: "failed"
     }),
-    "测试影院 测试电影\n1号厅\n2026-09-12 18:40\n6排18座"
+    "🏢 测试影院\n🎞 1号厅\n📅 2026-09-12 18:40\n💺 6排18座\n📌 原因：锁座未完成\n\n👉 请查看当前座位，重新选择"
   );
 });
 
