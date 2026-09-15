@@ -3,143 +3,222 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>猫眼影院场次监控 - 云端版</title>
-  <link rel="stylesheet" href="style.css?v=20260915b" />
+  <title>猫眼影院场次监控</title>
+  <link rel="stylesheet" href="style.css?v=20260915d" />
 </head>
 <body>
-  <!-- 登录层: 首次进入 / 切换连接时显示 -->
+  <div id="ambient-background" class="ambient-background" aria-hidden="true">
+    <span class="ambient-plate plate-one"></span>
+    <span class="ambient-plate plate-two"></span>
+    <span class="ambient-plate plate-three"></span>
+    <span class="ambient-plate plate-four"></span>
+  </div>
+
   <div id="login-overlay" class="overlay">
-    <div class="login-card">
-      <div class="login-logo">🎬</div>
-      <h1>猫眼影院场次监控</h1>
-      <p class="login-sub">云端定时检查影院新增场次 · 支持 Bark / Server酱 推送到手机</p>
+    <section class="login-card glass-panel" aria-labelledby="login-title">
+      <div class="login-logo" aria-hidden="true">M</div>
+      <p class="eyebrow">MAOYAN MONITOR</p>
+      <h1 id="login-title">连接监控服务</h1>
+      <p class="login-sub">输入 Worker 地址和访问令牌，连接后继续配置影院与通知。</p>
       <div class="form-grid login-grid">
-        <label for="worker-url">服务地址</label>
+        <label for="worker-url">Worker 地址</label>
         <input id="worker-url" type="url" placeholder="默认使用本站服务，无需填写" autocomplete="url" />
         <label for="token-input">访问令牌</label>
         <input id="token-input" type="password" placeholder="请输入访问令牌" autocomplete="off" />
       </div>
       <div id="login-error" class="login-error hidden"></div>
-      <button id="btn-connect" class="btn primary block">进入监控</button>
       <div id="login-hint" class="login-hint hidden"></div>
-    </div>
+      <button id="btn-connect" class="btn primary block" type="button">连接服务</button>
+    </section>
   </div>
 
-  <!-- 主页面: 连接成功后显示 -->
   <div id="main-page" class="container hidden">
-    <header>
-      <div class="title-block">
-        <h1>猫眼影院场次监控</h1>
-        <span class="subtitle" id="page-sub">云端定时检查影院新增场次，Bark / Server酱 推送到手机</span>
-      </div>
-      <div class="header-right">
-        <div id="status-line" class="status-line st-off">未连接</div>
-        <div id="worker-profile" class="connection-state">配置：未连接</div>
-        <div id="worker-security" class="connection-state">未连接</div>
+    <div class="app-workspace">
+      <header class="scene-bar">
+        <div class="brand-mark" aria-hidden="true">M</div>
+        <div class="title-block">
+          <h1>猫眼场次监控</h1>
+          <span class="subtitle" id="page-sub">监控配置</span>
+        </div>
+        <div class="scene-status">
+          <div id="status-line" class="status-line st-off">未连接</div>
+          <div id="worker-profile" class="connection-state">配置：未连接</div>
+          <div id="worker-security" class="connection-state">未连接</div>
+        </div>
         <div id="update-status" class="update-status hidden"><span id="update-text"></span><button id="btn-open-update" class="btn small ghost" type="button">查看更新</button></div>
-        <button id="btn-logout" class="btn small ghost">切换连接</button>
-        <a class="btn small ghost" href="../">🧰 工具箱</a>
-      </div>
-    </header>
+        <div class="header-actions">
+          <button id="btn-logout" class="btn small ghost" type="button">切换连接</button>
+          <a class="btn small ghost" href="../">工具箱</a>
+        </div>
+      </header>
 
-    <main class="main-grid">
-      <!-- 左列: 影院设置 + 监控设置与控制 + 使用说明 -->
-      <div class="col col-settings">
-        <section class="card">
-          <h2>影院设置</h2>
-          <div class="form-grid">
-            <label for="city-input">选择城市</label>
-            <div class="suggest-wrap">
-              <input id="city-input" type="text" placeholder="输入城市名，如：北京" autocomplete="off" />
-              <div id="city-dropdown" class="suggest-dropdown hidden"></div>
-            </div>
-            <label for="cinema-search">搜索影院</label>
-            <div class="suggest-wrap">
-              <div class="row no-margin">
-                <input id="cinema-search" type="text" placeholder="先选城市，再输入影院名模糊搜索" autocomplete="off" />
-                <button id="btn-search-cinema" class="btn small ghost">搜索</button>
-              </div>
-              <div id="cinema-dropdown" class="suggest-dropdown hidden"></div>
-            </div>
+      <main class="workflow-shell">
+        <aside class="workflow-progress glass-panel" aria-label="设置进度">
+          <div class="progress-heading">
+            <span>设置进度</span>
+            <span id="workflow-count">2 / 4</span>
           </div>
-          <div id="cinema-name" class="cinema-name hidden"></div>
-        </section>
-
-        <section class="card">
-          <h2>监控设置与控制</h2>
-          <div class="form-grid">
-            <div id="push-channel-row" class="channel-row span-all">
-              <span class="channel-label">推送渠道</span>
-              <div class="channel-opts">
-                <label><input type="radio" name="push-channel" value="bark" checked /> Bark（iPhone）</label>
-                <label><input type="radio" name="push-channel" value="serverchan" /> Server酱（微信）</label>
-              </div>
-              <button id="btn-test-push" class="btn small ghost">保存并测试</button>
-            </div>
-            <div id="push-bark-row" class="row-span-all">
-              <label for="bark-input">推送密钥</label>
-              <input id="bark-input" type="text" placeholder="Bark Key 或 URL，如 https://api.day.app/xxxxx" autocomplete="off" />
-              <div class="push-hint muted">
-                没有 Bark？<a href="https://apps.apple.com/cn/app/id1403753865" data-external-link target="_blank" rel="noopener">App Store 下载 Bark</a>，打开后在 App 内复制 Key
-              </div>
-            </div>
-            <div id="push-serverchan-row" class="row-span-all hidden">
-              <label for="serverchan-input">推送密钥（Server酱 SendKey）</label>
-              <input id="serverchan-input" type="text" placeholder="SCT 开头的 SendKey" autocomplete="off" />
-              <div class="push-hint muted">
-                微信扫码登录 <a href="https://sct.ftqq.com/sendkey" data-external-link target="_blank" rel="noopener">获取 SendKey</a>（免费版每天 5 条）
-              </div>
-            </div>
-          </div>
-          <div class="row">
-            <span class="spacer"></span>
-            <button id="btn-lock-seats" class="btn small ghost" disabled title="配置自动锁座">
-              <span aria-hidden="true">🔒</span><span>锁座（Beta）</span>
-            </button>
-            <button id="btn-toggle-monitor" class="btn small ghost danger">停止监控</button>
-          </div>
-          <div class="muted tip-line" id="batch-tip">云端按定时批次自动检查（当前每 30 分钟一批，以服务端为准）。改动会自动保存，无需手动操作</div>
-        </section>
-
-        <section class="card grow muted-card">
-          <h2>使用说明</h2>
-          <ol class="help-list">
-            <li>在登录页填访问令牌，点「进入监控」（同域打开无需填地址）</li>
-            <li>选择城市，模糊搜索影院并加载</li>
-            <li>勾选电影，选择推送渠道（Bark 或 Server酱）并填好推送密钥，点「保存并测试」推送一次</li>
-            <li>测试成功后点「开始监控」即生效；每次开始 30 天内有效，到期会自动停止</li>
+          <ol class="step-list">
+            <li class="workflow-step is-complete">
+              <button type="button" data-workflow-step="1" aria-label="连接服务，已完成">
+                <span class="step-number" aria-hidden="true">1</span>
+                <span class="step-copy"><strong>连接服务</strong><small>已完成</small></span>
+              </button>
+            </li>
+            <li class="workflow-step is-active">
+              <button type="button" data-workflow-step="2" aria-current="step">
+                <span class="step-number" aria-hidden="true">2</span>
+                <span class="step-copy"><strong>选择影院</strong><small>当前步骤</small></span>
+              </button>
+            </li>
+            <li class="workflow-step">
+              <button type="button" data-workflow-step="3" disabled>
+                <span class="step-number" aria-hidden="true">3</span>
+                <span class="step-copy"><strong>选择影片</strong><small>等待影院</small></span>
+              </button>
+            </li>
+            <li class="workflow-step">
+              <button type="button" data-workflow-step="4" disabled>
+                <span class="step-number" aria-hidden="true">4</span>
+                <span class="step-copy"><strong>通知与启动</strong><small>等待影片</small></span>
+              </button>
+            </li>
           </ol>
-        </section>
-      </div>
-
-      <!-- 中列: 电影列表 -->
-      <div class="col col-movies">
-        <section class="card grow">
-          <div class="row space-between">
-            <h2>选择要监控的电影</h2>
-            <button id="btn-toggle-all" class="btn small ghost">全选</button>
+          <div class="progress-meta">
+            <span>监控时段</span>
+            <strong>07:00 - 22:59</strong>
           </div>
-          <div id="movie-count" class="muted">连接后自动加载影片</div>
-          <div id="movie-list" class="movie-list">
-            <div class="muted empty-tip">连接云端后显示该影院在映影片</div>
-          </div>
-        </section>
-      </div>
+        </aside>
 
-      <!-- 右列: 变化记录 -->
-      <div class="col col-log">
-        <section class="card grow">
-          <div class="row space-between">
-            <h2>变化记录</h2>
-            <div class="row no-margin">
-              <button id="btn-check" class="btn small ghost">立即检查</button>
-              <button id="btn-refresh" class="btn small ghost">刷新</button>
+        <section class="workflow-main glass-panel" aria-live="polite">
+          <section class="workflow-view" data-workflow-panel="1" aria-labelledby="connection-step-title" aria-hidden="true">
+            <header class="panel-heading">
+              <div>
+                <p class="eyebrow">STEP 01</p>
+                <h2 id="connection-step-title">连接服务</h2>
+                <p>当前连接可用，可以继续配置或从顶部切换连接。</p>
+              </div>
+              <span class="panel-step-count">第 1 步，共 4 步</span>
+            </header>
+            <div class="panel-content connection-panel-content">
+              <div class="connection-summary" role="status">
+                <span class="connection-indicator" aria-hidden="true"></span>
+                <div><strong>监控服务已连接</strong><p>Worker 地址和访问令牌已通过验证。</p></div>
+              </div>
             </div>
-          </div>
-          <div id="log-panel" class="log-panel" aria-live="polite"></div>
+            <footer class="panel-actions">
+              <span class="autosave-state">连接状态正常</span>
+              <button id="btn-step-connection-next" class="btn primary" type="button">继续配置</button>
+            </footer>
+          </section>
+
+          <section class="workflow-view is-active" data-workflow-panel="2" aria-labelledby="cinema-step-title">
+            <header class="panel-heading">
+              <div>
+                <p class="eyebrow">STEP 02</p>
+                <h2 id="cinema-step-title">选择影院</h2>
+                <p>先选择城市，再搜索需要监控的影院。</p>
+              </div>
+              <span class="panel-step-count">第 2 步，共 4 步</span>
+            </header>
+            <div class="panel-content">
+              <div class="form-grid cinema-form">
+                <label for="city-input">城市</label>
+                <div class="suggest-wrap">
+                  <input id="city-input" type="text" placeholder="输入城市名，如：北京" autocomplete="off" />
+                  <div id="city-dropdown" class="suggest-dropdown hidden"></div>
+                </div>
+                <label for="cinema-search">影院</label>
+                <div class="suggest-wrap">
+                  <div class="row no-margin search-row">
+                    <input id="cinema-search" type="text" placeholder="先选城市，再输入影院名" autocomplete="off" />
+                    <button id="btn-search-cinema" class="btn small ghost" type="button">搜索</button>
+                  </div>
+                  <div id="cinema-dropdown" class="suggest-dropdown hidden"></div>
+                </div>
+              </div>
+              <div id="cinema-name" class="cinema-name hidden"></div>
+            </div>
+            <footer class="panel-actions">
+              <span class="autosave-state">选择后自动保存</span>
+              <button id="btn-step-cinema-next" class="btn primary" type="button" disabled>下一步</button>
+            </footer>
+          </section>
+
+          <section class="workflow-view" data-workflow-panel="3" aria-labelledby="movie-step-title" aria-hidden="true">
+            <header class="panel-heading">
+              <div>
+                <p class="eyebrow">STEP 03</p>
+                <h2 id="movie-step-title">选择影片</h2>
+                <p>勾选需要持续跟踪场次变化的影片。</p>
+              </div>
+              <div class="heading-tools"><span class="panel-step-count">第 3 步，共 4 步</span><button id="btn-toggle-all" class="btn small ghost" type="button">全选</button></div>
+            </header>
+            <div class="panel-content movie-panel-content">
+              <div id="movie-count" class="muted">连接后自动加载影片</div>
+              <div id="movie-list" class="movie-list">
+                <div class="muted empty-tip">选择影院后显示该影院在映影片</div>
+              </div>
+            </div>
+            <footer class="panel-actions">
+              <button id="btn-step-movie-back" class="btn ghost" type="button">上一步</button>
+              <span class="autosave-state">勾选会自动保存</span>
+              <button id="btn-step-movie-next" class="btn primary" type="button" disabled>下一步</button>
+            </footer>
+          </section>
+
+          <section class="workflow-view" data-workflow-panel="4" aria-labelledby="notify-step-title" aria-hidden="true">
+            <header class="panel-heading">
+              <div>
+                <p class="eyebrow">STEP 04</p>
+                <h2 id="notify-step-title">通知与启动</h2>
+                <p>测试推送后启动监控，变化记录会保留在下方。</p>
+              </div>
+              <span class="panel-step-count">第 4 步，共 4 步</span>
+            </header>
+            <div class="panel-content notify-content">
+              <div class="form-grid notify-form">
+                <div id="push-channel-row" class="channel-row span-all">
+                  <span class="channel-label">推送渠道</span>
+                  <div class="channel-opts" role="radiogroup" aria-label="推送渠道">
+                    <label><input type="radio" name="push-channel" value="bark" checked /><span>Bark · iPhone</span></label>
+                    <label><input type="radio" name="push-channel" value="serverchan" /><span>Server酱 · 微信</span></label>
+                  </div>
+                </div>
+                <div id="push-bark-row" class="row-span-all">
+                  <label for="bark-input">推送密钥</label>
+                  <input id="bark-input" type="text" placeholder="Bark Key 或 URL，如 https://api.day.app/xxxxx" autocomplete="off" />
+                  <div class="push-hint muted">没有 Bark？<a href="https://apps.apple.com/cn/app/id1403753865" data-external-link target="_blank" rel="noopener">下载 Bark</a> 并在 App 内复制 Key</div>
+                </div>
+                <div id="push-serverchan-row" class="row-span-all hidden">
+                  <label for="serverchan-input">推送密钥</label>
+                  <input id="serverchan-input" type="text" placeholder="SCT 开头的 SendKey" autocomplete="off" />
+                  <div class="push-hint muted"><a href="https://sct.ftqq.com/sendkey" data-external-link target="_blank" rel="noopener">登录 Server酱</a> 获取 SendKey</div>
+                </div>
+              </div>
+              <div class="control-strip">
+                <button id="btn-test-push" class="btn small ghost" type="button">保存并测试</button>
+                <span class="spacer"></span>
+                <button id="btn-lock-seats" class="btn small ghost" type="button" disabled title="配置自动锁座">锁座</button>
+                <button id="btn-toggle-monitor" class="btn primary" type="button">开始监控</button>
+              </div>
+              <div class="muted tip-line" id="batch-tip">云端按定时批次自动检查（当前每 30 分钟一批，以服务端为准）。改动会自动保存。</div>
+              <section class="activity-section" aria-labelledby="activity-title">
+                <div class="activity-heading">
+                  <div><h3 id="activity-title">变化记录</h3><p>监控结果与操作状态</p></div>
+                  <div class="row no-margin"><button id="btn-check" class="btn small ghost" type="button">立即检查</button><button id="btn-refresh" class="btn small ghost" type="button">刷新</button></div>
+                </div>
+                <div id="log-panel" class="log-panel" aria-live="polite"></div>
+              </section>
+            </div>
+            <footer class="panel-actions">
+              <button id="btn-step-notify-back" class="btn ghost" type="button">上一步</button>
+              <span id="workflow-ready-state" class="autosave-state">请先测试推送</span>
+            </footer>
+          </section>
         </section>
-      </div>
-    </main>
+      </main>
+    </div>
   </div>
 
   <div id="lock-overlay" class="lock-overlay hidden" role="presentation">
@@ -182,10 +261,10 @@
         <section class="lock-section" id="lock-section-seats">
           <div class="lock-seat-heading">
             <h3>座位选择</h3>
-              <div class="lock-heading-tools">
-                <div class="lock-legend" aria-label="座位图图例"><span class="legend-seat available"></span>可选 <span class="legend-seat selected"></span>已选 <span class="legend-seat unavailable"></span>不可选</div>
-                <button id="btn-lock-seat-feedback" class="btn small ghost lock-feedback" type="button">反馈座位问题</button>
-              </div>
+            <div class="lock-heading-tools">
+              <div class="lock-legend" aria-label="座位图图例"><span class="legend-seat available"></span>可选 <span class="legend-seat selected"></span>已选 <span class="legend-seat unavailable"></span>不可选</div>
+              <button id="btn-lock-seat-feedback" class="btn small ghost lock-feedback" type="button">反馈座位问题</button>
+            </div>
           </div>
           <div class="lock-zoom-bar">
             <span class="muted">缩放</span>
@@ -235,8 +314,9 @@
 
   <script src="runtime.js?v=20260915b"></script>
   <script src="secure-store.js?v=20260912b"></script>
-  <script src="ui.js?v=20260912b"></script>
-<script src="lock.js?v=20260914h"></script>
-<script src="app.js?v=20260915b"></script>
+  <script src="ui.js?v=20260915c"></script>
+  <script src="workflow.js?v=20260915d"></script>
+  <script src="lock.js?v=20260914h"></script>
+  <script src="app.js?v=20260915d"></script>
 </body>
 </html>

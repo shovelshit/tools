@@ -278,11 +278,16 @@ test("seat map centers, pans by drag, zooms at cursor; risk box only for inferre
   // 风险区: 仅推断座位展示, 门控期隐藏; 勾选仅在推断模式下必填
   assert.match(source, /setHidden\(els\.sectionRisk, !state\.session\?\.uploaded \|\| state\.seatMapIsTemplate !== true\)/);
   assert.match(source, /if \(state\.seatMapIsTemplate && !els\.risk\?\.checked\) return "请先勾选风险提示";/);
-  // 风险框红色
-  assert.match(readSource("style.css"), /\.lock-risk \{ padding: 10px 12px; border: 1px solid #f2b8b5; border-radius: 6px; background: #fdeceb; color: #b3261e;/);
+  // 风险框必须保持独立的边框、底色和文字色，具体设计 token 可随主题调整
+  const riskRule = readSource("style.css").match(/\.lock-risk\s*\{([^}]*)\}/)?.[1] || "";
+  assert.match(riskRule, /border:/);
+  assert.match(riskRule, /background:/);
+  assert.match(riskRule, /color:/);
   // 画布式容器: 滚轮缩放/拖动平移
   assert.match(html, /滚轮缩放 · 按住拖动 · 双指捏合/);
-  assert.match(readSource("style.css"), /\.lock-seat-scroll \{ overflow: hidden;.*cursor: grab;/);
+  const seatScrollRule = readSource("style.css").match(/\.lock-seat-scroll\s*\{([^}]*)\}/)?.[1] || "";
+  assert.match(seatScrollRule, /overflow:\s*hidden/);
+  assert.match(seatScrollRule, /cursor:\s*grab/);
 });
 
 test("seat map auto-detects swapped seatNo segment order (Dolby vs laser IMAX halls)", () => {

@@ -1,11 +1,9 @@
-name: Electron unsigned packages
+name: Electron releases
 
 on:
   workflow_dispatch:
   push:
-    branches: [main, master]
-    tags: ["v*"]
-    paths: ["desktop/**", "pages/maoyan/**", "worker/**", ".github/workflows/electron.yml"]
+    branches: [master]
   pull_request:
     paths: ["desktop/**", "pages/maoyan/**", "worker/**", ".github/workflows/electron.yml"]
 
@@ -13,14 +11,8 @@ permissions:
   contents: read
 
 jobs:
-  package:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    env:
-      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+  verify:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -32,6 +24,60 @@ jobs:
       - run: npm --prefix worker test
       - run: npm --prefix desktop test
       - run: node --test pages/maoyan/app.test.cjs pages/maoyan/lock.test.cjs pages/maoyan/runtime.test.cjs
+
+  prepare_release:
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.23.2"
+      - name: Derive release version
+        id: version
+        shell: bash
+        run: |
+          base_version="$(node -p "require('./desktop/package.json').version")"
+          release_version="${base_version%.*}.${GITHUB_RUN_NUMBER}"
+          echo "version=$release_version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$release_version" >> "$GITHUB_OUTPUT"
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --draft --generate-notes --title "Maoyan Monitor $RELEASE_TAG"
+
+  package_release:
+    needs: prepare_release
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_TAG: ${{ needs.prepare_release.outputs.tag }}
+      RELEASE_VERSION: ${{ needs.prepare_release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.23.2"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm --prefix desktop ci
+      - name: Set application version
+        shell: bash
+        run: npm --prefix desktop pkg set version="$RELEASE_VERSION"
       - name: Build unsigned macOS arm64 and x64
         if: runner.os == 'macOS'
         run: npm --prefix desktop run package:mac
@@ -40,14 +86,17 @@ jobs:
         run: npm --prefix desktop run package:win
       - name: Launch packaged local page and verify asar contents
         run: npm --prefix desktop run test:smoke -- --packaged
-      - name: SHA-256 macOS artifacts
+      - name: SHA-256 macOS release assets
         if: runner.os == 'macOS'
         working-directory: desktop/dist
         run: |
-          for artifact in maoyan-*.dmg maoyan-*.zip; do
-            shasum -a 256 "$artifact" > "$artifact.sha256"
+          for asset in maoyan-*.dmg maoyan-*.zip; do
+            shasum -a 256 "$asset" > "$asset.sha256"
           done
-      - name: SHA-256 Windows artifacts
+      - name: Upload macOS release assets
+        if: runner.os == 'macOS'
+        run: gh release upload "$RELEASE_TAG" desktop/dist/maoyan-*.dmg desktop/dist/maoyan-*.zip desktop/dist/maoyan-*.sha256 --clobber
+      - name: SHA-256 Windows release assets
         if: runner.os == 'Windows'
         shell: pwsh
         working-directory: desktop/dist
@@ -59,12 +108,90 @@ jobs:
             if (@($hash).Count -ne 1) { throw "Missing SHA-256 for $($_.Name)" }
             "$hash  $($_.Name)" | Set-Content -Encoding ascii "$($_.FullName).sha256"
           }
-      - uses: actions/upload-artifact@v4
-        with:
-          name: maoyan-unsigned-${{ runner.os }}
-          if-no-files-found: error
-          path: |
-            desktop/dist/maoyan-*.dmg
-            desktop/dist/maoyan-*.zip
-            desktop/dist/maoyan-*.exe
-            desktop/dist/maoyan-*.sha256
+      - name: Upload Windows release assets
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $assets = Get-ChildItem desktop/dist/maoyan-*.exe, desktop/dist/maoyan-*.zip, desktop/dist/maoyan-*.sha256 | ForEach-Object { $_.FullName }
+          if (@($assets).Count -eq 0) { throw "No Windows release assets found" }
+          gh release upload $env:RELEASE_TAG $assets --clobber
+
+  publish_release:
+    needs: [prepare_release, package_release]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Wait for earlier master releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          while true; do
+            prior_run="$(gh api --method GET --paginate --slurp \
+              "repos/$GITHUB_REPOSITORY/actions/workflows/electron.yml/runs" \
+              -f branch=master -f event=push -f per_page=100 \
+              --jq "[.[].workflow_runs[] | select((.run_number < $GITHUB_RUN_NUMBER) and (.status != \"completed\"))] | min_by(.run_number) | .run_number // empty")"
+            if [ -z "$prior_run" ]; then
+              break
+            fi
+            echo "Waiting for earlier release run $prior_run"
+            sleep 20
+          done
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.prepare_release.outputs.tag }}
+        shell: bash
+        run: |
+          newer_success="$(gh api --method GET --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/electron.yml/runs" \
+            -f branch=master -f event=push -f per_page=100 \
+            --jq "[.[].workflow_runs[] | select((.run_number > $GITHUB_RUN_NUMBER) and (.conclusion == \"success\"))] | min_by(.run_number) | .run_number // empty")"
+          latest_flag="--latest"
+          if [ -n "$newer_success" ]; then
+            latest_flag="--latest=false"
+          fi
+          gh release edit "$RELEASE_TAG" --draft=false "$latest_flag" --repo "$GITHUB_REPOSITORY"
+
+  cleanup_release:
+    needs: [prepare_release, package_release, publish_release]
+    if: ${{ always() && needs.prepare_release.result != 'skipped' && needs.prepare_release.outputs.tag != '' && needs.publish_release.result != 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Remove incomplete release and tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.prepare_release.outputs.tag }}
+        shell: bash
+        run: |
+          retry_gh() {
+            local attempt
+            for attempt in 1 2 3 4; do
+              if "$@"; then
+                return 0
+              fi
+              if [ "$attempt" -eq 4 ]; then
+                return 1
+              fi
+              sleep $((attempt * 2))
+            done
+          }
+
+          release_id="$(retry_gh gh api --method GET --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/releases" -f per_page=100 \
+            --jq "[.[][] | select((.tag_name == \"$RELEASE_TAG\") and (.draft == true))][0].id // empty")" || exit 1
+          if [ -z "$release_id" ]; then
+            exit 0
+          fi
+
+          retry_gh gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$release_id" || exit 1
+          tag_exists="$(retry_gh gh api --method GET \
+            "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$RELEASE_TAG" \
+            --jq "[.[] | select(.ref == \"refs/tags/$RELEASE_TAG\")] | length")" || exit 1
+          if [ "$tag_exists" -gt 0 ]; then
+            retry_gh gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$RELEASE_TAG" || exit 1
+          fi

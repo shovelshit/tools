@@ -28,6 +28,12 @@ const els = {
   cinemaDropdown: $("cinema-dropdown"),
   btnSearchCinema: $("btn-search-cinema"),
   cinemaName: $("cinema-name"),
+  btnStepConnectionNext: $("btn-step-connection-next"),
+  btnStepCinemaNext: $("btn-step-cinema-next"),
+  btnStepMovieBack: $("btn-step-movie-back"),
+  btnStepMovieNext: $("btn-step-movie-next"),
+  btnStepNotifyBack: $("btn-step-notify-back"),
+  workflowReadyState: $("workflow-ready-state"),
   // 监控设置
   btnCheck: $("btn-check"),
   btnTestPush: $("btn-test-push"),
@@ -68,11 +74,47 @@ let selectedCinema = null; // {id, name}
 let selectedCinemaId = ""; // 当前影院 ID(搜索选中/加载成功/云端恢复三处写入, 替代旧的手动输入框)
 let cinemaSelected = false; // 影院已在影院设置中选择或加载(锁座入口门槛)
 let cinemaSearchTimer = null;
+let workflowStep = null;
 
 // 同域部署下 Worker 地址可留空(直接请求当前域名); 其他托管环境给出默认后端
 const SAME_ORIGIN_HOSTS = ["ltools.asia", "www.ltools.asia", "tools-a65.pages.dev"];
 const SAME_ORIGIN = SAME_ORIGIN_HOSTS.includes(location.hostname);
 const DEFAULT_WORKER = SAME_ORIGIN ? "" : "https://ltools.asia";
+
+function syncWorkflowUi(requestedStep = workflowStep) {
+  const state = window.maoyanWorkflow.deriveWorkflowState({
+    connected,
+    cinemaSelected,
+    selectedMovieCount: getSelectedIds().length,
+    pushVerified,
+    monitorEnabled,
+    requestedStep,
+  });
+  workflowStep = state.activeStep;
+  window.maoyanWorkflow.renderWorkflow(document, state);
+  if (els.btnStepCinemaNext) els.btnStepCinemaNext.disabled = !state.steps[1].complete;
+  if (els.btnStepMovieNext) els.btnStepMovieNext.disabled = !state.steps[2].complete;
+  if (els.workflowReadyState) {
+    els.workflowReadyState.textContent = monitorEnabled
+      ? "监控已启动"
+      : (pushVerified ? "推送已验证" : "请先测试推送");
+  }
+}
+
+function navigateWorkflow(step) {
+  workflowStep = step;
+  syncWorkflowUi();
+}
+
+document.querySelectorAll("[data-workflow-step]").forEach((button) => {
+  button.addEventListener("click", () => navigateWorkflow(Number(button.dataset.workflowStep)));
+});
+els.btnStepConnectionNext?.addEventListener("click", () => navigateWorkflow(2));
+els.btnStepCinemaNext?.addEventListener("click", () => navigateWorkflow(3));
+els.btnStepMovieBack?.addEventListener("click", () => navigateWorkflow(2));
+els.btnStepMovieNext?.addEventListener("click", () => navigateWorkflow(4));
+els.btnStepNotifyBack?.addEventListener("click", () => navigateWorkflow(3));
+window.maoyanWorkflow.bindAmbientMotion({ window, document });
 
 // ---------------- 基础 ----------------
 function normalizedWorkerUrl() {
@@ -251,6 +293,7 @@ function resetProfileUi(nextProfileKey) {
   saving = false;
   savePending = false;
   restoring = false;
+  workflowStep = 1;
   allCities = [];
   els.cityInput.value = "";
   els.cityInput.disabled = false;
@@ -273,6 +316,7 @@ function resetProfileUi(nextProfileKey) {
   lockController.reset?.();
   lockController.syncAvailability();
   updateMonitorBtn();
+  syncWorkflowUi();
 }
 
 function connectionErrorMessage(error, workerUrl) {
@@ -322,6 +366,8 @@ function showLoginHint(msg) {
 function enterMainPage() {
   els.loginOverlay.classList.add("hidden");
   els.mainPage.classList.remove("hidden");
+  workflowStep = null;
+  syncWorkflowUi();
 }
 
 async function connect() {
@@ -443,6 +489,8 @@ async function restoreConfig() {
       : { cinemaId: String(cloudConfig.cinemaId || ""), selectedMovieIds: (cloudConfig.selectedMovieIds || []).map(String) };
     lastSavedSig = JSON.stringify(pushConfigBody(baseline));
     restoring = false;
+    workflowStep = null;
+    syncWorkflowUi();
   }
 }
 
@@ -653,10 +701,13 @@ function fmtDate(ts) {
 function updateMonitorBtn() {
   els.btnToggleMonitor.textContent = monitorEnabled ? "停止监控" : "开始监控";
   els.btnToggleMonitor.classList.toggle("danger", monitorEnabled);
-  els.btnToggleMonitor.classList.toggle("success", !monitorEnabled);
+  els.btnToggleMonitor.classList.toggle("ghost", monitorEnabled);
+  els.btnToggleMonitor.classList.toggle("primary", !monitorEnabled);
+  els.btnToggleMonitor.classList.remove("success");
   const requiresPushTest = !monitorEnabled && !pushVerified;
   els.btnToggleMonitor.disabled = !connected || requiresPushTest;
   els.btnToggleMonitor.title = requiresPushTest ? "请先配置推送渠道，填好推送密钥并「保存并测试」" : "";
+  syncWorkflowUi();
 }
 
 els.btnToggleMonitor.addEventListener("click", async () => {
@@ -774,6 +825,7 @@ function chooseCity(c) {
   selectedCinema = null;
   cinemaSelected = false;
   lockController.syncAvailability();
+  syncWorkflowUi();
   els.cinemaSearch.value = "";
   els.cinemaSearch.disabled = false;
   els.btnSearchCinema.disabled = false;
@@ -876,6 +928,7 @@ els.cinemaSearch.addEventListener("input", () => {
   selectedCinema = null;
   cinemaSelected = false;
   lockController.syncAvailability();
+  syncWorkflowUi();
   scheduleCinemaSearch();
 });
 els.cinemaSearch.addEventListener("keydown", (e) => {
@@ -933,7 +986,7 @@ async function loadCinema(cinemaId, prevSelected, { restore = false } = {}) {
       if (!profileGeneration.isCurrent(generation) || seq !== cinemaLoadSeq) return true; // 过期响应: 已有更新的选择在加载, 丢弃本次结果(不更新界面/不保存云端)
       selectedCinemaId = String(res.cinemaId); // 以接口返回为准, 搜索与恢复两条路径在此汇合
       cinemaSelected = true;
-      els.cinemaName.textContent = `🎬 ${res.cinemaName}（ID: ${res.cinemaId}）`;
+      els.cinemaName.textContent = `${res.cinemaName}（ID: ${res.cinemaId}）`;
       els.cinemaName.classList.remove("hidden");
       const sel = prevSelected || new Set(getSelectedIds());
       cinemaMovies = res.movies.map((m) => ({ ...m, checked: sel.has(String(m.id)) }));
@@ -947,6 +1000,8 @@ async function loadCinema(cinemaId, prevSelected, { restore = false } = {}) {
         { cinemaId: String(res.cinemaId), selectedMovieIds: getSelectedIds() },
         { msg: `影院已保存到云端：${res.cinemaName}` }
       );
+      workflowStep = restore ? null : 3;
+      syncWorkflowUi();
       return true;
     } catch (e) {
       if (!profileGeneration.isCurrent(generation) || isStaleProfileError(e) || seq !== cinemaLoadSeq) return true; // 过期请求的失败不提示、不回滚新选择的状态
@@ -962,6 +1017,7 @@ async function loadCinema(cinemaId, prevSelected, { restore = false } = {}) {
         log("error", "加载影院失败: " + e.message);
         els.movieList.innerHTML = '<div class="muted empty-tip">加载失败，请重试</div>';
       }
+      syncWorkflowUi();
       return false;
     } finally {
       lockController.syncAvailability();
@@ -1050,6 +1106,7 @@ function renderShowtimes(m, box) {
 function syncCount() {
   els.movieCount.textContent = `共 ${cinemaMovies.length} 部在映影片，已勾选 ${getSelectedIds().length} 部`;
   lockController.syncAvailability();
+  syncWorkflowUi();
 }
 
 els.btnToggleAll.addEventListener("click", () => {
@@ -1169,7 +1226,7 @@ function updateBatchTip() {
     `云端按定时批次自动检查（${cronText}）。停止监控不会丢失配置，可随时恢复`;
   // 页面副标题同步展示实际批次与推送渠道
   if (els.pageSub) {
-    els.pageSub.textContent = `云端定时检查新增场次（${cronText}）· Bark / Server酱 推送到手机`;
+    els.pageSub.textContent = "监控配置";
   }
 }
 
