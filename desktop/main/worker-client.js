@@ -49,7 +49,9 @@ function readProfiles(filePath) {
       baseUrl: profile.baseUrl,
       updatedAt: profile.updatedAt,
       isLoopback: profile.isLoopback,
-      requiresHttpConfirmation: profile.requiresHttpConfirmation
+      requiresHttpConfirmation: profile.requiresHttpConfirmation,
+      httpRiskConfirmed: profile.httpRiskConfirmed === true,
+      httpSessionUploadConfirmed: profile.httpSessionUploadConfirmed === true
     }]));
   } catch {
     return {};
@@ -122,9 +124,17 @@ function createWorkerClient({ app, safeStorage, fetchImpl = globalThis.fetch, co
 
   async function requireHttpConfirmation(profile, confirmed, operation) {
     if (!profile.requiresHttpConfirmation) return;
+    const confirmationKey = operation === "session-upload" ? "httpSessionUploadConfirmed" : "httpRiskConfirmed";
+    if (profile[confirmationKey] === true) return false;
     if (!confirmed || !(await confirmHttp({ operation, profile: { ...profile } }))) {
       throw new Error("非本机 HTTP 服务需要确认安全风险");
     }
+    return true;
+  }
+
+  function persistProfile(profile) {
+    profiles[profile.baseUrl] = { ...profile };
+    writeProfiles(profilesPath, profiles);
   }
 
   async function send(profile, requestPath, { method = "GET", body, signal, onSend, sessionUpload = false } = {}) {
@@ -162,7 +172,14 @@ function createWorkerClient({ app, safeStorage, fetchImpl = globalThis.fetch, co
       profileGeneration += 1;
       pendingConnections += 1;
       try {
-        await requireHttpConfirmation(normalized, connection.httpRiskConfirmed === true, "connect");
+        const previousProfile = profiles[normalized.baseUrl];
+        const candidate = {
+          ...normalized,
+          // A newly supplied token changes the sensitive material sent over HTTP.
+          httpRiskConfirmed: previousProfile?.httpRiskConfirmed === true && connection.token === undefined,
+          httpSessionUploadConfirmed: previousProfile?.httpSessionUploadConfirmed === true
+        };
+        const httpRiskConfirmed = await requireHttpConfirmation(candidate, connection.httpRiskConfirmed === true, "connect");
 
         const suppliedToken = typeof connection.token === "string";
         if (suppliedToken) credentialStore.setToken(normalized.baseUrl, connection.token);
@@ -172,10 +189,11 @@ function createWorkerClient({ app, safeStorage, fetchImpl = globalThis.fetch, co
             baseUrl: normalized.baseUrl,
             updatedAt: new Date().toISOString(),
             isLoopback: normalized.isLoopback,
-            requiresHttpConfirmation: normalized.requiresHttpConfirmation
+            requiresHttpConfirmation: normalized.requiresHttpConfirmation,
+            httpRiskConfirmed: normalized.requiresHttpConfirmation && (candidate.httpRiskConfirmed || httpRiskConfirmed === true),
+            httpSessionUploadConfirmed: normalized.requiresHttpConfirmation && candidate.httpSessionUploadConfirmed
           };
-          profiles[normalized.baseUrl] = profile;
-          writeProfiles(profilesPath, profiles);
+          persistProfile(profile);
           activeProfileKey = normalized.baseUrl;
           return { status, profile: status?.profile ?? null, httpRisk: normalized.requiresHttpConfirmation };
         } catch (error) {
@@ -198,8 +216,12 @@ function createWorkerClient({ app, safeStorage, fetchImpl = globalThis.fetch, co
           if (pendingConnections || profileGeneration !== generation || activeProfileKey !== profile.baseUrl) throw safeError("disconnected");
         };
         checkCurrent();
-        await requireHttpConfirmation(profile, true, "session-upload");
+        const uploadConfirmed = await requireHttpConfirmation(profile, true, "session-upload");
         checkCurrent();
+        if (uploadConfirmed) {
+          profile.httpSessionUploadConfirmed = true;
+          persistProfile(profile);
+        }
         try {
           const result = await send(profile, "/api/lock/session", { method: "POST", body, signal, onSend, sessionUpload: true });
           if (result?.session?.uploaded !== true) throw safeError("unknown");
@@ -226,8 +248,12 @@ function createWorkerClient({ app, safeStorage, fetchImpl = globalThis.fetch, co
       if (!ALLOWED_METHODS.has(method)) throw new Error("请求方法无效");
       if (!activeProfileKey || !profiles[activeProfileKey]) throw new Error("尚未连接服务");
       const profile = profiles[activeProfileKey];
-      if (method === "POST" && pathValue.pathname === "/api/lock/session") {
-        await requireHttpConfirmation(profile, options.httpRiskConfirmed === true, "session-upload");
+      if (method === "POST" && /^\/api\/lock\/session\/?$/.test(pathValue.pathname)) {
+        const uploadConfirmed = await requireHttpConfirmation(profile, options.httpRiskConfirmed === true, "session-upload");
+        if (uploadConfirmed) {
+          profile.httpSessionUploadConfirmed = true;
+          persistProfile(profile);
+        }
       }
       return send(profile, pathValue.requestPath, { method, body: options.body });
     },

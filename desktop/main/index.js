@@ -1,11 +1,14 @@
 const path = require("node:path");
+const fs = require("node:fs/promises");
 const { pathToFileURL } = require("node:url");
-const { app, BrowserWindow, dialog, ipcMain, safeStorage, session } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, safeStorage, session, shell } = require("electron");
 const { createWorkerClient } = require("./worker-client");
 const { createMaoyanLogin } = require("./maoyan-login");
-const { sanitizeError, safeError, publicLoginResult } = require("./session-validation");
+const { captureSession, sanitizeError, safeError, publicLoginResult, publicSessionStatus } = require("./session-validation");
+const { checkForUpdates, openExternal } = require("./updates");
 
 const pagePath = path.join(__dirname, "..", "..", "pages", "maoyan", "index.html");
+const MAX_SESSION_FILE_BYTES = 256 * 1024;
 
 function notReady(feature) {
   return { ok: false, code: "not-ready", feature };
@@ -24,9 +27,62 @@ function confirmRemoteHttp({ operation }) {
   }).then(({ response }) => response === 0);
 }
 
-function registerIpcHandlers({ workerClient, createLogin = createMaoyanLogin } = {}) {
+function manualSessionPayload(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw safeError("validation");
+  const uid = typeof value.uid === "number" && Number.isSafeInteger(value.uid) ? String(value.uid) : value.uid;
+  if (!/^\d+$/.test(uid || "") || typeof value._csrf !== "string" || typeof value.mtgsig !== "string" || typeof value.user_agent !== "string") {
+    throw safeError("validation");
+  }
+  const query = new URLSearchParams();
+  for (const key of ["yodaReady", "csecplatform", "csecversion"]) {
+    if (typeof value[key] === "string") query.set(key, value[key]);
+  }
+  return captureSession({
+    cookies: [
+      { domain: ".maoyan.com", name: "uid", value: uid },
+      { domain: ".maoyan.com", name: "_csrf", value: value._csrf }
+    ],
+    requestHeaders: { mtgsig: value.mtgsig },
+    requestUrl: `https://www.maoyan.com/ajax/createOrder?${query}`,
+    userAgent: value.user_agent
+  });
+}
+
+async function uploadSessionFile({ dialog: fileDialog = dialog, workerClient, fs: fileSystem = fs } = {}) {
+  let fileText = "";
+  let payload;
+  try {
+    const selected = await fileDialog.showOpenDialog({
+      properties: ["openFile"],
+      filters: [{ name: "JSON", extensions: ["json"] }]
+    });
+    if (selected?.canceled || !Array.isArray(selected?.filePaths) || selected.filePaths.length !== 1) return { cancelled: true };
+    const filePath = selected.filePaths[0];
+    const stats = await fileSystem.stat(filePath);
+    if (!stats?.isFile?.() && stats?.isFile !== undefined) throw safeError("validation");
+    if (!Number.isSafeInteger(stats?.size) || stats.size > MAX_SESSION_FILE_BYTES) throw safeError("validation");
+    fileText = await fileSystem.readFile(filePath, "utf8");
+    if (Buffer.byteLength(fileText, "utf8") > MAX_SESSION_FILE_BYTES) throw safeError("validation");
+    payload = manualSessionPayload(JSON.parse(fileText));
+    const upload = workerClient?.prepareSessionUpload?.();
+    if (typeof upload !== "function") throw safeError("disconnected");
+    const result = await upload(payload);
+    if (result?.session?.uploaded !== true) throw safeError("unknown");
+    return { session: publicSessionStatus(result.session) };
+  } catch (error) {
+    return sanitizeError(error?.code ? error : safeError("validation"));
+  } finally {
+    fileText = "";
+    payload = undefined;
+  }
+}
+
+function registerIpcHandlers({ workerClient, createLogin = createMaoyanLogin, updateChecker = checkForUpdates } = {}) {
   const client = workerClient ?? createWorkerClient({ app, safeStorage, confirmHttp: confirmRemoteHttp });
   const logins = new Map();
+  let latestReleaseUrl = "";
+  let lastUpdateCheckAt = 0;
+  let lastUpdateResult = { available: false };
   let quitting = false;
   let cleanupComplete = false;
   const localPageUrl = pathToFileURL(pagePath).toString();
@@ -71,9 +127,23 @@ function registerIpcHandlers({ workerClient, createLogin = createMaoyanLogin } =
     const result = await logins.get(event.sender)?.controller.cancel();
     return publicLoginResult(result ?? { cancelled: true });
   });
-  ipcMain.handle("maoyan:upload-file", () => notReady("maoyan-upload-file"));
-  ipcMain.handle("updates:check", () => notReady("updates-check"));
-  ipcMain.handle("external:open", () => notReady("external-open"));
+  ipcMain.handle("maoyan:upload-file", async (event) => {
+    if (!trustedSender(event)) return sanitizeError(safeError("unavailable"));
+    return uploadSessionFile({ workerClient: client });
+  });
+  ipcMain.handle("updates:check", async (event) => {
+    if (!trustedSender(event)) return { available: false };
+    if (Date.now() - lastUpdateCheckAt >= 24 * 60 * 60 * 1000) {
+      lastUpdateCheckAt = Date.now();
+      lastUpdateResult = await updateChecker({ currentVersion: app.getVersion?.() || "0.0.0" });
+      latestReleaseUrl = lastUpdateResult.available === true ? lastUpdateResult.releaseUrl : "";
+    }
+    return lastUpdateResult;
+  });
+  ipcMain.handle("external:open", async (event, input) => {
+    if (!trustedSender(event)) return { opened: false };
+    return openExternal(input?.url, { shell, approvedUrls: latestReleaseUrl ? [latestReleaseUrl] : [], workerProfile: client.getProfile?.() });
+  });
   app.on("before-quit", (event) => {
     if (cleanupComplete || logins.size === 0) return;
     event.preventDefault();
@@ -118,4 +188,4 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-module.exports = { createMainWindow, registerIpcHandlers };
+module.exports = { createMainWindow, registerIpcHandlers, uploadSessionFile, manualSessionPayload };

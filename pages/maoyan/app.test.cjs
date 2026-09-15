@@ -232,3 +232,15 @@ test("lock entry follows the monitor switch and explains a paused lock rule", ()
   assert.match(source, /lockController\.syncAvailability\(\);\s*[\s\S]{0,400}?\/\/ 停止监控时若挂着进行中的自动锁座规则/);
   assert.match(source, /已随监控暂停，重新开始监控后自动继续/);
 });
+
+test("Electron shows an official update affordance and keeps the HTTP warning visible", () => {
+  const source = readSource("app.js");
+  const html = readSource("index.html");
+  assert.match(html, /id="update-status"/);
+  assert.match(html, /id="btn-open-update"/);
+  assert.match(source, /async function checkForDesktopUpdate\(\)/);
+  assert.match(source, /window\.maoyanRuntime\.checkForUpdates\(\)/);
+  assert.match(source, /未经签名验证/);
+  assert.match(source, /window\.maoyanRuntime\.openExternal\(releaseUrl\)/);
+  assert.match(source, /不安全 HTTP 连接/);
+});

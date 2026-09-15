@@ -17,6 +17,9 @@ const els = {
   statusLine: $("status-line"),
   workerProfile: $("worker-profile"),
   workerSecurity: $("worker-security"),
+  updateStatus: $("update-status"),
+  updateText: $("update-text"),
+  btnOpenUpdate: $("btn-open-update"),
   btnLogout: $("btn-logout"),
   // 影院设置
   cityInput: $("city-input"),
@@ -144,6 +147,33 @@ function setConnectionState({ profileKey = "", httpRisk = false } = {}) {
   }
 }
 
+function renderDesktopUpdate(update) {
+  if (!els.updateStatus || !els.updateText || !els.btnOpenUpdate) return;
+  const available = runtimeInfo.kind === "electron" && update?.available === true && typeof update.releaseUrl === "string";
+  els.updateStatus.classList.toggle("hidden", !available);
+  if (!available) return;
+  els.updateText.textContent = `发现新版本 v${update.version}`;
+  els.btnOpenUpdate.dataset.releaseUrl = update.releaseUrl;
+}
+
+async function checkForDesktopUpdate() {
+  if (runtimeInfo.kind !== "electron") return;
+  try {
+    renderDesktopUpdate(await window.maoyanRuntime.checkForUpdates());
+  } catch {
+    renderDesktopUpdate({ available: false });
+  }
+}
+
+els.btnOpenUpdate?.addEventListener("click", async () => {
+  const releaseUrl = els.btnOpenUpdate.dataset.releaseUrl;
+  if (!releaseUrl) return;
+  const accepted = await window.showConfirm("本应用未经签名验证；请仅从官方 GitHub Releases 页面下载更新。", {
+    title: "查看更新", okText: "打开官方页面", cancelText: "取消"
+  });
+  if (accepted) await window.maoyanRuntime.openExternal(releaseUrl);
+});
+
 function resetProfileUi(nextProfileKey) {
   profileGeneration.invalidate();
   window.switchWorkerProfile({
@@ -267,7 +297,7 @@ async function connect() {
     await withButtonLoading(els.btnConnect, "连接中...", async () => {
       showBlockOverlay("正在连接云端...");
       try {
-        const httpRiskConfirmed = !/^http:/i.test(workerUrl) || window.confirm("HTTP 服务连接可能泄露访问令牌，是否继续？");
+        const httpRiskConfirmed = runtimeInfo.kind === "electron" || !/^http:/i.test(workerUrl) || window.confirm("HTTP 服务连接可能泄露访问令牌，是否继续？");
         const connection = { workerUrl, httpRiskConfirmed };
         const typedToken = els.token.value.trim();
         if (typedToken) connection.token = typedToken;
@@ -1112,6 +1142,7 @@ function syncCronInfo(data) {
   } catch {
     runtimeInfo = { kind: window.maoyanRuntime?.kind || "web", canLoginMaoyan: false, persistentTokenStorage: false };
   }
+  void checkForDesktopUpdate();
   // 排查"刷新后回到登录页": 本机存储 / WebCrypto / 安全上下文 是否可用
   function probeEnv() {
     let storageOk = true;

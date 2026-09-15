@@ -171,9 +171,43 @@ test("profiles use full normalized URLs so tokens and HTTP risk stay isolated", 
       baseUrl: "https://worker.example:9443/b",
       updatedAt: client.getProfile().updatedAt,
       isLoopback: false,
-      requiresHttpConfirmation: false
+      requiresHttpConfirmation: false,
+      httpRiskConfirmed: false,
+      httpSessionUploadConfirmed: false
     });
     assert.doesNotMatch(fs.readFileSync(path.join(fixture.userData, "worker-profiles.json"), "utf8"), /token-[ab]/);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("remote HTTP approvals persist only on the current Worker profile", async () => {
+  const confirmations = [];
+  const fixture = makeFixture({
+    confirmHttp: async ({ operation }) => { confirmations.push(operation); return true; },
+    fetchImpl: async (_url, options) => ({
+      ok: true,
+      status: 200,
+      json: async () => options.method === "POST" ? { session: { uploaded: true } } : { profile: {} }
+    })
+  });
+  try {
+    const client = createWorkerClient(fixture);
+    await client.connectWorker({ workerUrl: "http://worker.example", httpRiskConfirmed: true });
+    assert.equal(client.getProfile().httpRiskConfirmed, true);
+    assert.equal(client.getProfile().httpSessionUploadConfirmed, false);
+
+    await client.prepareSessionUpload()({ saved_at: "2026-09-15T00:00:00.000Z" });
+    assert.deepEqual(confirmations, ["connect", "session-upload"]);
+    assert.equal(client.getProfile().httpSessionUploadConfirmed, true);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(fixture.userData, "worker-profiles.json"), "utf8")).profiles["http://worker.example"], {
+      baseUrl: "http://worker.example",
+      updatedAt: client.getProfile().updatedAt,
+      isLoopback: false,
+      requiresHttpConfirmation: true,
+      httpRiskConfirmed: true,
+      httpSessionUploadConfirmed: true
+    });
   } finally {
     fixture.cleanup();
   }
@@ -242,6 +276,28 @@ test("remote HTTP session upload with query parameters still needs a second conf
       /确认/
     );
     assert.deepEqual(confirmations, ["connect", "session-upload"]);
+    assert.equal(requests.length, 1);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("remote HTTP session upload with a trailing slash still needs a second confirmation", async () => {
+  const requests = [];
+  const fixture = makeFixture({
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      return { ok: true, status: 200, json: async () => ({ profile: {} }) };
+    },
+    confirmHttp: async ({ operation }) => operation === "connect"
+  });
+  try {
+    const client = createWorkerClient(fixture);
+    await client.connectWorker({ workerUrl: "http://worker.example", token: "t", httpRiskConfirmed: true });
+    await assert.rejects(
+      client.requestWorker("/api/lock/session/", { method: "POST", body: "{}", httpRiskConfirmed: true }),
+      /确认/
+    );
     assert.equal(requests.length, 1);
   } finally {
     fixture.cleanup();
