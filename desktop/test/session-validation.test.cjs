@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { captureSession, sanitizeError, publicSessionStatus } = require("../main/session-validation");
+const { captureSession, normalizeUploadedSession, sanitizeError, publicSessionStatus } = require("../main/session-validation");
 
 const input = () => ({
   cookies: [{ domain: ".maoyan.com", name: "uid", value: "123456789" }, { domain: ".maoyan.com", name: "_csrf", value: "csrf-secret" }],
@@ -31,6 +31,33 @@ test("capture rejects missing login material, invalid origins and header injecti
   for (const value of ["not-numeric", ""]) {
     const raw = input(); raw.cookies[0].value = value;
     assert.throws(() => captureSession(raw), { code: "validation" });
+  }
+});
+
+test("imported Python sessions use the same strict credential validation", () => {
+  const exported = {
+    cookies: [{ domain: ".maoyan.com", name: "uid", value: "123456789" }, { domain: ".maoyan.com", name: "_csrf", value: "csrf-secret" }],
+    csrf: "csrf-secret",
+    mtgsig: "signature-secret",
+    user_agent: "Mozilla/5.0",
+    create_order_query: { yodaReady: "h5", csecplatform: "4", csecversion: "2.6.0", extra: "drop" },
+    saved_at: "2026-09-15T00:00:00.000Z"
+  };
+  assert.deepEqual(normalizeUploadedSession(exported), {
+    cookies: [{ name: "uid", value: "123456789" }, { name: "_csrf", value: "csrf-secret" }],
+    csrf: "csrf-secret",
+    mtgsig: "signature-secret",
+    user_agent: "Mozilla/5.0",
+    create_order_query: { yodaReady: "h5", csecplatform: "4", csecversion: "2.6.0" },
+    saved_at: "2026-09-15T00:00:00.000Z"
+  });
+
+  for (const changes of [
+    { mtgsig: "bad\r\nheader" }, { csrf: "\u0000" }, { csrf: " " }, { mtgsig: " " }, { user_agent: " " },
+    { csrf: "x".repeat(4097) }, { mtgsig: "x".repeat(16385) }, { user_agent: "x".repeat(4097) },
+    { saved_at: "not-a-date" }, { saved_at: "x".repeat(65) }
+  ]) {
+    assert.throws(() => normalizeUploadedSession({ ...exported, ...changes }), { code: "validation" });
   }
 });
 

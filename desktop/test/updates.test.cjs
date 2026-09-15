@@ -170,6 +170,22 @@ test("native upload accepts the local Python session export and drops untrusted 
   }]);
 });
 
+test("native upload rejects unsafe Python session fields before Worker upload", async () => {
+  const exported = {
+    cookies: [{ domain: ".maoyan.com", name: "uid", value: "123456789" }, { domain: ".maoyan.com", name: "_csrf", value: "csrf-secret" }],
+    csrf: "csrf-secret", mtgsig: "signature-secret", user_agent: "Mozilla/5.0",
+    create_order_query: { yodaReady: "h5" }, saved_at: "2026-09-15T00:00:00.000Z"
+  };
+  for (const changes of [
+    { mtgsig: "bad\r\nheader" }, { csrf: " " }, { user_agent: "x".repeat(4097) }
+  ]) {
+    const { result, uploaded } = await uploadSessionFileWithFixture({ json: JSON.stringify({ ...exported, ...changes }) });
+
+    assert.equal(result.code, "validation");
+    assert.deepEqual(uploaded, []);
+  }
+});
+
 test("native upload leaves the cloud session untouched on cancel, oversize, or invalid JSON", async () => {
   const cancelled = await uploadSessionFileWithFixture({ cancelled: true });
   assert.deepEqual(cancelled, { result: { cancelled: true }, uploaded: [] });

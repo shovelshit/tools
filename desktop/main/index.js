@@ -5,14 +5,13 @@ const { pathToFileURL } = require("node:url");
 const { app, BrowserWindow, dialog, ipcMain, safeStorage, session, shell } = require("electron");
 const { createWorkerClient } = require("./worker-client");
 const { createMaoyanLogin } = require("./maoyan-login");
-const { captureSession, sanitizeError, safeError, publicLoginResult, publicSessionStatus } = require("./session-validation");
+const { captureSession, normalizeUploadedSession, sanitizeError, safeError, publicLoginResult, publicSessionStatus } = require("./session-validation");
 const { checkForUpdates, openExternal } = require("./updates");
 
 const pagePath = path.join(__dirname, "..", "..", "pages", "maoyan", "index.html");
 const MAX_SESSION_FILE_BYTES = 256 * 1024;
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const QUERY_KEYS = ["yodaReady", "csecplatform", "csecversion"];
-const SAFE_QUERY_VALUE = /^[A-Za-z0-9._:-]{1,64}$/;
 
 function notReady(feature) {
   return { ok: false, code: "not-ready", feature };
@@ -29,33 +28,6 @@ function confirmRemoteHttp({ operation }) {
     message: "非本机 HTTP 服务可能泄露访问令牌",
     detail: isSessionUpload ? "即将通过 HTTP 上传猫眼登录态。" : "即将通过 HTTP 连接 Worker 服务。"
   }).then(({ response }) => response === 0);
-}
-
-function normalizeUploadedSession(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw safeError("validation");
-  const cookies = (Array.isArray(value.cookies) ? value.cookies : [])
-    .filter((cookie) => cookie && /^\.?([a-z0-9-]+\.)*maoyan\.com$/i.test(String(cookie.domain || ".maoyan.com")))
-    .map((cookie) => ({ name: String(cookie.name || "").trim(), value: String(cookie.value || "") }))
-    .filter((cookie) => /^[A-Za-z0-9_-]{1,128}$/.test(cookie.name) && cookie.value.length <= 4096)
-    .slice(0, 64);
-  const uid = cookies.find((cookie) => cookie.name === "uid")?.value || "";
-  const csrf = String(value.csrf || "");
-  const mtgsig = String(value.mtgsig || "");
-  const userAgent = String(value.user_agent || "");
-  if (!cookies.length || !/^\d+$/.test(uid) || !csrf || !mtgsig || !userAgent) throw safeError("validation");
-  const sourceQuery = value.create_order_query && typeof value.create_order_query === "object" && !Array.isArray(value.create_order_query)
-    ? value.create_order_query : {};
-  const createOrderQuery = Object.fromEntries(QUERY_KEYS
-    .map((key) => [key, String(sourceQuery[key] || "")])
-    .filter(([, queryValue]) => queryValue && SAFE_QUERY_VALUE.test(queryValue)));
-  return {
-    cookies,
-    csrf,
-    mtgsig,
-    user_agent: userAgent,
-    create_order_query: createOrderQuery,
-    saved_at: String(value.saved_at || "")
-  };
 }
 
 function manualSessionPayload(value) {
