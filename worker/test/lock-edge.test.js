@@ -7,22 +7,21 @@
 // - 锁座 API: 未知路径、非数字参数、超长会话体、无会话删除
 import test from "node:test";
 import assert from "node:assert/strict";
-import { MemoryKV, testEncryptionKey, validSession } from "./helpers.js";
+import { MemoryD1, MemoryKV, createDB, testEncryptionKey, validSession } from "./helpers.js";
 import { createLockRule, validateLockRuleInput } from "../src/maoyan/lock-rule.js";
 import { handleLockApi } from "../src/maoyan/lock-api.js";
 import { runOneLockRule } from "../src/maoyan/lock-runner.js";
 import { parseSeatPage } from "../src/maoyan/lock-client.js";
 import { normalizeSession } from "../src/maoyan/lock-session.js";
-import { userKey } from "../src/maoyan/user.js";
 
 const now = new Date("2026-09-11T04:00:00.000Z");
 const tokenId = "11111111-1111-4111-8111-111111111111";
 
-function envWithConfig(config = { cinemaId: "25428", selectedMovieIds: ["7"] }) {
+async function envWithConfig(config = { cinemaId: "25428", selectedMovieIds: ["7"] }) {
   return {
     LOCK_SERVICE_ENABLED: "true",
     SESSION_ENCRYPTION_KEY: testEncryptionKey(),
-    MAOYAN_KV: new MemoryKV({ [userKey("token-a", "config")]: JSON.stringify(config) })
+    DB: await createDB({ configs: { "token-a": config } })
   };
 }
 
@@ -64,7 +63,7 @@ function coupleSeats(extra = []) {
 // ---------------- 情侣座 ----------------
 
 test("情侣座必须成对选择: 只选一半会被拒绝", async () => {
-  const env = envWithConfig();
+  const env = await envWithConfig();
   await assert.rejects(
     createLockRule(env, "token-a", validInput({ seatNos: ["1-6-18"] }), dependencies({
       fetchSeats: async () => ({ sectionId: "1", sectionName: "1号厅", seqNo: "100", seats: coupleSeats() })
@@ -74,7 +73,7 @@ test("情侣座必须成对选择: 只选一半会被拒绝", async () => {
 });
 
 test("情侣座成对选择时规则同时记录两个座位", async () => {
-  const env = envWithConfig();
+  const env = await envWithConfig();
   const rule = await createLockRule(env, "token-a", validInput({ seatNos: ["1-6-18", "1-6-19"] }), dependencies({
     fetchSeats: async () => ({ sectionId: "1", sectionName: "1号厅", seqNo: "100", seats: coupleSeats() })
   }));
@@ -83,7 +82,7 @@ test("情侣座成对选择时规则同时记录两个座位", async () => {
 });
 
 test("情侣座的另一半不相邻时仍视为未成对", async () => {
-  const env = envWithConfig();
+  const env = await envWithConfig();
   await assert.rejects(
     createLockRule(env, "token-a", validInput({ seatNos: ["1-6-18"] }), dependencies({
       fetchSeats: async () => ({ sectionId: "1", sectionName: "1号厅", seqNo: "100", seats: [
@@ -105,14 +104,14 @@ test("L/R 严格交替的情侣排: 合法对 (23,24) 不被误拆成 (21,22)", 
       type: columnId % 2 === 1 ? "L" : "R", available: true
     });
   }
-  const env = envWithConfig();
+  const env = await envWithConfig();
   const rule = await createLockRule(env, "token-a", validInput({ seatNos: ["1-23-12", "1-24-12"] }), dependencies({
     fetchSeats: async () => ({ sectionId: "1", sectionName: "1号厅", seqNo: "100", seats })
   }));
   assert.deepEqual(rule.seats.map((seat) => seat.seatNo), ["1-23-12", "1-24-12"]);
   // 反向: 只选 24 不选 23 → 仍未成对(新 env, 避开上一条规则的同规则互斥)
   await assert.rejects(
-    createLockRule(envWithConfig(), "token-a", validInput({ seatNos: ["1-24-12"] }), dependencies({
+    createLockRule(await envWithConfig(),"token-a", validInput({ seatNos: ["1-24-12"] }), dependencies({
       fetchSeats: async () => ({ sectionId: "1", sectionName: "1号厅", seqNo: "100", seats })
     })),
     /情侣座需成对选择/
@@ -129,7 +128,7 @@ test("目标场次真实存在时情侣座成对约束同样生效且校验可�
     }
   };
   // 成对选择且可售 → 立即下单成功, 状态 locked
-  const locked = await createLockRule(envWithConfig(), "token-a",
+  const locked = await createLockRule(await envWithConfig(),"token-a",
     validInput({ seatNos: ["1-6-18", "1-6-19"] }), dependencies({
       fetchCinema: async () => cinemaWithTarget,
       fetchSeats: async () => ({ sectionId: "1", sectionName: "1号厅", seqNo: "100", seats: coupleSeats() }),
@@ -141,7 +140,7 @@ test("目标场次真实存在时情侣座成对约束同样生效且校验可�
   // 只选一半 → 拒绝, 不会有订单
   let ordered = 0;
   await assert.rejects(
-    createLockRule(envWithConfig(), "token-a", validInput({ seatNos: ["1-6-18"] }), dependencies({
+    createLockRule(await envWithConfig(),"token-a", validInput({ seatNos: ["1-6-18"] }), dependencies({
       fetchCinema: async () => cinemaWithTarget,
       fetchSeats: async () => ({ sectionId: "1", sectionName: "1号厅", seqNo: "100", seats: coupleSeats() }),
       placeOrder: async () => { ordered++; return { orderId: "x" }; }
@@ -182,7 +181,7 @@ test("座位主键仍拒绝空串/含空白/超长值", () => {
 test("不存在的日历日期会被拒绝", async () => {
   for (const targetDate of ["2026-02-30", "2026-13-01", "2026-09-31"]) {
     await assert.rejects(
-      createLockRule(envWithConfig(), "token-a", validInput({ targetDate }), dependencies()),
+      createLockRule(await envWithConfig(),"token-a", validInput({ targetDate }), dependencies()),
       /目标日期需在今天起 30 天内/
     );
   }
@@ -265,8 +264,8 @@ test("座位 parse 结果区分可售与不可售且保留排列表", () => {
 
 // ---------------- 定时锁座边界 ----------------
 
-function runtime(overrides = {}) {
-  return { MAOYAN_KV: new MemoryKV(), LOCK_SERVICE_ENABLED: "true", ...overrides };
+async function runtime(overrides = {}) {
+  return { DB: new MemoryD1(), LOCK_SERVICE_ENABLED: "true", ...overrides };
 }
 
 function storedRule(overrides = {}) {
@@ -280,7 +279,7 @@ function storedRule(overrides = {}) {
 
 test("缺少监控数据的定时锁座直接跳过而不是报错", async () => {
   const stored = storedRule();
-  const result = await runOneLockRule(runtime(), tokenId, {
+  const result = await runOneLockRule(await runtime(), tokenId, {
     now: () => now,
     getRule: async () => stored,
     putRule: async () => {}
@@ -292,7 +291,7 @@ test("缺少监控数据的定时锁座直接跳过而不是报错", async () =>
 test("座位仍可售但排号变化时按影厅布局变化失败且不下单", async () => {
   const stored = storedRule();
   let orderCalls = 0;
-  await runOneLockRule(runtime(), tokenId, {
+  await runOneLockRule(await runtime(), tokenId, {
     now: () => now,
     getRule: async () => stored,
     putRule: async (_env, _token, value) => { Object.assign(stored, value); },
@@ -310,11 +309,10 @@ test("座位仍可售但排号变化时按影厅布局变化失败且不下单",
 
 // ---------------- 锁座 API 边界 ----------------
 
-function lockApiEnv(overrides = {}) {
+async function lockApiEnv(overrides = {}) {
   return {
-    MAOYAN_KV: new MemoryKV({
-      [userKey(tokenId, "config")]: JSON.stringify({ cinemaId: "25428", selectedMovieIds: ["7"] })
-    }),
+    DB: await createDB({ configs: { [tokenId]: { cinemaId: "25428", selectedMovieIds: ["7"] } } }),
+    MAOYAN_KV: new MemoryKV(), // 加密会话仍存 KV
     SESSION_ENCRYPTION_KEY: testEncryptionKey(),
     LOCK_SERVICE_ENABLED: "true",
     ...overrides
@@ -325,7 +323,8 @@ function lockRequest(path, options = {}) {
   return new Request(`https://worker.example${path}`, options);
 }
 
-async function callLockApi(path, options, env = lockApiEnv()) {
+async function callLockApi(path, options, env = null) {
+  env = env || await lockApiEnv();
   return await handleLockApi(lockRequest(path, options), env, new URL(`https://worker.example${path}`), tokenId);
 }
 
@@ -367,7 +366,7 @@ test("上传非 JSON 会话体返回格式错误", async () => {
 });
 
 test("未上传会话时删除锁座资源返回 404", async () => {
-  const env = lockApiEnv({
+  const env = await lockApiEnv({
     LOCK_COORDINATOR: {
       idFromName: (id) => id,
       get: () => ({ fetch: async () => Response.json({ ok: false, error: "未找到锁座资源" }, { status: 404 }) })

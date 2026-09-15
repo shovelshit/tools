@@ -4,7 +4,7 @@
 // - BUG-9: 缺失资源的文案保持具体; 已知路径方法不符返回 405(带 Allow)
 import test from "node:test";
 import assert from "node:assert/strict";
-import { captureConsole, MemoryKV, testEncryptionKey, validSession } from "./helpers.js";
+import { captureConsole, MemoryD1, MemoryKV, createDB, testEncryptionKey, validSession } from "./helpers.js";
 import { createLockRule, RULE_KNOWN_ERRORS } from "../src/maoyan/lock-rule.js";
 import { LockCoordinator, createLockRuleThroughCoordinator } from "../src/maoyan/lock-runner.js";
 import { handleLockApi } from "../src/maoyan/lock-api.js";
@@ -18,13 +18,11 @@ const SESSION_NAME = "maoyan-session";
 
 // ---------------- 通用脚手架 ----------------
 
-function envWithConfig() {
+async function envWithConfig() {
   return {
     LOCK_SERVICE_ENABLED: "true",
     SESSION_ENCRYPTION_KEY: testEncryptionKey(),
-    MAOYAN_KV: new MemoryKV({
-      [userKey("token-a", "config")]: JSON.stringify({ cinemaId: "25428", selectedMovieIds: ["7"] })
-    })
+    DB: await createDB({ configs: { "token-a": { cinemaId: "25428", selectedMovieIds: ["7"] } } })
   };
 }
 
@@ -70,18 +68,18 @@ function coordinatorRequest(body) {
   });
 }
 
-function lockApiEnv(overrides = {}) {
+async function lockApiEnv(overrides = {}) {
   return {
-    MAOYAN_KV: new MemoryKV({
-      [userKey(tokenId, "config")]: JSON.stringify({ cinemaId: "25428", selectedMovieIds: ["7"] })
-    }),
+    DB: await createDB({ configs: { [tokenId]: { cinemaId: "25428", selectedMovieIds: ["7"] } } }),
+    MAOYAN_KV: new MemoryKV(), // 加密会话仍存 KV
     SESSION_ENCRYPTION_KEY: testEncryptionKey(),
     LOCK_SERVICE_ENABLED: "true",
     ...overrides
   };
 }
 
-async function callLockApi(path, options, env = lockApiEnv()) {
+async function callLockApi(path, options, env = null) {
+  env = env || await lockApiEnv();
   return await handleLockApi(
     new Request(`https://worker.example${path}`, options),
     env,
@@ -134,7 +132,7 @@ test("白名单与客户端文案保持同步, 杜绝文案漂移", () => {
 
 test("上游拒绝下单时错误带 upstream 标记并保留原文案", async () => {
   await assert.rejects(
-    createLockRule(envWithConfig(), "token-a", ruleInput(), orderDependencies(async () => {
+    createLockRule(await envWithConfig(),"token-a", ruleInput(), orderDependencies(async () => {
       throw new OrderAttemptError(ORDER_REJECTED_SESSION, false);
     })),
     (error) => {
@@ -147,7 +145,7 @@ test("上游拒绝下单时错误带 upstream 标记并保留原文案", async (
 
 test("座位被抢占时补充为更具体的提示", async () => {
   await assert.rejects(
-    createLockRule(envWithConfig(), "token-a", ruleInput(), orderDependencies(async () => {
+    createLockRule(await envWithConfig(),"token-a", ruleInput(), orderDependencies(async () => {
       throw new OrderAttemptError(ORDER_REJECTED_SEATS, false);
     })),
     (error) => {
@@ -159,14 +157,14 @@ test("座位被抢占时补充为更具体的提示", async () => {
 });
 
 test("下单结果不确定时不标记为上游拒绝(仍走待确认路径)", async () => {
-  const rule = await createLockRule(envWithConfig(), "token-a", ruleInput(), orderDependencies(async () => {
+  const rule = await createLockRule(await envWithConfig(),"token-a", ruleInput(), orderDependencies(async () => {
     throw new OrderAttemptError("创建订单结果不确定，请在猫眼订单中确认", true);
   }));
   assert.equal(rule.state, "unknown");
 });
 
 test("协调器把上游拒绝映射为 502 并保留原文案", async () => {
-  const coordinator = new LockCoordinator(coordinatorState(), { MAOYAN_KV: new MemoryKV(), LOCK_SERVICE_ENABLED: "true" }, {
+  const coordinator = new LockCoordinator(coordinatorState(), { DB: new MemoryD1(), LOCK_SERVICE_ENABLED: "true" }, {
     createRule: async () => {
       const error = new Error(ORDER_REJECTED_SESSION);
       error.kind = "upstream";
@@ -179,7 +177,7 @@ test("协调器把上游拒绝映射为 502 并保留原文案", async () => {
 });
 
 test("协调器仍把已知参数错误映射为 400", async () => {
-  const coordinator = new LockCoordinator(coordinatorState(), { MAOYAN_KV: new MemoryKV(), LOCK_SERVICE_ENABLED: "true" }, {
+  const coordinator = new LockCoordinator(coordinatorState(), { DB: new MemoryD1(), LOCK_SERVICE_ENABLED: "true" }, {
     createRule: async () => { throw new Error("所选座位不可用"); }
   });
   const response = await coordinator.fetch(coordinatorRequest({ action: "create", tokenId, input: {} }));
@@ -188,7 +186,7 @@ test("协调器仍把已知参数错误映射为 400", async () => {
 });
 
 test("协调器对未知错误仍返回 500 且不泄露内部信息", async () => {
-  const coordinator = new LockCoordinator(coordinatorState(), { MAOYAN_KV: new MemoryKV(), LOCK_SERVICE_ENABLED: "true" }, {
+  const coordinator = new LockCoordinator(coordinatorState(), { DB: new MemoryD1(), LOCK_SERVICE_ENABLED: "true" }, {
     createRule: async () => { throw new Error("internal stack detail"); }
   });
   const { result } = await captureConsole(async () =>
@@ -213,7 +211,7 @@ test("协调器调用端把 502 还原为 upstream 错误", async () => {
 });
 
 test("锁座规则创建遇上游拒绝时 API 返回 502 与真实原因", async () => {
-  const env = lockApiEnv({
+  const env = await lockApiEnv({
     LOCK_COORDINATOR: coordinatorStub(Response.json({ ok: false, error: ORDER_REJECTED_SESSION }, { status: 502 }))
   });
   const response = await callLockApi("/api/lock/rule", {
@@ -248,10 +246,9 @@ test("加密密钥轮换后旧会话解密失败时 API 返回 409 而非 500", 
     mtgsig: "signature-secret",
     userAgent: "Mozilla/5.0 Test"
   });
-  const env = lockApiEnv({
+  const env = await lockApiEnv({
     SESSION_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
     MAOYAN_KV: new MemoryKV({
-      [userKey(tokenId, "config")]: JSON.stringify({ cinemaId: "25428", selectedMovieIds: ["7"] }),
       [userKey(tokenId, SESSION_NAME)]: JSON.stringify(envelope)
     })
   });
@@ -261,9 +258,8 @@ test("加密密钥轮换后旧会话解密失败时 API 返回 409 而非 500", 
 });
 
 test("会话信封损坏(非法 iv)时同样按 409 处理", async () => {
-  const env = lockApiEnv({
+  const env = await lockApiEnv({
     MAOYAN_KV: new MemoryKV({
-      [userKey(tokenId, "config")]: JSON.stringify({ cinemaId: "25428", selectedMovieIds: ["7"] }),
       [userKey(tokenId, SESSION_NAME)]: JSON.stringify({
         v: 1, iv: "AAAA", data: "BBBB",
         uploadedAt: "2026-09-11T00:00:00.000Z", uidMasked: "UID 1**", sourceSavedAt: ""
@@ -277,7 +273,7 @@ test("会话信封损坏(非法 iv)时同样按 409 处理", async () => {
 // ---------------- BUG-9: 缺失文案与 405 ----------------
 
 test("取消锁座规则时保留「未找到锁座规则」的文案", async () => {
-  const env = lockApiEnv({
+  const env = await lockApiEnv({
     LOCK_COORDINATOR: coordinatorStub(Response.json({ ok: false, error: "未找到锁座规则" }, { status: 404 }))
   });
   const response = await callLockApi("/api/lock/rule/cancel", { method: "POST" }, env);
@@ -286,7 +282,7 @@ test("取消锁座规则时保留「未找到锁座规则」的文案", async ()
 });
 
 test("删除锁座资源时保留「未找到锁座资源」的文案", async () => {
-  const env = lockApiEnv({
+  const env = await lockApiEnv({
     LOCK_COORDINATOR: coordinatorStub(Response.json({ ok: false, error: "未找到锁座资源" }, { status: 404 }))
   });
   const response = await callLockApi("/api/lock/session/remove", { method: "POST" }, env);

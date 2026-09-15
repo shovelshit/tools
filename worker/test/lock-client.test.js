@@ -5,6 +5,7 @@ import {
   createUnpaidOrder,
   extractOfficialSeatHtml,
   fetchSeatMap,
+  findCompatibleShows,
   findExactShows,
   OrderAttemptError,
   parseSeatPage,
@@ -287,6 +288,45 @@ test("matches only the exact target date and HH:mm", () => {
   assert.deepEqual(findExactShows(data, {
     movieId: "7", targetDate: "2026-09-12", templateTime: "20:00"
   }).map((show) => show.seqNo), ["2"]);
+});
+
+test("matches same-hall shows within an inclusive thirty-minute window", () => {
+  const data = { showData: { movies: [{ id: 7, shows: [{ showDate: "2026-09-12", plist: [
+    { seqNo: "outside-before", tm: "18:09", th: "1号激光IMAX厅" },
+    { seqNo: "edge-before", tm: "18:10", th: "1号激光IMAX厅" },
+    { seqNo: "near", tm: "18:50", th: "1号激光IMAX厅" },
+    { seqNo: "edge-after", tm: "19:10", th: "1号激光IMAX厅" },
+    { seqNo: "outside-after", tm: "19:11", th: "1号激光IMAX厅" },
+    { seqNo: "other-hall", tm: "18:50", th: "2号激光IMAX厅" },
+    { seqNo: "sold", tm: "18:45", th: "1号激光IMAX厅", ticketStatus: 1 }
+  ] }] }] } };
+
+  const matches = findCompatibleShows(data, {
+    movieId: "7",
+    targetDate: "2026-09-12",
+    templateTime: "18:40",
+    templateHall: "1号激光IMAX厅"
+  });
+
+  assert.deepEqual(matches.map((show) => [show.seqNo, show.timeDeltaMinutes, show.matchMode]), [
+    ["near", 10, "fuzzy"],
+    ["edge-after", 30, "fuzzy"],
+    ["edge-before", -30, "fuzzy"]
+  ]);
+});
+
+test("does not match fuzzy shows without a valid exact hall or time", () => {
+  const data = { showData: { movies: [{ id: 7, shows: [{ showDate: "2026-09-12", plist: [
+    { seqNo: "missing-hall", tm: "18:40" },
+    { seqNo: "invalid-time", tm: "18:xx", th: "1号激光IMAX厅" }
+  ] }, { showDate: "2026-09-13", plist: [{ seqNo: "wrong-date", tm: "18:40", th: "1号激光IMAX厅" }] }] }] } };
+
+  assert.deepEqual(findCompatibleShows(data, {
+    movieId: "7",
+    targetDate: "2026-09-12",
+    templateTime: "18:40",
+    templateHall: "1号激光IMAX厅"
+  }).map((show) => show.seqNo), []);
 });
 
 test("refuses redirects and requests outside www.maoyan.com", async () => {

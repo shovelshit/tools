@@ -4,20 +4,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import worker from "../src/index.js";
-import { MemoryKV } from "./helpers.js";
+import { createDB } from "./helpers.js";
+import { getConfig, listChanges } from "../src/maoyan/db.js";
 import { isExpired } from "../src/maoyan/ddl.js";
 import { runScheduledChecks } from "../src/maoyan/tokens.js";
-import { userKey } from "../src/maoyan/user.js";
 
 const tokenId = "11111111-1111-4111-8111-111111111111";
 const ACCESS = "access-token";
 const FUTURE = new Date(Date.now() + 86400e3).toISOString();
 
-function runtime(config = {}) {
+async function runtime(config = {}) {
   return {
-    MAOYAN_KV: new MemoryKV({
-      "meta:tokens": JSON.stringify([{ id: tokenId, token: ACCESS }]),
-      [userKey(tokenId, "config")]: JSON.stringify(config)
+    DB: await createDB({
+      tokens: [{ id: tokenId, token: ACCESS }],
+      configs: { [tokenId]: config }
     })
   };
 }
@@ -58,7 +58,7 @@ test("BUG-1: isExpired 只对「明确开始监控」的配置生效", () => {
 
 test("BUG-1: cron 跳过从未开始监控的用户, 不写告警也不抓取上游", async () => {
   const config = { cinemaId: "38569", selectedMovieIds: ["1545360"] };
-  const env = runtime(config);
+  const env = await runtime(config);
   let upstreamCalls = 0;
   await withMockFetch(async () => {
     upstreamCalls += 1;
@@ -67,33 +67,33 @@ test("BUG-1: cron 跳过从未开始监控的用户, 不写告警也不抓取上
     await runScheduledChecks(env, undefined, { now: Date.parse("2026-09-14T02:00:00.000Z") }); // 北京 10:00, 窗口内
   });
   assert.equal(upstreamCalls, 0);
-  assert.equal(await env.MAOYAN_KV.get(userKey(tokenId, "changes"), "json"), null);
+  assert.deepEqual(await listChanges(env.DB, tokenId), []);
   // 配置未被改写(不会被写入 enabled:false 或误导性的到期文案)
-  assert.deepEqual(await env.MAOYAN_KV.get(userKey(tokenId, "config"), "json"), config);
+  assert.deepEqual(await getConfig(env.DB, tokenId), config);
 });
 
 test("BUG-2: 手动检查用真实状态码回报, 不再假装成功", async () => {
   const noCinema = await worker.fetch(
     request("/api/check", {}),
-    runtime({ enabled: true, monitorDdl: FUTURE })
+    await runtime({ enabled: true, monitorDdl: FUTURE })
   );
   assert.equal(noCinema.status, 400);
   assert.match((await noCinema.json()).error, /未配置影院/);
 
-  const notStarted = await worker.fetch(request("/api/check", {}), runtime({ cinemaId: "38569" }));
+  const notStarted = await worker.fetch(request("/api/check", {}), await runtime({ cinemaId: "38569" }));
   assert.equal(notStarted.status, 409);
   assert.match((await notStarted.json()).error, /尚未开始监控/);
 
   const stopped = await worker.fetch(
     request("/api/check", {}),
-    runtime({ cinemaId: "38569", enabled: false, monitorDdl: FUTURE })
+    await runtime({ cinemaId: "38569", enabled: false, monitorDdl: FUTURE })
   );
   assert.equal(stopped.status, 409);
   assert.match((await stopped.json()).error, /监控已停止/);
 });
 
 test("BUG-4: 运行中切到未配置渠道时自动停止监控并留痕", async () => {
-  const env = runtime({ cinemaId: "38569", notifyChannel: "bark", barkKey: "bark-key" });
+  const env = await runtime({ cinemaId: "38569", notifyChannel: "bark", barkKey: "bark-key" });
   await withMockFetch(async () => new Response("ok", { status: 200 }), async () => {
     const tested = await worker.fetch(request("/api/test-push", {}), env);
     assert.equal(tested.status, 200);
@@ -110,22 +110,22 @@ test("BUG-4: 运行中切到未配置渠道时自动停止监控并留痕", asyn
     assert.match(body.notice, /自动停止/);
   });
 
-  const changes = await env.MAOYAN_KV.get(userKey(tokenId, "changes"), "json");
+  const changes = await listChanges(env.DB, tokenId);
   assert.equal(changes.length, 1);
   assert.equal(changes[0].type, "warn");
   assert.match(changes[0].text, /监控已自动停止/);
 });
 
 test("BUG-5: 非法 cinemaId 被拒绝且不落库", async () => {
-  const env = runtime({});
+  const env = await runtime({});
   const rejected = await worker.fetch(request("/api/config", { cinemaId: "abc" }), env);
   assert.equal(rejected.status, 400);
   assert.match((await rejected.json()).error, /纯数字/);
-  assert.deepEqual(await env.MAOYAN_KV.get(userKey(tokenId, "config"), "json"), {});
+  assert.deepEqual(await getConfig(env.DB, tokenId), {});
 });
 
 test("状态码统一: shows/cinemas 的非法入参返回 400 而非 500", async () => {
-  const env = runtime({ cinemaId: "38569" });
+  const env = await runtime({ cinemaId: "38569" });
   const shows = await worker.fetch(request("/api/shows?cinemaId=abc"), env);
   assert.equal(shows.status, 400);
   assert.match((await shows.json()).error, /cinemaId 无效/);

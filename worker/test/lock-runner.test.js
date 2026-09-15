@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { captureConsole, MemoryKV } from "./helpers.js";
+import { captureConsole, createDB } from "./helpers.js";
 import { OrderAttemptError } from "../src/maoyan/lock-client.js";
+import * as db from "../src/maoyan/db.js";
 import * as lockRunner from "../src/maoyan/lock-runner.js";
 import { LockCoordinator, runOneLockRule } from "../src/maoyan/lock-runner.js";
 import worker from "../src/index.js";
@@ -24,8 +25,8 @@ function rule(overrides = {}) {
   };
 }
 
-function runtime(overrides = {}) {
-  return { MAOYAN_KV: new MemoryKV(), LOCK_SERVICE_ENABLED: "true", ...overrides };
+async function runtime(overrides = {}) {
+  return { DB: await createDB(), LOCK_SERVICE_ENABLED: "true", ...overrides };
 }
 
 function deps(stored, overrides = {}) {
@@ -49,14 +50,14 @@ function deps(stored, overrides = {}) {
 
 test("automation disabled leaves a waiting rule unchanged", async () => {
   const stored = rule();
-  const result = await runOneLockRule(runtime({ LOCK_SERVICE_ENABLED: "false" }), tokenId, deps(stored));
+  const result = await runOneLockRule(await runtime({ LOCK_SERVICE_ENABLED: "false" }), tokenId, deps(stored));
   assert.deepEqual(result, { ok: true, skipped: true, disabled: true });
   assert.equal(stored.state, "waiting_schedule");
 });
 
 test("scheduled locking receives only the monitored cinema projection", async () => {
   let requestBody;
-  const env = runtime({
+  const env = await runtime({
     LOCK_COORDINATOR: {
       idFromName: (id) => id,
       get: () => ({
@@ -90,7 +91,7 @@ test("scheduled locking receives only the monitored cinema projection", async ()
     ticketStatus: 0
   });
 
-  const failedEnv = runtime({
+  const failedEnv = await runtime({
     LOCK_COORDINATOR: {
       idFromName: (id) => id,
       get: () => ({ fetch: async () => Response.json({ ok: false }, { status: 500 }) })
@@ -112,7 +113,7 @@ test("coordinator locks from monitored data without fetching schedules again", a
     throw new Error("independent schedule fetch is forbidden");
   };
   try {
-    const coordinator = new LockCoordinator(coordinatorState(), runtime(), deps(stored, {
+    const coordinator = new LockCoordinator(coordinatorState(), await runtime(), deps(stored, {
       fetchCinema: undefined,
       createOrder: async () => {
         orderCalls++;
@@ -146,15 +147,15 @@ test("the monitor cron hands a persisted monitor result to locking", async (t) =
   // 深夜跑套件必挂(coordinatorCalls=0)。mock 时钟固定在窗口内(北京 12:00)消除时间依赖。
   t.mock.timers.enable({ apis: ["Date"], now: now.getTime() });
   let coordinatorCalls = 0;
-  const env = runtime({
-    MAOYAN_KV: new MemoryKV({
-      "meta:tokens": JSON.stringify([{ id: tokenId, token: "access-token" }]),
-      [`u:${tokenId}:config`]: JSON.stringify({
+  const env = await runtime({
+    DB: await createDB({
+      tokens: [{ id: tokenId, token: "access-token" }],
+      configs: { [tokenId]: {
         enabled: true,
         cinemaId: "25428",
         selectedMovieIds: ["7"],
         monitorDdl: "2099-01-01T00:00:00.000Z"
-      })
+      } }
     }),
     LOCK_COORDINATOR: {
       idFromName: (id) => id,
@@ -183,13 +184,13 @@ test("the monitor cron hands a persisted monitor result to locking", async (t) =
   }
 
   assert.equal(coordinatorCalls, 1);
-  assert.ok(await env.MAOYAN_KV.get(`u:${tokenId}:snapshot`, "json"));
-  assert.ok(await env.MAOYAN_KV.get(`u:${tokenId}:status`, "json"));
+  assert.ok(Object.keys(await db.getSnapshot(env.DB, tokenId)).length > 0);
+  assert.ok(await db.getStatus(env.DB, tokenId));
 });
 
 test("automation exact HH:mm locks only selectable matching seats", async () => {
   const stored = rule();
-  const result = await runOneLockRule(runtime(), tokenId, deps(stored));
+  const result = await runOneLockRule(await runtime(), tokenId, deps(stored));
   assert.equal(result.ok, true);
   assert.equal(stored.state, "locked");
   assert.equal(stored.orderId, "order-1");
@@ -203,7 +204,7 @@ test("scheduled lock push renders hall row/seat instead of the internal identifi
     targetDate: "2026-09-12"
   });
   let notification;
-  const result = await runOneLockRule(runtime(), tokenId, deps(stored, {
+  const result = await runOneLockRule(await runtime(), tokenId, deps(stored, {
     fetchSeats: async () => ({
       seqNo: "200", sectionId: "1", sectionName: "1号厅",
       seats: [{ seatNo: "1-12-1", rowId: "1", columnId: "10", available: true }]
@@ -222,7 +223,7 @@ test("scheduled lock push renders hall row/seat instead of the internal identifi
 test("scheduled lock failure push keeps the readable seat label", async () => {
   const stored = rule({ seats: [{ seatNo: "1-12-1", rowId: "1", columnId: "10", type: "N" }] });
   let notification;
-  await runOneLockRule(runtime(), tokenId, deps(stored, {
+  await runOneLockRule(await runtime(), tokenId, deps(stored, {
     createOrder: async () => { throw new OrderAttemptError("rejected", false); },
     notify: async (_config, title, content) => { notification = { title, content }; }
   }));
@@ -236,7 +237,7 @@ test("scheduled lock failure push keeps the readable seat label", async () => {
 test("automation marks a past China target date expired before provider calls", async () => {
   const stored = rule({ targetDate: "2026-09-10" });
   let cinemaCalls = 0;
-  await runOneLockRule(runtime(), tokenId, deps(stored, { fetchCinema: async () => { cinemaCalls++; return {}; } }));
+  await runOneLockRule(await runtime(), tokenId, deps(stored, { fetchCinema: async () => { cinemaCalls++; return {}; } }));
   assert.equal(stored.state, "expired");
   assert.equal(cinemaCalls, 0);
 });
@@ -244,7 +245,7 @@ test("automation marks a past China target date expired before provider calls", 
 test("automation keeps no exact HH:mm match waiting without seat request", async () => {
   const stored = rule();
   let seatsCalls = 0;
-  await runOneLockRule(runtime(), tokenId, deps(stored, {
+  await runOneLockRule(await runtime(), tokenId, deps(stored, {
     findShows: () => [],
     fetchSeats: async () => { seatsCalls++; return {}; }
   }));
@@ -252,10 +253,139 @@ test("automation keeps no exact HH:mm match waiting without seat request", async
   assert.equal(seatsCalls, 0);
 });
 
+test("automation locks a same-hall show within thirty minutes and notifies with actual time", async () => {
+  const stored = rule({ hall: "1号激光IMAX厅", templateTime: "18:40" });
+  let notification;
+  let orderCalls = 0;
+  await runOneLockRule(await runtime(), tokenId, deps(stored, {
+    findShows: () => [],
+    findCompatibleShows: () => [{ seqNo: "250", tm: "18:50", th: "1号激光IMAX厅", showDate: stored.targetDate, timeDeltaMinutes: 10, matchMode: "fuzzy" }],
+    fetchSeats: async (_session, request) => ({
+      seqNo: request.seqNo, sectionId: "1", sectionName: "1号厅",
+      seats: [{ seatNo: "1-6-18", rowId: "6", columnId: "18", available: true }]
+    }),
+    createOrder: async () => { orderCalls++; return { orderId: "order-250", payLeftSecond: 600 }; },
+    notify: async (_config, title, content) => { notification = { title, content }; }
+  }));
+
+  assert.equal(stored.state, "locked");
+  assert.equal(stored.seqNo, "250");
+  assert.equal(stored.targetSeqNo, "250");
+  assert.equal(stored.targetTime, "18:50");
+  assert.equal(stored.matchMode, "fuzzy");
+  assert.equal(stored.timeDeltaMinutes, 10);
+  assert.equal(orderCalls, 1);
+  assert.equal(notification.title, "猫眼锁座成功");
+  assert.match(notification.content, /2026-09-12 18:50/);
+  assert.match(notification.content, /模板场次 18:40，实际场次偏差 \+10 分钟/);
+});
+
+test("automation keeps waiting when no same-hall nearby show exists", async () => {
+  const stored = rule({ hall: "1号激光IMAX厅", templateTime: "18:40" });
+  let notifications = 0;
+  let seatsCalls = 0;
+  await runOneLockRule(await runtime(), tokenId, deps(stored, {
+    findShows: () => [],
+    findCompatibleShows: () => [],
+    fetchSeats: async () => { seatsCalls++; return {}; },
+    notify: async () => { notifications++; }
+  }));
+
+  assert.equal(stored.state, "waiting_schedule");
+  assert.equal(seatsCalls, 0);
+  assert.equal(notifications, 0);
+});
+
+test("automation turns an ambiguous nearby show into a notified failure", async () => {
+  const stored = rule({ hall: "1号激光IMAX厅", templateTime: "18:40" });
+  let notification;
+  await runOneLockRule(await runtime(), tokenId, deps(stored, {
+    findShows: () => [],
+    findCompatibleShows: () => [
+      { seqNo: "250", tm: "18:30", th: "1号激光IMAX厅", timeDeltaMinutes: -10, matchMode: "fuzzy" },
+      { seqNo: "260", tm: "18:50", th: "1号激光IMAX厅", timeDeltaMinutes: 10, matchMode: "fuzzy" }
+    ],
+    createOrder: async () => { throw new Error("must not order ambiguous candidate"); },
+    notify: async (_config, title, content) => { notification = { title, content }; }
+  }));
+
+  assert.equal(stored.state, "failed");
+  assert.match(stored.lastError, /多个同厅型/);
+  assert.equal(notification.title, "猫眼锁座失败");
+});
+
+test("automation notifies when a selected nearby show cannot load its seat map", async () => {
+  const stored = rule({ hall: "1号激光IMAX厅", templateTime: "18:40" });
+  let notification;
+  await runOneLockRule(await runtime(), tokenId, deps(stored, {
+    findShows: () => [],
+    findCompatibleShows: () => [{ seqNo: "250", tm: "18:50", th: "1号激光IMAX厅", timeDeltaMinutes: 10, matchMode: "fuzzy" }],
+    fetchSeats: async () => { throw new Error("座位图暂不可用"); },
+    notify: async (_config, title, content) => { notification = { title, content }; }
+  }));
+
+  assert.equal(stored.state, "failed");
+  assert.equal(notification.title, "猫眼锁座失败");
+  assert.match(notification.content, /2026-09-12 18:50/);
+});
+
+test("automation accepts the inclusive thirty-minute boundary from the default matcher", async () => {
+  const stored = rule({ hall: "1号激光IMAX厅", templateTime: "18:40" });
+  const result = await runOneLockRule(await runtime(), tokenId, deps(stored, {
+    fetchCinema: async () => ({ showData: { movies: [{ id: "7", shows: [{ showDate: stored.targetDate, plist: [
+      { seqNo: "270", tm: "19:10", th: "1号激光IMAX厅", ticketStatus: 0 }
+    ] }] }] } }),
+    findShows: () => [],
+    fetchSeats: async (_session, request) => ({
+      seqNo: request.seqNo, sectionId: "1", sectionName: "1号厅",
+      seats: [{ seatNo: "1-6-18", rowId: "6", columnId: "18", available: true }]
+    }),
+    createOrder: async () => ({ orderId: "order-270", payLeftSecond: 600 })
+  }));
+
+  assert.equal(result.state, "locked");
+  assert.equal(stored.targetSeqNo, "270");
+  assert.equal(stored.timeDeltaMinutes, 30);
+});
+
+test("automation does not match a default nearby candidate beyond thirty minutes", async () => {
+  const stored = rule({ hall: "1号激光IMAX厅", templateTime: "18:40" });
+  let orderCalls = 0;
+  await runOneLockRule(await runtime(), tokenId, deps(stored, {
+    fetchCinema: async () => ({ showData: { movies: [{ id: "7", shows: [{ showDate: stored.targetDate, plist: [
+      { seqNo: "271", tm: "19:11", th: "1号激光IMAX厅", ticketStatus: 0 }
+    ] }] }] } }),
+    findShows: () => [],
+    createOrder: async () => { orderCalls++; return { orderId: "must-not-order", payLeftSecond: 600 }; }
+  }));
+
+  assert.equal(stored.state, "waiting_schedule");
+  assert.equal(orderCalls, 0);
+});
+
+test("automation notifies when a fuzzy order result is uncertain", async () => {
+  const stored = rule({ hall: "1号激光IMAX厅", templateTime: "18:40" });
+  let notification;
+  await runOneLockRule(await runtime(), tokenId, deps(stored, {
+    findShows: () => [],
+    findCompatibleShows: () => [{ seqNo: "280", tm: "18:50", th: "1号激光IMAX厅", timeDeltaMinutes: 10, matchMode: "fuzzy" }],
+    fetchSeats: async (_session, request) => ({
+      seqNo: request.seqNo, sectionId: "1", sectionName: "1号厅",
+      seats: [{ seatNo: "1-6-18", rowId: "6", columnId: "18", available: true }]
+    }),
+    createOrder: async () => { throw new OrderAttemptError("uncertain", true); },
+    notify: async (_config, title, content) => { notification = { title, content }; }
+  }));
+
+  assert.equal(stored.state, "unknown");
+  assert.equal(notification.title, "猫眼锁座失败");
+  assert.match(notification.content, /2026-09-12 18:50/);
+});
+
 test("automation fails ambiguous exact HH:mm schedules without an order", async () => {
   const stored = rule();
   let orderCalls = 0;
-  await runOneLockRule(runtime(), tokenId, deps(stored, {
+  await runOneLockRule(await runtime(), tokenId, deps(stored, {
     findShows: () => [{ seqNo: "200" }, { seqNo: "201" }],
     createOrder: async () => { orderCalls++; return {}; }
   }));
@@ -266,7 +396,7 @@ test("automation fails ambiguous exact HH:mm schedules without an order", async 
 test("automation fails when a selected future seat is unavailable", async () => {
   const stored = rule();
   let orderCalls = 0;
-  await runOneLockRule(runtime(), tokenId, deps(stored, {
+  await runOneLockRule(await runtime(), tokenId, deps(stored, {
     fetchSeats: async () => ({ seqNo: "200", seats: [{ seatNo: "1-6-18", rowId: "6", columnId: "18", available: false }] }),
     createOrder: async () => { orderCalls++; return {}; }
   }));
@@ -276,13 +406,13 @@ test("automation fails when a selected future seat is unavailable", async () => 
 
 test("automation records certain provider rejection as failed and ambiguous order as unknown", async () => {
   const rejected = rule();
-  await runOneLockRule(runtime(), tokenId, deps(rejected, {
+  await runOneLockRule(await runtime(), tokenId, deps(rejected, {
     createOrder: async () => { throw new OrderAttemptError("rejected", false); }
   }));
   assert.equal(rejected.state, "failed");
 
   const unknown = rule();
-  await runOneLockRule(runtime(), tokenId, deps(unknown, {
+  await runOneLockRule(await runtime(), tokenId, deps(unknown, {
     createOrder: async () => { throw new OrderAttemptError("ambiguous", true); }
   }));
   assert.equal(unknown.state, "unknown");
@@ -292,7 +422,7 @@ test("automation skips terminal and matching rules forever", async () => {
   for (const state of ["locked", "failed", "expired", "unknown", "matching"]) {
     const stored = rule({ state });
     let called = false;
-    const result = await runOneLockRule(runtime(), tokenId, deps(stored, { fetchCinema: async () => { called = true; return {}; } }));
+    const result = await runOneLockRule(await runtime(), tokenId, deps(stored, { fetchCinema: async () => { called = true; return {}; } }));
     assert.equal(result.skipped, true);
     assert.equal(called, false);
   }
@@ -314,7 +444,7 @@ test("concurrency serializes a run and skips the second request", async () => {
   const wait = new Promise((resolve) => { release = resolve; });
   let calls = 0;
   const stored = rule();
-  const coordinator = new LockCoordinator(coordinatorState(), runtime(), deps(stored, {
+  const coordinator = new LockCoordinator(coordinatorState(), await runtime(), deps(stored, {
     createOrder: async () => { calls++; await wait; return { orderId: "order-1", payLeftSecond: 600 }; }
   }));
   const first = coordinator.fetch(coordinatorRequest({ action: "run", tokenId }));
@@ -329,7 +459,7 @@ test("concurrency serializes rule creation and rejects the second active rule", 
   let release;
   const wait = new Promise((resolve) => { release = resolve; });
   let creates = 0;
-  const coordinator = new LockCoordinator(coordinatorState(), runtime(), {
+  const coordinator = new LockCoordinator(coordinatorState(), await runtime(), {
     createRule: async () => { creates++; await wait; return { id: "rule-a" }; }
   });
   const first = coordinator.fetch(coordinatorRequest({ action: "create", tokenId, input: {} }));
@@ -348,7 +478,7 @@ test("concurrency cancellation prevents a delayed run from creating an order or 
   let rulePresent = true;
   let orderCalls = 0;
   const stored = rule();
-  const coordinator = new LockCoordinator(coordinatorState(), runtime(), deps(stored, {
+  const coordinator = new LockCoordinator(coordinatorState(), await runtime(), deps(stored, {
     getRule: async () => rulePresent ? stored : null,
     putRule: async (_env, _token, next) => { if (rulePresent) Object.assign(stored, next); },
     removeRule: async () => { rulePresent = false; },
@@ -374,7 +504,7 @@ test("concurrency session removal prevents a delayed run from creating an order 
   let sessionPresent = true;
   let orderCalls = 0;
   const stored = rule();
-  const coordinator = new LockCoordinator(coordinatorState(), runtime(), deps(stored, {
+  const coordinator = new LockCoordinator(coordinatorState(), await runtime(), deps(stored, {
     getRule: async () => rulePresent ? stored : null,
     putRule: async (_env, _token, next) => { if (rulePresent) Object.assign(stored, next); },
     getSessionStatus: async () => ({ uploaded: sessionPresent }),
@@ -403,7 +533,7 @@ test("concurrency cancellation after matching persistence prevents an order and 
   let sessionPresent = true;
   let orderCalls = 0;
   const stored = rule();
-  const coordinator = new LockCoordinator(coordinatorState(), runtime(), deps(stored, {
+  const coordinator = new LockCoordinator(coordinatorState(), await runtime(), deps(stored, {
     getRule: async () => rulePresent ? stored : null,
     putRule: async (_env, _token, next) => {
       if (next.state === "matching") {
@@ -451,8 +581,8 @@ test("scheduled rule logs are structured and omit rule identifiers", async () =>
     targetDate: "2026-09-12",
     templateTime: "20:00"
   });
-  const { text: logs, entries } = await captureConsole(() => runOneLockRule(
-    runtime(),
+  const { text: logs, entries } = await captureConsole(async () => runOneLockRule(
+    await runtime(),
     tokenId,
     deps(stored, { createOrder: async () => ({ orderId: "order-sensitive", payLeftSecond: 600 }) })
   ));

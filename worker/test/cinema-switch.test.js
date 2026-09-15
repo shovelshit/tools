@@ -5,8 +5,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import worker from "../src/index.js";
 import { runCheck } from "../src/maoyan/check.js";
-import { MemoryKV } from "./helpers.js";
-import { userKey } from "../src/maoyan/user.js";
+import { createDB } from "./helpers.js";
+import * as db from "../src/maoyan/db.js";
 
 const tokenId = "22222222-2222-4222-8222-222222222222";
 
@@ -32,11 +32,11 @@ async function withMockFetch(mock, callback) {
 }
 
 // 构造已验证推送渠道 + 监控开启的运行环境(与 config.test.js 同路径: test-push → enabled)
-async function verifiedEnv(extraKV = {}) {
+async function verifiedEnv(snapshot = null) {
   const env = {
-    MAOYAN_KV: new MemoryKV({
-      "meta:tokens": JSON.stringify([{ id: tokenId, token: "access-token" }]),
-      ...extraKV
+    DB: await createDB({
+      tokens: [{ id: tokenId, token: "access-token" }],
+      ...(snapshot ? { snapshots: { [tokenId]: snapshot } } : {})
     })
   };
   // 与 config.test.js 同路径: 先保存推送密钥 → 测试推送验证 → 才能开启监控
@@ -62,25 +62,21 @@ const cinemaB = {
 };
 
 test("switching cinema resets the show snapshot so the new cinema is not reported as new shows", async () => {
-  const env = await verifiedEnv({
-    // 旧影院(111)的快照: 影片 900 已记录 seqNo A1
-    [userKey(tokenId, "snapshot")]: JSON.stringify({ "900": ["A1"] })
-  });
+  const env = await verifiedEnv({ "900": ["A1"] });
   const post = await worker.fetch(request("/api/config", { cinemaId: "222" }), env);
   assert.equal(post.status, 200);
-  const cfg = await env.MAOYAN_KV.get(userKey(tokenId, "config"), "json");
+  const cfg = await db.getConfig(env.DB, tokenId);
   assert.equal(cfg.cinemaId, "222");
-  assert.equal(await env.MAOYAN_KV.get(userKey(tokenId, "snapshot"), "json"), null); // 快照已随切影院清空
+  assert.deepEqual(await db.getSnapshot(env.DB, tokenId), {}); // 快照已随切影院清空
 
   // 切影院后首次检查: 重建基线, 不产生"新增场次"告警, 不推送
   const res = await withMockFetch(async () => {
     throw new Error("pushNotify must not be called right after a cinema switch");
   }, () => runCheck(env, false, tokenId, { fetchCinema: async () => cinemaB }));
   assert.equal(res.skipped, undefined);
-  // 无变化批次(重建基线)不再落盘 changes(KV 写额度优化), 读取为 null
-  const changes = (await env.MAOYAN_KV.get(userKey(tokenId, "changes"), "json")) || [];
-  assert.equal(changes.length, 0);
-  const snapshot = await env.MAOYAN_KV.get(userKey(tokenId, "snapshot"), "json");
+  const changes = await db.listChanges(env.DB, tokenId);
+  assert.equal(changes.length, 0); // 无变化批次不记 changes
+  const snapshot = await db.getSnapshot(env.DB, tokenId);
   assert.deepEqual(snapshot["900"], ["B1"]); // 新影院基线已建立
 });
 
@@ -88,11 +84,11 @@ test("re-saving the same cinema keeps the snapshot (no spurious baseline resets)
   const env = await verifiedEnv();
   // 切到 222(快照本就为空) → 首检建立基线 B1(直接预置模拟)
   await worker.fetch(request("/api/config", { cinemaId: "222" }), env);
-  await env.MAOYAN_KV.put(userKey(tokenId, "snapshot"), JSON.stringify({ "900": ["B1"] }));
+  await db.saveSnapshot(env.DB, tokenId, { "900": ["B1"] });
   // 前端每次加载影院/勾选影片都会重复保存同一 cinemaId — 不得清快照(否则持续漏报真实新增)
   const post = await worker.fetch(request("/api/config", { cinemaId: "222", selectedMovieIds: ["900"] }), env);
   assert.equal(post.status, 200);
-  const snapshot = await env.MAOYAN_KV.get(userKey(tokenId, "snapshot"), "json");
+  const snapshot = await db.getSnapshot(env.DB, tokenId);
   assert.deepEqual(snapshot["900"], ["B1"]);
 });
 
@@ -100,7 +96,7 @@ test("monitor keeps running and follows the new cinema after a switch (config un
   const env = await verifiedEnv();
   const post = await worker.fetch(request("/api/config", { cinemaId: "222" }), env);
   assert.equal(post.status, 200);
-  const cfg = await env.MAOYAN_KV.get(userKey(tokenId, "config"), "json");
+  const cfg = await db.getConfig(env.DB, tokenId);
   assert.equal(cfg.enabled, true); // 切影院不停止监控
   assert.equal(cfg.monitorDdl !== undefined && cfg.monitorDdl !== null, true); // 截止时间不重置
   assert.deepEqual(cfg.selectedMovieIds, ["900"]); // 未随请求变化

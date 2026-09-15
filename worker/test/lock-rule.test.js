@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { captureConsole, MemoryKV, validSession } from "./helpers.js";
+import { captureConsole, createDB, MemoryKV, validSession } from "./helpers.js";
 import { userKey, cleanupUserData } from "../src/maoyan/user.js";
+import { getLockRuleRow, putConfig } from "../src/maoyan/db.js";
 import {
   createLockRule,
   getLockRule,
+  lockNotificationContent,
   publicLockRule,
   putLockRule,
   removeLockRule
@@ -12,12 +14,11 @@ import {
 
 const now = new Date("2026-09-11T04:00:00.000Z");
 
-function envWithConfig(config = { cinemaId: "25428", selectedMovieIds: ["7"] }) {
+async function envWithConfig(config = { cinemaId: "25428", selectedMovieIds: ["7"] }) {
   return {
     LOCK_SERVICE_ENABLED: "true",
-    MAOYAN_KV: new MemoryKV({
-      [userKey("token-a", "config")]: JSON.stringify(config)
-    })
+    DB: await createDB({ configs: { "token-a": config } }),
+    MAOYAN_KV: new MemoryKV()
   };
 }
 
@@ -56,7 +57,7 @@ async function reject(env, input, pattern, deps = dependencies()) {
 }
 
 test("creates a rule from authoritative cinema and seat data", async () => {
-  const env = envWithConfig();
+  const env = await envWithConfig();
   const rule = await createLockRule(env, "token-a", validInput({ seatNos: ["1-6-18", "1-6-18"] }), dependencies());
 
   assert.equal(rule.cinemaName, "测试影院");
@@ -78,7 +79,7 @@ test("creates a rule from authoritative cinema and seat data", async () => {
 });
 
 test("maps the template sequence to the authenticated seat-map request", async () => {
-  const env = envWithConfig();
+  const env = await envWithConfig();
   await createLockRule(env, "token-a", validInput(), dependencies({
     fetchSeats: async (_session, request) => {
       assert.deepEqual(request, { cinemaId: "25428", movieId: "7", seqNo: "100" });
@@ -93,7 +94,7 @@ test("maps the template sequence to the authenticated seat-map request", async (
 });
 
 test("requires explicit risk acceptance", async () => {
-  await reject(envWithConfig(), validInput({ riskAccepted: "true" }), /风险/);
+  await reject(await envWithConfig(),validInput({ riskAccepted: "true" }), /风险/);
 });
 
 test("a real target show does not require risk acceptance (inferred ones still do)", async () => {
@@ -104,7 +105,7 @@ test("a real target show does not require risk acceptance (inferred ones still d
       { seqNo: "200", tm: "20:00", ticketStatus: 0 }
     ] }] }]
   } };
-  const locked = await createLockRule(envWithConfig(), "token-a", validInput({ templateSeqNo: "200", riskAccepted: false }), dependencies({
+  const locked = await createLockRule(await envWithConfig(),"token-a", validInput({ templateSeqNo: "200", riskAccepted: false }), dependencies({
     fetchCinema: async () => realShowCinema,
     fetchSeats: async (_session, request) => ({
       seqNo: request.seqNo, sectionId: "1", sectionName: "2号厅",
@@ -115,28 +116,28 @@ test("a real target show does not require risk acceptance (inferred ones still d
   assert.equal(locked.state, "locked");
   assert.equal(locked.orderId, "order-1");
   // 推断模式(目标日期无排期): 缺少风险勾选仍拒绝
-  await reject(envWithConfig(), validInput({ riskAccepted: false }), /风险/);
+  await reject(await envWithConfig(),validInput({ riskAccepted: false }), /风险/);
 });
 
 test("rejects non-decimal IDs before reading provider data", async () => {
   let called = false;
-  await reject(envWithConfig(), validInput({ cinemaId: "25428x" }), /参数/, dependencies({
+  await reject(await envWithConfig(),validInput({ cinemaId: "25428x" }), /参数/, dependencies({
     fetchCinema: async () => { called = true; return {}; }
   }));
   assert.equal(called, false);
 });
 
 test("requires the movie to be selected in the monitor configuration", async () => {
-  await reject(envWithConfig({ cinemaId: "25428", selectedMovieIds: ["8"] }), validInput(), /监控/);
+  await reject(await envWithConfig({ cinemaId: "25428", selectedMovieIds: ["8"] }), validInput(), /监控/);
 });
 
 test("requires the template sequence to belong to the configured cinema movie", async () => {
-  await reject(envWithConfig(), validInput({ templateSeqNo: "101" }), /场次/);
+  await reject(await envWithConfig(),validInput({ templateSeqNo: "101" }), /场次/);
 });
 
 test("seat availability is enforced for real shows but ignored for inferred ones", async () => {
   // 目标日期无排期(推断模式): 模板座位图中"已售"的座位也允许锁定
-  const inferred = await createLockRule(envWithConfig(), "token-a", validInput({ seatNos: ["1-6-19"] }), dependencies());
+  const inferred = await createLockRule(await envWithConfig(),"token-a", validInput({ seatNos: ["1-6-19"] }), dependencies());
   assert.deepEqual(inferred.seats.map((seat) => seat.seatNo), ["1-6-19"]);
   // 目标日期有真实排期: 强制校验真实售卖状态
   const realShowCinema = { showData: {
@@ -156,8 +157,8 @@ test("seat availability is enforced for real shows but ignored for inferred ones
       ] };
     }
   });
-  await reject(envWithConfig(), validInput({ templateSeqNo: "200", seatNos: ["1-6-19"] }), /座位/, realDeps);
-  const locked = await createLockRule(envWithConfig(), "token-a", validInput({ templateSeqNo: "200" }), {
+  await reject(await envWithConfig(),validInput({ templateSeqNo: "200", seatNos: ["1-6-19"] }), /座位/, realDeps);
+  const locked = await createLockRule(await envWithConfig(),"token-a", validInput({ templateSeqNo: "200" }), {
     ...realDeps,
     placeOrder: async () => ({ orderId: "order-1", payLeftSecond: 600 })
   });
@@ -167,7 +168,7 @@ test("seat availability is enforced for real shows but ignored for inferred ones
 });
 
 test("an immediate successful lock sends the same terminal notification after persistence", async () => {
-  const env = envWithConfig({
+  const env = await envWithConfig({
     cinemaId: "25428",
     selectedMovieIds: ["7"],
     notifyChannel: "bark",
@@ -192,7 +193,7 @@ test("an immediate successful lock sends the same terminal notification after pe
 });
 
 test("an immediate notification failure keeps the successful order locked", async () => {
-  const env = envWithConfig();
+  const env = await envWithConfig();
   const locked = await createLockRule(env, "token-a", validInput({ targetDate: "2026-09-11" }), dependencies({
     placeOrder: async () => ({ orderId: "order-1", payLeftSecond: 600 }),
     notify: async () => { throw new Error("push unavailable"); }
@@ -212,7 +213,7 @@ test("a real show uses exactly the sequence selected by the user", async () => {
     ] }] }]
   } };
   let orderedSeqNo = null;
-  const result = await createLockRule(envWithConfig(), "token-a", validInput({ templateSeqNo: "201" }), dependencies({
+  const result = await createLockRule(await envWithConfig(),"token-a", validInput({ templateSeqNo: "201" }), dependencies({
     fetchCinema: async () => cinema,
     fetchSeats: async (_session, request) => ({
       seqNo: request.seqNo, sectionId: "1", sectionName: "2号厅",
@@ -235,19 +236,19 @@ test("a stale template cannot replace a selectable real target show", async () =
       { showDate: "2026-09-12", plist: [{ seqNo: "200", tm: "20:00", ticketStatus: 0 }] }
     ] }]
   } };
-  await reject(envWithConfig(), validInput(), /目标日期的实际场次/, dependencies({ fetchCinema: async () => cinema }));
+  await reject(await envWithConfig(),validInput(), /目标日期的实际场次/, dependencies({ fetchCinema: async () => cinema }));
 });
 
 test("requires at least one well-formed selected seat", async () => {
-  await reject(envWithConfig(), validInput({ seatNos: [] }), /座位/);
-  await reject(envWithConfig(), validInput({ seatNos: ["one"] }), /座位/);
+  await reject(await envWithConfig(),validInput({ seatNos: [] }), /座位/);
+  await reject(await envWithConfig(),validInput({ seatNos: ["one"] }), /座位/);
 });
 
 test("targets are limited to today through the next 30 China calendar days", async () => {
   // 昨天不可锁
-  await reject(envWithConfig(), validInput({ targetDate: "2026-09-10" }), /目标日期/);
+  await reject(await envWithConfig(),validInput({ targetDate: "2026-09-10" }), /目标日期/);
   // 今天可锁(即使与模板场次同日): 真实场次存在 → 立即锁座下单
-  const today = await createLockRule(envWithConfig(), "token-a", validInput({ targetDate: "2026-09-11" }), {
+  const today = await createLockRule(await envWithConfig(),"token-a", validInput({ targetDate: "2026-09-11" }), {
     ...dependencies(),
     placeOrder: async () => ({ orderId: "order-1", payLeftSecond: 600 })
   });
@@ -255,11 +256,11 @@ test("targets are limited to today through the next 30 China calendar days", asy
   assert.equal(today.state, "locked");
   assert.equal(today.targetSeqNo, "100");
   // 超出 30 天不可锁
-  await reject(envWithConfig(), validInput({ targetDate: "2026-10-12" }), /目标日期/);
+  await reject(await envWithConfig(),validInput({ targetDate: "2026-10-12" }), /目标日期/);
 });
 
 test("allows only one non-terminal rule for a token", async () => {
-  const env = envWithConfig();
+  const env = await envWithConfig();
   await putLockRule(env, "token-a", { id: "existing", state: "waiting_schedule" });
   await reject(env, validInput(), /进行中/);
   await putLockRule(env, "token-a", { id: "finished", state: "failed" });
@@ -269,21 +270,21 @@ test("allows only one non-terminal rule for a token", async () => {
 
 test("replaces safe terminal lock rules but retains active and uncertain rules", async () => {
   for (const state of ["locked", "expired", "failed"]) {
-    const env = envWithConfig();
+    const env = await envWithConfig();
     await putLockRule(env, "token-a", { id: `old-${state}`, state });
     const replacement = await createLockRule(env, "token-a", validInput(), dependencies());
     assert.notEqual(replacement.id, `old-${state}`);
     assert.equal(replacement.state, "waiting_schedule");
   }
   for (const state of ["waiting_schedule", "matching", "unknown"]) {
-    const env = envWithConfig();
+    const env = await envWithConfig();
     await putLockRule(env, "token-a", { id: `active-${state}`, state });
     await reject(env, validInput(), /进行中/);
   }
 });
 
 test("projects only public rule fields and removes token-scoped rule", async () => {
-  const env = envWithConfig();
+  const env = await envWithConfig();
   const rule = await createLockRule(env, "token-a", validInput(), dependencies());
   const projected = publicLockRule({ ...rule, attemptMarker: "internal", session: "secret" }, false);
   assert.equal(projected.automationEnabled, false);
@@ -293,21 +294,62 @@ test("projects only public rule fields and removes token-scoped rule", async () 
   assert.equal(await getLockRule(env, "token-a"), null);
 });
 
-test("cleanup deletes the encrypted session and lock rule keys", async () => {
-  const env = envWithConfig();
+test("projects fuzzy target show details and renders the actual time in notifications", () => {
+  const rule = {
+    cinemaName: "测试影院",
+    movieName: "测试电影",
+    hall: "1号激光IMAX厅",
+    targetDate: "2026-09-12",
+    templateTime: "18:40",
+    targetTime: "18:50",
+    matchMode: "fuzzy",
+    timeDeltaMinutes: 10,
+    seats: [{ label: "6排18座" }],
+    state: "failed",
+    lastError: "所选未来座位不可用或影厅布局已变化"
+  };
+
+  const projected = publicLockRule({ ...rule, secret: "hidden" }, true);
+  assert.equal(projected.targetTime, "18:50");
+  assert.equal(projected.matchMode, "fuzzy");
+  assert.equal(projected.timeDeltaMinutes, 10);
+  assert.equal(Object.hasOwn(projected, "secret"), false);
+  assert.equal(
+    lockNotificationContent(rule),
+    "测试影院 测试电影\n1号激光IMAX厅\n2026-09-12 18:50\n模板场次 18:40，实际场次偏差 +10 分钟\n6排18座"
+  );
+});
+
+test("legacy exact rules keep using the template time in notifications", () => {
+  assert.equal(
+    lockNotificationContent({
+      cinemaName: "测试影院",
+      movieName: "测试电影",
+      hall: "1号厅",
+      targetDate: "2026-09-12",
+      templateTime: "18:40",
+      seats: [{ label: "6排18座" }],
+      state: "failed"
+    }),
+    "测试影院 测试电影\n1号厅\n2026-09-12 18:40\n6排18座"
+  );
+});
+
+test("cleanup deletes the encrypted session (KV) and the lock rule (D1)", async () => {
+  const env = await envWithConfig();
   await env.MAOYAN_KV.put(userKey("token-a", "maoyan-session"), "ciphertext");
-  await env.MAOYAN_KV.put(userKey("token-a", "maoyan-lock-rule"), "rule");
+  await putLockRule(env, "token-a", { id: "rule-a", state: "waiting_schedule" });
   await cleanupUserData(env, "token-a");
   assert.equal(await env.MAOYAN_KV.get(userKey("token-a", "maoyan-session")), null);
-  assert.equal(await env.MAOYAN_KV.get(userKey("token-a", "maoyan-lock-rule")), null);
+  assert.equal(await getLockRuleRow(env.DB, "token-a"), null);
 });
 
 test("rule logs are structured and omit user, show, seat, and order identifiers", async () => {
-  const env = envWithConfig();
-  await env.MAOYAN_KV.put(userKey("token-a-sensitive", "config"), JSON.stringify({
+  const env = await envWithConfig();
+  await putConfig(env.DB, "token-a-sensitive", {
     cinemaId: "25428",
     selectedMovieIds: ["7"]
-  }));
+  });
   const { text: logs, entries } = await captureConsole(() => createLockRule(
     env,
     "token-a-sensitive",

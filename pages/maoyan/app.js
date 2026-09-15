@@ -1,5 +1,5 @@
 // 猫眼影院场次监控 - 云端版前端
-// 与 Cloudflare Worker 的 /api/* 交互; Worker 地址和令牌存 localStorage
+// 与 Cloudflare Worker 的 /api/* 交互; 传输与凭据由运行时适配器管理
 // 首次进入显示登录层, 连接成功后进入主页面
 
 const $ = (id) => document.getElementById(id);
@@ -7,6 +7,7 @@ const els = {
   // 登录层
   loginOverlay: $("login-overlay"),
   mainPage: $("main-page"),
+  lockOverlay: $("lock-overlay"),
   workerUrl: $("worker-url"),
   token: $("token-input"),
   btnConnect: $("btn-connect"),
@@ -14,6 +15,11 @@ const els = {
   loginHint: $("login-hint"),
   // 顶栏
   statusLine: $("status-line"),
+  workerProfile: $("worker-profile"),
+  workerSecurity: $("worker-security"),
+  updateStatus: $("update-status"),
+  updateText: $("update-text"),
+  btnOpenUpdate: $("btn-open-update"),
   btnLogout: $("btn-logout"),
   // 影院设置
   cityInput: $("city-input"),
@@ -45,6 +51,10 @@ const els = {
 
 let cinemaMovies = []; // [{id, nm, showCount, checked}]
 let connected = false;
+const profileGeneration = window.createProfileGeneration();
+let activeProfileKey = "";
+let runtimeInfo = { kind: window.maoyanRuntime?.kind || "web", canLoginMaoyan: false, persistentTokenStorage: false };
+let tokenProfileKey = "";
 let lockServiceEnabled = false;
 let monitorEnabled = false; // 默认停止, 需显式「开始监控」
 let monitorDdl = null; // 监控截止时间(ISO), 每次开始监控刷新 30 天
@@ -65,28 +75,63 @@ const SAME_ORIGIN = SAME_ORIGIN_HOSTS.includes(location.hostname);
 const DEFAULT_WORKER = SAME_ORIGIN ? "" : "https://ltools.asia";
 
 // ---------------- 基础 ----------------
-// 安全: 令牌只通过 X-Token 请求头传递, 不再拼进 URL(避免进入日志/历史记录)
-function apiPath(path, params = "") {
-  const base = els.workerUrl.value.trim().replace(/\/+$/, "");
-  return `${base}${path}${params}`;
+function normalizedWorkerUrl() {
+  return normalizeWorkerProfile(els.workerUrl.value);
+}
+
+function normalizeWorkerProfile(value) {
+  try {
+    const url = new URL(String(value ?? "").trim() || (SAME_ORIGIN ? location.origin : ""));
+    if (!/^https?:$/.test(url.protocol) || url.username || url.password || url.search || url.hash) return "";
+    return url.toString().replace(/\/$/, "");
+  } catch { return ""; }
+}
+
+function webTokenKey(profileKey) {
+  return `token:${encodeURIComponent(profileKey)}`;
+}
+
+async function restoreWebToken(savedWorker, requestedWorker) {
+  const savedProfile = savedWorker === null ? "" : normalizeWorkerProfile(savedWorker);
+  // The legacy global token is usable only with its explicitly saved Worker.
+  const legacyToken = savedProfile ? await secureGet("token") : "";
+  if (legacyToken && !(await secureGet(webTokenKey(savedProfile)))) {
+    await secureSet(webTokenKey(savedProfile), legacyToken);
+  }
+  await secureSet("token", "");
+  return requestedWorker ? (await secureGet(webTokenKey(requestedWorker))) || "" : "";
 }
 
 async function api(path, options = {}) {
-  const headers = { "X-Token": els.token.value.trim() };
-  if (options.body) headers["Content-Type"] = "application/json";
+  const generation = profileGeneration.current();
   startTopProgress();
   try {
-    const res = await fetch(apiPath(path), { ...options, headers });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || "HTTP " + res.status);
-    return data;
+    const result = await window.maoyanRuntime.requestWorker(path, options);
+    if (!profileGeneration.isCurrent(generation)) throw staleProfileError();
+    return result;
+  } catch (error) {
+    if (!profileGeneration.isCurrent(generation)) throw staleProfileError();
+    throw error;
   } finally {
     stopTopProgress();
   }
 }
 
+function staleProfileError() {
+  const error = new Error("连接已切换");
+  error.staleProfile = true;
+  return error;
+}
+
+function isStaleProfileError(error) {
+  return error?.staleProfile === true;
+}
+
 const lockController = window.createMaoyanLockController({
   api,
+  runtime: window.maoyanRuntime,
+  getProfileGeneration: () => profileGeneration.current(),
+  isProfileGenerationCurrent: (generation) => profileGeneration.isCurrent(generation),
   getContext: () => ({
     connected,
     cinemaId: selectedCinemaId,
@@ -114,6 +159,127 @@ function setStatus(text, state = "off") {
   els.statusLine.className = `status-line st-${state}`;
   els.statusLine.innerHTML = '<span class="dot"></span><span></span>';
   els.statusLine.lastChild.textContent = text;
+}
+
+function setConnectionState({ profileKey = "", workerUrl = "" } = {}) {
+  if (els.workerProfile) els.workerProfile.textContent = profileKey ? `配置：${profileKey}` : "配置：未连接";
+  if (els.workerSecurity) {
+    let label = "未连接";
+    let httpRisk = false;
+    try {
+      const url = new URL(workerUrl);
+      if (url.protocol === "https:") label = "HTTPS";
+      if (url.protocol === "http:") {
+        const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname.toLowerCase());
+        httpRisk = !loopback;
+        label = loopback ? "本机 HTTP" : "不安全 HTTP 连接";
+      }
+    } catch { /* No connection metadata is available yet. */ }
+    els.workerSecurity.textContent = label;
+    els.workerSecurity.classList.toggle("http-risk", httpRisk);
+  }
+}
+
+function renderDesktopUpdate(update) {
+  if (!els.updateStatus || !els.updateText || !els.btnOpenUpdate) return;
+  const available = runtimeInfo.kind === "electron" && update?.available === true && typeof update.releaseUrl === "string";
+  els.updateStatus.classList.toggle("hidden", !available);
+  if (!available) return;
+  els.updateText.textContent = `发现新版本 v${update.version}`;
+  els.btnOpenUpdate.dataset.releaseUrl = update.releaseUrl;
+}
+
+async function checkForDesktopUpdate() {
+  if (runtimeInfo.kind !== "electron") return;
+  try {
+    renderDesktopUpdate(await window.maoyanRuntime.checkForUpdates());
+  } catch {
+    renderDesktopUpdate({ available: false });
+  }
+}
+
+els.btnOpenUpdate?.addEventListener("click", async () => {
+  const releaseUrl = els.btnOpenUpdate.dataset.releaseUrl;
+  if (!releaseUrl) return;
+  const accepted = await window.showConfirm("本应用未经签名验证；请仅从官方 GitHub Releases 页面下载更新。", {
+    title: "查看更新", okText: "打开官方页面", cancelText: "取消"
+  });
+  if (accepted) await window.maoyanRuntime.openExternal(releaseUrl);
+});
+
+function bindSetupLinks() {
+  document.querySelectorAll("a[data-external-link]").forEach((link) => {
+    link.addEventListener("click", async (event) => {
+      event.preventDefault();
+      try {
+        const result = await window.maoyanRuntime.openExternal(link.href);
+        if (result?.opened === false) showToast("无法打开外部链接", "error");
+      } catch { showToast("无法打开外部链接", "error"); }
+    });
+  });
+}
+
+function resetProfileUi(nextProfileKey) {
+  profileGeneration.invalidate();
+  window.switchWorkerProfile({
+    cinemaId: selectedCinemaId,
+    selectedMovies: getSelectedIds(),
+    lockOpen: !els.lockOverlay.classList.contains("hidden"),
+    profileKey: activeProfileKey
+  }, nextProfileKey);
+  connected = false;
+  lockServiceEnabled = false;
+  monitorEnabled = false;
+  monitorDdl = null;
+  pushSaved = false;
+  pushVerified = false;
+  realKeys.bark = "";
+  realKeys.serverchan = "";
+  keyStored.bark = false;
+  keyStored.serverchan = false;
+  cinemaSelected = false;
+  selectedCity = null;
+  selectedCinema = null;
+  selectedCinemaId = "";
+  cinemaMovies = [];
+  cinemaLoadSeq += 1;
+  clearTimeout(cinemaSearchTimer);
+  cinemaSearchTimer = null;
+  clearTimeout(movieSaveTimer);
+  movieSaveTimer = null;
+  lastSavedSig = "";
+  saving = false;
+  savePending = false;
+  restoring = false;
+  allCities = [];
+  els.cityInput.value = "";
+  els.cityInput.disabled = false;
+  els.cinemaSearch.value = "";
+  els.cinemaSearch.disabled = false;
+  els.btnSearchCinema.disabled = false;
+  els.cityDropdown.innerHTML = "";
+  els.cityDropdown.classList.add("hidden");
+  els.cinemaDropdown.innerHTML = "";
+  els.cinemaDropdown.classList.add("hidden");
+  els.cinemaName.textContent = "";
+  els.cinemaName.classList.add("hidden");
+  els.barkInput.value = "";
+  els.serverChanInput.value = "";
+  setChannel("bark");
+  els.movieList.innerHTML = '<div class="muted empty-tip">连接云端后显示该影院在映影片</div>';
+  els.movieCount.textContent = "连接后自动加载影片";
+  els.logPanel.innerHTML = "";
+  setStatus("未连接");
+  lockController.reset?.();
+  lockController.syncAvailability();
+  updateMonitorBtn();
+}
+
+function connectionErrorMessage(error, workerUrl) {
+  if (runtimeInfo.kind === "web" && location.protocol === "https:" && /^http:/i.test(workerUrl)) {
+    return "浏览器阻止 HTTPS 页面连接 HTTP Worker，请改用 HTTPS Worker 或使用 Electron 客户端";
+  }
+  return error.message;
 }
 
 function fmtClock(ts) {
@@ -159,17 +325,34 @@ function enterMainPage() {
 }
 
 async function connect() {
-  if (!els.workerUrl.value.trim() && !SAME_ORIGIN) return showLoginError("请填写服务地址");
-  localStorage.setItem("workerUrl", els.workerUrl.value.trim());
-  await secureSet("token", els.token.value.trim());
+  const workerUrl = normalizedWorkerUrl();
+  if (!workerUrl) return showLoginError("请填写服务地址");
+  const profileChanged = Boolean(activeProfileKey && activeProfileKey !== workerUrl);
+  if (profileChanged) {
+    resetProfileUi(workerUrl);
+  }
+  if (tokenProfileKey && tokenProfileKey !== workerUrl) els.token.value = "";
+  const generation = profileGeneration.current();
   els.loginError.classList.add("hidden");
   if (els.loginHint) els.loginHint.classList.add("hidden");
   try {
     await withButtonLoading(els.btnConnect, "连接中...", async () => {
       showBlockOverlay("正在连接云端...");
       try {
-        const st = await api("/api/status");
+        const httpRiskConfirmed = runtimeInfo.kind === "electron" || !/^http:/i.test(workerUrl) || window.confirm("HTTP 服务连接可能泄露访问令牌，是否继续？");
+        const connection = { workerUrl, httpRiskConfirmed };
+        const typedToken = els.token.value.trim();
+        if (typedToken) connection.token = typedToken;
+        if (runtimeInfo.kind === "electron") els.token.value = "";
+        const { status: st, profile } = await window.maoyanRuntime.connectWorker(connection);
+        if (!profileGeneration.isCurrent(generation)) return;
         connected = true;
+        activeProfileKey = workerUrl;
+        tokenProfileKey = workerUrl;
+        localStorage.setItem("workerUrl", els.workerUrl.value.trim());
+        if (runtimeInfo.kind === "web") await secureSet(webTokenKey(workerUrl), typedToken);
+        else els.token.value = "";
+        setConnectionState({ profileKey: profile?.id || profile?.baseUrl || workerUrl, workerUrl });
         lockServiceEnabled = st.lockServiceEnabled === true;
         const openMode = st.authMode === "open";
         document.body.classList.toggle("open-mode", openMode);
@@ -182,16 +365,18 @@ async function connect() {
         lockController.syncAvailability();
         log("ok", "云端连接成功");
         await Promise.all([loadCities(), restoreConfig()]);
+        if (!profileGeneration.isCurrent(generation)) return;
         refreshChanges();
       } finally {
-        hideBlockOverlay();
+        if (profileGeneration.isCurrent(generation)) hideBlockOverlay();
       }
     });
   } catch (e) {
+    if (!profileGeneration.isCurrent(generation) || isStaleProfileError(e)) return;
     connected = false;
     setStatus("连接失败", "stopped");
     // 令牌错误只做简短提示, 不暴露 Worker 名称与配置步骤(多人使用场景)
-    let msg = e.message;
+    let msg = connectionErrorMessage(e, workerUrl);
     if (msg.includes("访问令牌错误")) msg = "访问令牌无效，请检查令牌是否输入正确";
     showLoginError("连接失败：" + msg);
   }
@@ -201,35 +386,33 @@ els.btnConnect.addEventListener("click", connect);
 els.token.addEventListener("keydown", (e) => {
   if (e.key === "Enter") connect();
 });
+els.token.addEventListener("input", () => { tokenProfileKey = normalizedWorkerUrl(); });
 
 // 切换连接: 仅清除当前工具的连接信息，不影响同域管理页等其他本地数据
 els.btnLogout.addEventListener("click", async () => {
-  connected = false;
-  lockServiceEnabled = false;
-  pushVerified = false;
-  cinemaSelected = false;
-  selectedCinemaId = "";
-  selectedCinema = null;
+  resetProfileUi("");
+  const previousProfileKey = tokenProfileKey;
   realKeys.bark = "";
   realKeys.serverchan = "";
   localStorage.removeItem("workerUrl");
   localStorage.removeItem("authMode");
-  await secureSet("token", "");
+  if (runtimeInfo.kind === "web") {
+    if (previousProfileKey) await secureSet(webTokenKey(previousProfileKey), "");
+    await secureSet("token", "");
+  }
   els.workerUrl.value = "";
   els.token.value = "";
-  els.cinemaName.classList.add("hidden");
-  els.cinemaName.textContent = "";
-  cinemaMovies = [];
-  setStatus("未连接");
+  activeProfileKey = "";
+  tokenProfileKey = "";
+  setConnectionState();
   els.mainPage.classList.add("hidden");
   els.loginOverlay.classList.remove("hidden");
   els.loginError.classList.add("hidden");
-  lockController.close?.();
-  lockController.syncAvailability();
   els.btnLockSeats.disabled = true;
 });
 
 async function restoreConfig() {
+  const generation = profileGeneration.current();
   restoring = true; // 恢复期间自动保存全部跳过, 避免每次连接都冗余写 KV
   let cloudConfig = null;
   let restoredOk = false;
@@ -247,10 +430,12 @@ async function restoreConfig() {
     if (selectedCinemaId) {
       // 恢复加载成功才视为已选择(失败保持未选, 锁座禁用待重试)
       restoredOk = (await loadCinema(selectedCinemaId, prevSelected, { restore: true })) === true;
+      if (!profileGeneration.isCurrent(generation)) return;
       cinemaSelected = restoredOk;
     }
     lockController.syncAvailability();
   } finally {
+    if (!profileGeneration.isCurrent(generation)) return;
     // 恢复完成: 记录当前状态签名, 与云端一致的内容不再重复写入。
     // 恢复加载失败时以云端原值为基线 — 否则后续任何其他字段的保存都会把影院勾选清空
     const baseline = restoredOk || !cloudConfig
@@ -361,6 +546,7 @@ let savePending = false;
 let restoring = false;
 
 async function autoSaveConfig(extra = {}, { msg = "配置已自动保存", silent = false } = {}) {
+  const generation = profileGeneration.current();
   if (restoring) return; // 恢复配置期间不写
   const body = pushConfigBody(extra);
   const sig = JSON.stringify(body);
@@ -377,14 +563,17 @@ async function autoSaveConfig(extra = {}, { msg = "配置已自动保存", silen
     updateMonitorBtn();
     if (res.notice) {
       await refreshChanges(); // 拉取服务端刚写入的告警与最新状态
+      if (!profileGeneration.isCurrent(generation)) return;
       log("warn", res.notice);
       return;
     }
     if (!silent) log("ok", msg);
   } catch (e) {
+    if (!profileGeneration.isCurrent(generation) || isStaleProfileError(e)) return;
     lastSavedSig = ""; // 失败允许重试
     showToast("自动保存失败：" + e.message, "error");
   } finally {
+    if (!profileGeneration.isCurrent(generation)) return;
     saving = false;
     if (savePending) {
       savePending = false;
@@ -472,10 +661,12 @@ function updateMonitorBtn() {
 
 els.btnToggleMonitor.addEventListener("click", async () => {
   if (!connected) return showToast("请先连接云端", "warn");
+  const generation = profileGeneration.current();
   await withButtonLoading(els.btnToggleMonitor, "处理中...", async () => {
     try {
       const target = !monitorEnabled;
       const res = await api("/api/config", { method: "POST", body: JSON.stringify({ enabled: target }) });
+      if (!profileGeneration.isCurrent(generation)) return;
       monitorEnabled = target;
       pushVerified = res.config?.notifyVerified === true;
       if (res.config) monitorDdl = res.config.monitorDdl || monitorDdl;
@@ -504,6 +695,7 @@ els.btnToggleMonitor.addEventListener("click", async () => {
         } catch {}
       }
     } catch (e) {
+      if (!profileGeneration.isCurrent(generation) || isStaleProfileError(e)) return;
       showToast("操作失败：" + e.message, "error");
     }
   });
@@ -512,6 +704,7 @@ els.btnToggleMonitor.addEventListener("click", async () => {
 
 // ---------------- 城市选择 ----------------
 async function loadCities() {
+  const generation = profileGeneration.current();
   try {
     const res = await api("/api/cities");
     allCities = (res.cities || []).map((c) => ({
@@ -520,6 +713,7 @@ async function loadCities() {
       pinyin: String(c.pinyin || "").toLowerCase(),
     }));
   } catch (e) {
+    if (!profileGeneration.isCurrent(generation) || isStaleProfileError(e)) return;
     // 云端暂不支持城市/影院搜索接口, 降级为仅手动输入
     allCities = [];
     selectedCity = null;
@@ -610,6 +804,7 @@ function scheduleCinemaSearch(immediate = false) {
 }
 
 async function searchCinemas() {
+  const generation = profileGeneration.current();
   if (!allCities.length) return; // 城市接口不可用时整体禁用
   if (!selectedCity) {
     els.cinemaDropdown.innerHTML = "";
@@ -629,8 +824,10 @@ async function searchCinemas() {
     const res = await api(
       `/api/cinemas?cityId=${encodeURIComponent(selectedCity.id)}&kw=${encodeURIComponent(kw)}`
     );
+    if (!profileGeneration.isCurrent(generation)) return;
     renderCinemaResults(res.cinemas || []);
   } catch (e) {
+    if (!profileGeneration.isCurrent(generation) || isStaleProfileError(e)) return;
     els.cinemaDropdown.innerHTML = "";
     appendSuggestMsg(els.cinemaDropdown, "搜索失败：" + e.message);
     els.cinemaDropdown.classList.remove("hidden");
@@ -708,11 +905,14 @@ document.addEventListener("click", (e) => {
 // ---------------- 影院加载 ----------------
 // 拉取影院排期, 自动重试 2 次(猫眼接口偶发失败)
 async function fetchShowsWithRetry(cinemaId) {
+  const generation = profileGeneration.current();
   let lastErr;
   for (let i = 0; i < 3; i++) {
+    if (!profileGeneration.isCurrent(generation)) throw staleProfileError();
     try {
       return await api("/api/shows?cinemaId=" + encodeURIComponent(cinemaId));
     } catch (e) {
+      if (!profileGeneration.isCurrent(generation) || isStaleProfileError(e)) throw staleProfileError();
       lastErr = e;
       if (i < 2) await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
     }
@@ -724,12 +924,13 @@ async function fetchShowsWithRetry(cinemaId) {
 let cinemaLoadSeq = 0;
 
 async function loadCinema(cinemaId, prevSelected, { restore = false } = {}) {
+  const generation = profileGeneration.current();
   const seq = ++cinemaLoadSeq;
   setPanelLoading(els.movieList, "正在加载影院影片...");
   return await withButtonLoading(null, "加载中...", async () => {
     try {
       const res = await fetchShowsWithRetry(cinemaId);
-      if (seq !== cinemaLoadSeq) return true; // 过期响应: 已有更新的选择在加载, 丢弃本次结果(不更新界面/不保存云端)
+      if (!profileGeneration.isCurrent(generation) || seq !== cinemaLoadSeq) return true; // 过期响应: 已有更新的选择在加载, 丢弃本次结果(不更新界面/不保存云端)
       selectedCinemaId = String(res.cinemaId); // 以接口返回为准, 搜索与恢复两条路径在此汇合
       cinemaSelected = true;
       els.cinemaName.textContent = `🎬 ${res.cinemaName}（ID: ${res.cinemaId}）`;
@@ -748,7 +949,7 @@ async function loadCinema(cinemaId, prevSelected, { restore = false } = {}) {
       );
       return true;
     } catch (e) {
-      if (seq !== cinemaLoadSeq) return true; // 过期请求的失败不提示、不回滚新选择的状态
+      if (!profileGeneration.isCurrent(generation) || isStaleProfileError(e) || seq !== cinemaLoadSeq) return true; // 过期请求的失败不提示、不回滚新选择的状态
       // 加载失败: 影院选择视为未完成(排期未就绪不可锁座), 待重新搜索/刷新后恢复
       cinemaSelected = false;
       selectedCinema = null;
@@ -862,12 +1063,15 @@ els.btnToggleAll.addEventListener("click", () => {
 // ---------------- 检查 / 测试 ----------------
 els.btnCheck.addEventListener("click", async () => {
   if (!connected) return showToast("请先连接云端", "warn");
+  const generation = profileGeneration.current();
   await withButtonLoading(els.btnCheck, "检查中...", async () => {
     try {
       const res = await api("/api/check", { method: "POST" });
+      if (!profileGeneration.isCurrent(generation)) return;
       log(res.newTotal ? "new" : "ok", `检查完成: ${res.cinemaName || ""}，新增 ${res.newTotal ?? 0} 场`);
       await refreshChanges();
     } catch (e) {
+      if (!profileGeneration.isCurrent(generation) || isStaleProfileError(e)) return;
       showToast("检查失败：" + e.message, "error");
     }
   });
@@ -875,6 +1079,7 @@ els.btnCheck.addEventListener("click", async () => {
 
 els.btnTestPush.addEventListener("click", async () => {
   if (!connected) return showToast("请先连接云端", "warn");
+  const generation = profileGeneration.current();
   await withButtonLoading(els.btnTestPush, "发送中...", async () => {
     try {
       // 先保存当前渠道的推送配置再测试(密钥从内存取, 输入框里是掩码)
@@ -884,12 +1089,14 @@ els.btnTestPush.addEventListener("click", async () => {
         pushSaved = true;
       }
       const res = await api("/api/test-push", { method: "POST" });
+      if (!profileGeneration.isCurrent(generation)) return;
       const label = res.label || CHANNEL_LABELS[getChannel()];
       pushVerified = true;
       updateMonitorBtn();
       showToast(`测试推送已发送（${label}），请查收`, "success");
       log("ok", `${label} 测试推送已发送`);
     } catch (e) {
+      if (!profileGeneration.isCurrent(generation) || isStaleProfileError(e)) return;
       showToast("测试失败：" + e.message, "error");
     }
   });
@@ -898,9 +1105,11 @@ els.btnTestPush.addEventListener("click", async () => {
 // ---------------- 变化记录 ----------------
 // showLoading: 手动刷新时显示面板占位, 自动轮询不显示(避免闪烁)
 async function refreshChanges(showLoading = false) {
+  const generation = profileGeneration.current();
   try {
     if (showLoading) setPanelLoading(els.logPanel, "正在加载变化记录...");
     const data = await api("/api/status");
+    if (!profileGeneration.isCurrent(generation)) return;
     const { status, changes } = data;
     lockServiceEnabled = data.lockServiceEnabled === true;
     lockController.syncAvailability();
@@ -935,6 +1144,7 @@ async function refreshChanges(showLoading = false) {
       els.logPanel.innerHTML = '<div class="log-entry log-info">暂无变化记录，点「立即检查」试试</div>';
     }
   } catch (e) {
+    if (!profileGeneration.isCurrent(generation) || isStaleProfileError(e)) return;
     if (showLoading) els.logPanel.innerHTML = '<div class="log-entry log-error">加载失败，请重试</div>';
     log("error", "获取变化记录失败: " + e.message);
   }
@@ -973,6 +1183,13 @@ function syncCronInfo(data) {
 
 (async function init() {
   updateBatchTip();
+  try {
+    runtimeInfo = await window.maoyanRuntime.getRuntimeInfo();
+  } catch {
+    runtimeInfo = { kind: window.maoyanRuntime?.kind || "web", canLoginMaoyan: false, persistentTokenStorage: false };
+  }
+  bindSetupLinks();
+  void checkForDesktopUpdate();
   // 排查"刷新后回到登录页": 本机存储 / WebCrypto / 安全上下文 是否可用
   function probeEnv() {
     let storageOk = true;
@@ -991,11 +1208,19 @@ function syncCronInfo(data) {
 
   const env = probeEnv();
   const openMode = localStorage.getItem("authMode") === "open";
+  const savedWorker = localStorage.getItem("workerUrl");
+  els.workerUrl.value = savedWorker ?? DEFAULT_WORKER;
+  // 令牌不接受 URL 参数，以免泄露到历史记录或日志。
+  const qs = new URLSearchParams(location.search);
+  if (qs.get("worker")) els.workerUrl.value = qs.get("worker");
+  tokenProfileKey = normalizedWorkerUrl();
   let savedToken = "";
-  try {
-    savedToken = (await secureGet("token")) || "";
-  } catch (e) {
-    savedToken = "";
+  if (runtimeInfo.kind === "web") {
+    try {
+      savedToken = await restoreWebToken(savedWorker, tokenProfileKey);
+    } catch (e) {
+      savedToken = "";
+    }
   }
   // 令牌指纹: 与 worker 端 KV 键名 u:<指纹>:config 中的段一致, 便于核对是哪份配置
   function tokenFingerprint(t) {
@@ -1007,11 +1232,7 @@ function syncCronInfo(data) {
     return h.toString(16).padStart(8, "0");
   }
 
-  els.workerUrl.value = localStorage.getItem("workerUrl") ?? DEFAULT_WORKER;
   els.token.value = savedToken;
-  // 仅支持通过 URL 指定 Worker 地址，令牌不接受 URL 参数以免泄露到历史记录或日志。
-  const qs = new URLSearchParams(location.search);
-  if (qs.get("worker")) els.workerUrl.value = qs.get("worker");
   const explicit = qs.has("worker"); // 带参数打开视为明确意图, 免令牌模式也能自动连
   const canAutoConnect = Boolean(els.token.value.trim() || explicit || openMode);
   console.warn("[maoyan init]", {

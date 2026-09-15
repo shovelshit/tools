@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>猫眼影院场次监控 - 云端版</title>
-  <link rel="stylesheet" href="style.css?v=20260914d" />
+  <link rel="stylesheet" href="style.css?v=20260915b" />
 </head>
 <body>
   <!-- 登录层: 首次进入 / 切换连接时显示 -->
@@ -14,8 +14,8 @@
       <h1>猫眼影院场次监控</h1>
       <p class="login-sub">云端定时检查影院新增场次 · 支持 Bark / Server酱 推送到手机</p>
       <div class="form-grid login-grid">
-        <label for="worker-url" class="hidden">服务地址</label>
-        <input id="worker-url" class="hidden" type="text" placeholder="默认使用本站服务，无需填写" />
+        <label for="worker-url">服务地址</label>
+        <input id="worker-url" type="url" placeholder="默认使用本站服务，无需填写" autocomplete="url" />
         <label for="token-input">访问令牌</label>
         <input id="token-input" type="password" placeholder="请输入访问令牌" autocomplete="off" />
       </div>
@@ -34,6 +34,9 @@
       </div>
       <div class="header-right">
         <div id="status-line" class="status-line st-off">未连接</div>
+        <div id="worker-profile" class="connection-state">配置：未连接</div>
+        <div id="worker-security" class="connection-state">未连接</div>
+        <div id="update-status" class="update-status hidden"><span id="update-text"></span><button id="btn-open-update" class="btn small ghost" type="button">查看更新</button></div>
         <button id="btn-logout" class="btn small ghost">切换连接</button>
         <a class="btn small ghost" href="../">🧰 工具箱</a>
       </div>
@@ -77,14 +80,14 @@
               <label for="bark-input">推送密钥</label>
               <input id="bark-input" type="text" placeholder="Bark Key 或 URL，如 https://api.day.app/xxxxx" autocomplete="off" />
               <div class="push-hint muted">
-                没有 Bark？<a href="https://apps.apple.com/cn/app/id1403753865" target="_blank" rel="noopener">App Store 下载 Bark</a>，打开后在 App 内复制 Key
+                没有 Bark？<a href="https://apps.apple.com/cn/app/id1403753865" data-external-link target="_blank" rel="noopener">App Store 下载 Bark</a>，打开后在 App 内复制 Key
               </div>
             </div>
             <div id="push-serverchan-row" class="row-span-all hidden">
               <label for="serverchan-input">推送密钥（Server酱 SendKey）</label>
               <input id="serverchan-input" type="text" placeholder="SCT 开头的 SendKey" autocomplete="off" />
               <div class="push-hint muted">
-                微信扫码登录 <a href="https://sct.ftqq.com/sendkey" target="_blank" rel="noopener">获取 SendKey</a>（免费版每天 5 条）
+                微信扫码登录 <a href="https://sct.ftqq.com/sendkey" data-external-link target="_blank" rel="noopener">获取 SendKey</a>（免费版每天 5 条）
               </div>
             </div>
           </div>
@@ -156,7 +159,8 @@
           <p id="lock-session-status" class="lock-status">尚未上传猫眼会话</p>
           <div class="lock-upload-row">
             <input id="lock-session-file" type="file" accept=".json,application/json" />
-            <button id="btn-lock-upload" class="btn small ghost" type="button">上传或替换</button>
+            <button id="btn-lock-login" class="btn small ghost" type="button">Web端不支持一键登录</button>
+            <button id="btn-lock-upload" class="btn small ghost" type="button">手动上传登录态</button>
             <button id="btn-lock-remove-session" class="btn small ghost danger hidden" type="button">删除会话</button>
           </div>
         </section>
@@ -229,9 +233,10 @@
     </section>
   </div>
 
+  <script src="runtime.js?v=20260915b"></script>
   <script src="secure-store.js?v=20260912b"></script>
   <script src="ui.js?v=20260912b"></script>
 <script src="lock.js?v=20260914h"></script>
-<script src="app.js?v=20260914c"></script>
+<script src="app.js?v=20260915b"></script>
 </body>
 </html>

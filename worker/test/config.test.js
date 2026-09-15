@@ -1,16 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import worker from "../src/index.js";
-import { MemoryKV } from "./helpers.js";
-import { userKey } from "../src/maoyan/user.js";
+import { createDB } from "./helpers.js";
+import { getConfig } from "../src/maoyan/db.js";
 
 const tokenId = "11111111-1111-4111-8111-111111111111";
 
-function runtime(config = {}) {
+async function runtime(config = {}) {
   return {
-    MAOYAN_KV: new MemoryKV({
-      "meta:tokens": JSON.stringify([{ id: tokenId, token: "access-token" }]),
-      [userKey(tokenId, "config")]: JSON.stringify(config)
+    DB: await createDB({
+      tokens: [{ id: tokenId, token: "access-token" }],
+      configs: { [tokenId]: config }
     })
   };
 }
@@ -38,25 +38,25 @@ async function withMockFetch(mock, callback) {
 
 test("monitoring cannot start without a configured and tested current notification channel", async () => {
   const missing = runtime({ notifyChannel: "serverchan", enabled: false });
-  const missingResponse = await worker.fetch(request("/api/config", { enabled: true }), missing);
+  const missingResponse = await worker.fetch(request("/api/config", { enabled: true }), await missing);
   assert.equal(missingResponse.status, 400);
   assert.match((await missingResponse.json()).error, /配置.*Server酱/);
 
   const untested = runtime({ notifyChannel: "bark", barkKey: "test-key", enabled: false });
-  const untestedResponse = await worker.fetch(request("/api/config", { enabled: true }), untested);
+  const untestedResponse = await worker.fetch(request("/api/config", { enabled: true }), await untested);
   assert.equal(untestedResponse.status, 400);
   assert.match((await untestedResponse.json()).error, /测试推送/);
 });
 
 test("a successful test verifies only the current channel and credential", async () => {
-  const env = runtime({ notifyChannel: "bark", barkKey: "test-key", enabled: false });
+  const env = await runtime({ notifyChannel: "bark", barkKey: "test-key", enabled: false });
 
   await withMockFetch(async () => new Response("ok", { status: 200 }), async () => {
     const testResponse = await worker.fetch(request("/api/test-push", {}), env);
     assert.equal(testResponse.status, 200);
   });
 
-  const verifiedConfig = await env.MAOYAN_KV.get(userKey(tokenId, "config"), "json");
+  const verifiedConfig = await getConfig(env.DB, tokenId);
   assert.match(verifiedConfig.notifyVerification.fingerprint, /^[0-9a-f]{64}$/);
   assert.equal(JSON.stringify(verifiedConfig.notifyVerification).includes("test-key"), false);
 

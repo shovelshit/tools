@@ -5,11 +5,11 @@ import {
 } from "./lock-client.js";
 import { loadLockSession } from "./lock-session.js";
 import { withSeatFeedback } from "./seat-feedback.js";
-import { getUserConfig, userKey } from "./user.js";
+import * as db from "./db.js";
+import { getUserConfig } from "./user.js";
 import { pushNotify } from "./notify.js";
 import { lockError, lockLog } from "./log.js";
 
-const RULE_NAME = "maoyan-lock-rule";
 // 这些错误会原样透传给前端(而不是笼统的"锁座参数无效")
 // 注意: 与上游(猫眼)相关的文案直接引用 lock-client 导出的常量, 避免文案漂移
 export const RULE_KNOWN_ERRORS = [
@@ -23,7 +23,7 @@ export const RULE_KNOWN_ERRORS = [
 export const LOCK_RULE_TERMINAL_STATES = new Set(["locked", "expired", "failed", "completed", "cancelled"]);
 const PUBLIC_FIELDS = [
   "id", "cinemaId", "cinemaName", "movieId", "movieName", "hall", "targetDate",
-  "templateDate", "templateTime", "templateSeqNo", "targetSeqNo", "seats", "state",
+  "templateDate", "templateTime", "targetTime", "matchMode", "timeDeltaMinutes", "templateSeqNo", "targetSeqNo", "seats", "state",
   "createdAt", "updatedAt", "lastError", "orderId", "payLeftSecond"
 ];
 
@@ -150,10 +150,6 @@ function selectedSeats(seatMap, seatNos, { ignoreAvailability = false } = {}) {
   }));
 }
 
-function ruleKey(tokenId) {
-  return userKey(tokenId, RULE_NAME);
-}
-
 // 推送正文: 立即锁座(createLockRule)与定时锁座(lock-runner)共用一份, 避免两处副本再次漂移。
 // 座位一律渲染成人看的「几排几座」(排号=rowId, 座号段按影厅口径自动判别), 不能直接扔内部标识。
 // 影厅名(rule.hall, 来自场次 th 字段)是用户核对座位的关键信息, 缺失时跳过该行。
@@ -163,7 +159,12 @@ export function lockNotificationContent(rule) {
   const fallbackSegment = seatSegmentOf(seats);
   const labels = seats.map((seat) => seat?.label || seatDisplayLabel(seat, fallbackSegment)).join("、");
   const hall = rule?.hall ? `${rule.hall}\n` : "";
-  return `${rule.cinemaName} ${rule.movieName}\n${hall}${rule.targetDate} ${rule.templateTime}\n${labels}` +
+  const targetTime = rule?.targetTime || rule?.templateTime || "";
+  const delta = Number(rule?.timeDeltaMinutes);
+  const fuzzyTime = rule?.matchMode === "fuzzy" && Number.isFinite(delta)
+    ? `\n模板场次 ${rule.templateTime}，实际场次偏差 ${delta >= 0 ? "+" : ""}${delta} 分钟`
+    : "";
+  return `${rule.cinemaName} ${rule.movieName}\n${hall}${rule.targetDate} ${targetTime}${fuzzyTime}\n${labels}` +
     (rule.state === "locked" && rule.payLeftSecond !== null ? `\n剩余支付时间 ${rule.payLeftSecond} 秒` : "");
 }
 
@@ -172,15 +173,15 @@ async function notifyLockedRule(config, rule, notify = pushNotify) {
 }
 
 export async function getLockRule(env, tokenId) {
-  return await env.MAOYAN_KV.get(ruleKey(tokenId), "json");
+  return await db.getLockRuleRow(env.DB, tokenId);
 }
 
 export async function putLockRule(env, tokenId, rule) {
-  await env.MAOYAN_KV.put(ruleKey(tokenId), JSON.stringify(rule));
+  await db.putLockRuleRow(env.DB, tokenId, rule);
 }
 
 export async function removeLockRule(env, tokenId) {
-  await env.MAOYAN_KV.delete(ruleKey(tokenId));
+  await db.deleteLockRuleRow(env.DB, tokenId);
 }
 
 export function publicLockRule(rule, automationEnabled) {

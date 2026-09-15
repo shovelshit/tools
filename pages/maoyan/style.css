@@ -124,6 +124,10 @@ header h1 { font-size: 19px; font-weight: 700; display: inline; }
   white-space: nowrap;
 }
 
+.connection-state { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.connection-state.http-risk { color: var(--danger); font-weight: 600; }
+.update-status { display: inline-flex; align-items: center; gap: 6px; color: var(--primary-dark); font-size: 12px; white-space: nowrap; }
+
 /* 状态灯: 绿=监控中 红=已停止/失败 灰=未连接 */
 .status-line .dot {
   display: inline-block;
@@ -704,6 +708,7 @@ input[type="password"]:focus { border-color: var(--primary); }
 }
 .lock-upload-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .lock-upload-row input[type="file"] { min-width: 0; max-width: 100%; font-size: 12px; }
+.lock-upload-row .btn { white-space: nowrap; }
 
 .lock-form-grid {
   display: grid;

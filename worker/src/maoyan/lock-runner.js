@@ -1,5 +1,5 @@
 import { publicCinemaShows } from "./api.js";
-import { findExactShows, fetchSeatMap, createUnpaidOrder, OrderAttemptError } from "./lock-client.js";
+import { findExactShows, findCompatibleShows, fetchSeatMap, createUnpaidOrder, OrderAttemptError } from "./lock-client.js";
 import { getLockSessionStatus, loadLockSession, removeLockSession } from "./lock-session.js";
 import {
   createLockRule, getLockRule, isLockRuleTerminal, putLockRule, removeLockRule,
@@ -74,6 +74,7 @@ export async function runOneLockRule(env, tokenId, deps = {}) {
     return { ok: true, skipped: true, missingMonitorData: true };
   }
   const exactShows = deps.findShows || findExactShows;
+  const nearbyShows = deps.findCompatibleShows || findCompatibleShows;
   const loadSession = deps.loadSession || loadLockSession;
   // 默认的取图入口包一层解析失败自动留档(只写标识 KV, 失败静默); 测试注入的 deps.fetchSeats 不经包装
   const fetchSeats = deps.fetchSeats || withSeatFeedback(fetchSeatMap, env, { tokenId, cinemaId: rule.cinemaId, movieId: rule.movieId });
@@ -81,37 +82,89 @@ export async function runOneLockRule(env, tokenId, deps = {}) {
   let show;
   let session;
   let seatMap;
+  let matching;
   const shouldCancel = deps.shouldCancel || (() => false);
   try {
     const cinema = await fetchCinema(rule.cinemaId);
     if (shouldCancel()) return { ok: true, skipped: true };
-    const matches = exactShows(cinema, rule);
+    const exactMatches = exactShows(cinema, rule) || [];
+    const sameHallExact = rule.hall
+      ? exactMatches.filter((candidate) => String(candidate.th || "") === String(rule.hall))
+      : exactMatches;
+    let matches = sameHallExact;
+    let matchMode = "exact";
+    if (!matches.length && rule.hall) {
+      const candidates = nearbyShows(cinema, {
+        movieId: rule.movieId,
+        targetDate: rule.targetDate,
+        templateTime: rule.templateTime,
+        templateHall: rule.hall,
+        maxMinutes: 30
+      }) || [];
+      if (candidates.length) {
+        const nearestDelta = Math.abs(Number(candidates[0].timeDeltaMinutes));
+        const nearest = candidates.filter((candidate) => Math.abs(Number(candidate.timeDeltaMinutes)) === nearestDelta);
+        if (nearest.length > 1) {
+          return await terminal(env, tokenId, rule, "failed", { lastError: "目标日期存在多个同厅型且时间相近场次" }, deps);
+        }
+        matches = nearest;
+        matchMode = "fuzzy";
+      }
+    }
     if (!matches.length) return { ok: true, waiting: true };
     if (matches.length !== 1) return await terminal(env, tokenId, rule, "failed", { lastError: "目标日期存在多个相同时间场次" }, deps);
     show = matches[0];
+    const matchingChanges = {
+      state: "matching",
+      attemptStartedAt: new Date(now).toISOString(),
+      seqNo: String(show.seqNo),
+      targetSeqNo: String(show.seqNo),
+      targetTime: String(show.tm || rule.templateTime),
+      matchMode,
+      timeDeltaMinutes: matchMode === "fuzzy" ? Number(show.timeDeltaMinutes) : 0,
+      lastError: null,
+      hall: String(show.th || rule.hall || "")
+    };
+    // Fuzzy candidates must become terminal if preparation fails, so persist the
+    // actual show before loading the session or seat map. Exact matching retains
+    // the legacy waiting/seat-feedback behavior until preparation succeeds.
+    if (matchMode === "fuzzy") {
+      matching = await saveRule(env, tokenId, rule, matchingChanges, deps);
+      if (shouldCancel()) return { ok: true, skipped: true };
+      const currentRule = await getRule(env, tokenId);
+      if (shouldCancel() || !currentRule || currentRule.id !== matching.id || currentRule.state !== "matching") {
+        return { ok: true, skipped: true };
+      }
+    }
     session = await loadSession(env, tokenId);
     if (shouldCancel()) return { ok: true, skipped: true };
     seatMap = await fetchSeats(session, { cinemaId: rule.cinemaId, movieId: rule.movieId, seqNo: String(show.seqNo) });
     if (shouldCancel()) return { ok: true, skipped: true };
     if (String(seatMap?.seqNo) !== String(show.seqNo) || !seatsMatch(rule, seatMap)) {
-      return await terminal(env, tokenId, rule, "failed", { lastError: "所选未来座位不可用或影厅布局已变化" }, deps);
+      const error = new Error("所选未来座位不可用或影厅布局已变化");
+      if (matchMode === "exact") {
+        return await terminal(env, tokenId, rule, "failed", { lastError: error.message }, deps);
+      }
+      throw error;
+    }
+    if (!matching) {
+      matching = await saveRule(env, tokenId, rule, matchingChanges, deps);
+      if (shouldCancel()) return { ok: true, skipped: true };
+      const currentRule = await getRule(env, tokenId);
+      if (shouldCancel() || !currentRule || currentRule.id !== matching.id || currentRule.state !== "matching") {
+        return { ok: true, skipped: true };
+      }
     }
   } catch (error) {
+    if (matching) {
+      lockError("scheduled_rule", { phase: "prepare", state: "failed", reason: "provider_data_unavailable" });
+      return await terminal(env, tokenId, matching, "failed", { lastError: messageFor(error) }, deps);
+    }
     lockError("scheduled_rule", { phase: "prepare", state: "waiting_schedule", reason: "provider_data_unavailable" });
     await saveRule(env, tokenId, rule, { lastError: messageFor(error) }, deps);
     return { ok: false, waiting: true };
   }
 
-  const matching = await saveRule(env, tokenId, rule, {
-    state: "matching", attemptStartedAt: new Date(now).toISOString(), seqNo: String(show.seqNo), lastError: null,
-    // 目标日期的影厅可能与模板场次不同(如 VIP厅), 推送前刷新为实际场次影厅名
-    hall: String(show.th || rule.hall || "")
-  }, deps);
-  if (shouldCancel()) return { ok: true, skipped: true };
-  const currentRule = await getRule(env, tokenId);
-  if (shouldCancel() || !currentRule || currentRule.id !== matching.id || currentRule.state !== "matching") {
-    return { ok: true, skipped: true };
-  }
   try {
     const order = await createOrder(session, seatMap, matching.seats.map((seat) => seat.seatNo));
     return await terminal(env, tokenId, matching, "locked", {

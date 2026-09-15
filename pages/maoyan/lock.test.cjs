@@ -11,6 +11,365 @@ function loadLockModule() {
   return context.module.exports;
 }
 
+function fakeElement() {
+  const listeners = new Map();
+  const classes = new Set();
+  return {
+    disabled: false,
+    dataset: {},
+    files: [],
+    innerHTML: "",
+    textContent: "",
+    title: "",
+    value: "",
+    checked: false,
+    selectedOptions: [],
+    classList: {
+      add: (...names) => names.forEach((name) => classes.add(name)),
+      remove: (...names) => names.forEach((name) => classes.delete(name)),
+      toggle: (name, force) => {
+        if (force === undefined) {
+          if (classes.has(name)) classes.delete(name);
+          else classes.add(name);
+        } else if (force) classes.add(name);
+        else classes.delete(name);
+      },
+      contains: (name) => classes.has(name)
+    },
+    addEventListener: (name, listener) => listeners.set(name, listener),
+    closest: () => fakeElement(),
+    append: () => {},
+    removeAttribute: () => {},
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 1, height: 1 })
+  };
+}
+
+function mountLock({
+  runtimeInfo, runtime: runtimeOverrides = {}, context: contextOverrides = {}, api: apiOverrides = {},
+  getProfileGeneration, isProfileGenerationCurrent
+} = {}) {
+  const ids = [
+    "btn-lock-seats", "lock-overlay", "btn-lock-close", "lock-cinema", "lock-movie", "lock-template",
+    "lock-target-date", "lock-session-file", "btn-lock-login", "btn-lock-upload", "btn-lock-remove-session",
+    "lock-session-status", "lock-seat-grid", "lock-seat-count", "lock-risk-accepted", "lock-rule-status",
+    "btn-lock-cancel-rule", "lock-template-label", "lock-seat-source", "btn-lock-seat-feedback",
+    "lock-official-wrap", "lock-official-frame", "btn-official-zoom-in", "btn-official-zoom-out",
+    "btn-official-zoom-reset", "official-zoom-label", "lock-official-gesture", "lock-gate-hint",
+    "lock-section-schedule", "lock-section-seats", "lock-section-risk", "lock-section-rules", "btn-lock-cancel",
+    "btn-lock-submit", "btn-lock-zoom-in", "btn-lock-zoom-out", "btn-lock-zoom-reset", "lock-zoom-label"
+  ];
+  const elements = Object.fromEntries(ids.map((id) => [id, fakeElement()]));
+  const document = {
+    getElementById: (id) => elements[id] || null,
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  };
+  const messages = [];
+  const root = { document, window: null, showToast: (message, type) => messages.push({ message, type }) };
+  root.window = root;
+  const source = fs.readFileSync(path.join(__dirname, "lock.js"), "utf8");
+  const module = { exports: {} };
+  vm.runInNewContext(source, {
+    module, exports: module.exports, Intl, Date, Set, document, window: root,
+    Option: function Option(text, value) { this.text = text; this.value = value; }
+  }, { filename: "lock.js" });
+  const runtime = {
+    kind: runtimeInfo?.kind,
+    getRuntimeInfo: () => runtimeInfo,
+    loginMaoyan: async () => ({ cancelled: true }),
+    uploadSessionFile: async () => ({ cancelled: true }),
+    ...runtimeOverrides
+  };
+  const api = async (path, options) => {
+    if (Object.hasOwn(apiOverrides, path)) {
+      const result = apiOverrides[path];
+      return typeof result === "function" ? result(options) : result;
+    }
+    if (path === "/api/lock/session/status") return { session: { uploaded: false } };
+    if (path === "/api/lock/rule") return { rule: null };
+    return {};
+  };
+  const controller = module.exports.createMaoyanLockController({
+    api,
+    runtime,
+    getProfileGeneration,
+    isProfileGenerationCurrent,
+    getContext: () => ({
+      connected: true, cinemaId: "25428", cinemaName: "测试影院", cinemaSelected: true,
+      lockServiceEnabled: true, monitorEnabled: true, movies: [], ...contextOverrides
+    })
+  });
+  return {
+    controller,
+    messages,
+    loginButton: elements["btn-lock-login"],
+    uploadButton: elements["btn-lock-upload"],
+    fileInput: elements["lock-session-file"]
+  };
+}
+
+function loadRuntime() {
+  const source = fs.readFileSync(path.join(__dirname, "runtime.js"), "utf8");
+  const window = { window: null };
+  window.window = window;
+  vm.runInNewContext(source, { window }, { filename: "runtime.js" });
+  return window;
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
+test("web mode disables one-click login and keeps manual upload", async () => {
+  const dom = mountLock({ runtimeInfo: { kind: "web", canLoginMaoyan: false } });
+  await Promise.resolve();
+  assert.equal(dom.loginButton.disabled, true);
+  assert.match(dom.loginButton.textContent, /Web.*不支持/);
+  assert.match(dom.uploadButton.textContent, /手动上传登录态/);
+  assert.equal(dom.fileInput.classList.contains("hidden"), false);
+});
+
+test("electron login updates only the masked session state", async () => {
+  const session = {
+    uploaded: true,
+    uidMasked: "UID 123***789",
+    sourceSavedAt: "2026-09-15T10:00:00.000Z",
+    uploadedAt: "2026-09-15T10:01:00.000Z",
+    cookies: [{ name: "_m_h5_tk", value: "secret" }]
+  };
+  const dom = mountLock({
+    runtimeInfo: { kind: "electron", canLoginMaoyan: true },
+    runtime: { loginMaoyan: async () => ({ session }) },
+    api: {
+      "/api/lock/session/status": { session },
+      "/api/lock/rule": { rule: null }
+    }
+  });
+  await Promise.resolve();
+  await dom.controller.loginMaoyan();
+  assert.equal(dom.controller.getSession().uidMasked, "UID 123***789");
+  assert.equal(dom.controller.getSession().cookies, undefined);
+});
+
+test("web upload keeps the file in the renderer only for the upload request", async () => {
+  const uploaded = [];
+  const dom = mountLock({
+    runtimeInfo: { kind: "web", canLoginMaoyan: false },
+    api: {
+      "/api/lock/session": ({ body }) => {
+        uploaded.push(body);
+        return { session: { uploaded: true, uidMasked: "UID 456***321", cookies: ["secret"] } };
+      }
+    }
+  });
+  dom.fileInput.files = [{ size: 24, text: async () => '{"cookies":["secret"]}' }];
+  await dom.controller.uploadSession();
+  assert.deepEqual(uploaded, ['{"cookies":["secret"]}']);
+  assert.equal(dom.fileInput.value, "");
+  assert.equal(dom.controller.getSession().uidMasked, "UID 456***321");
+  assert.equal(dom.controller.getSession().cookies, undefined);
+});
+
+test("electron manual upload delegates file selection to the runtime", async () => {
+  let uploads = 0;
+  const session = { uploaded: true, uidMasked: "UID 789***123", sourceSavedAt: "2026-09-15T10:00:00.000Z" };
+  const dom = mountLock({
+    runtimeInfo: { kind: "electron", canLoginMaoyan: true },
+    runtime: { uploadSessionFile: async () => { uploads += 1; return { session }; } },
+    api: {
+      "/api/lock/session/status": { session },
+      "/api/lock/rule": { rule: null }
+    }
+  });
+  await Promise.resolve();
+  await dom.controller.uploadSession();
+  assert.equal(uploads, 1);
+  assert.equal(dom.fileInput.classList.contains("hidden"), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(dom.controller.getSession())), session);
+});
+
+test("cancelled electron login preserves the previous public session", async () => {
+  let calls = 0;
+  const session = { uploaded: true, uidMasked: "UID 123***789", uploadedAt: "2026-09-15T10:01:00.000Z" };
+  const dom = mountLock({
+    runtimeInfo: { kind: "electron", canLoginMaoyan: true },
+    runtime: { loginMaoyan: async () => ++calls === 1 ? { session } : { cancelled: true } },
+    api: {
+      "/api/lock/session/status": { session },
+      "/api/lock/rule": { rule: null }
+    }
+  });
+  await Promise.resolve();
+  await dom.controller.loginMaoyan();
+  await dom.controller.loginMaoyan();
+  assert.deepEqual(JSON.parse(JSON.stringify(dom.controller.getSession())), session);
+});
+
+test("resolved native unknown errors preserve refresh guidance and the previous session", async () => {
+  const message = "The upload outcome is unknown. Refresh the remote session status before trying again.";
+  const cleanup = "Temporary login cleanup failed. Please restart the application.";
+  for (const [operation, method] of [["loginMaoyan", "loginMaoyan"], ["uploadSession", "uploadSessionFile"]]) {
+    let calls = 0;
+    const session = { uploaded: true, uidMasked: "UID 123***789" };
+    const dom = mountLock({
+      runtimeInfo: { kind: "electron", canLoginMaoyan: true },
+      runtime: { [method]: async () => ++calls === 1 ? { session } : {
+        ok: false, code: "unknown", message, cookies: "sensitive-cookie", error: "sensitive-error",
+        warnings: [{ code: "cleanup", message: cleanup, raw: "sensitive-warning" }]
+      } },
+      api: { "/api/lock/session/status": { session } }
+    });
+    await Promise.resolve(); await dom.controller[operation](); await dom.controller[operation]();
+    assert.match(dom.messages.at(-1).message, /Refresh the remote session status/);
+    assert.match(dom.messages.at(-1).message, /restart the application/);
+    assert.equal(dom.messages.at(-1).type, "error");
+    assert.doesNotMatch(JSON.stringify(dom.messages), /sensitive/);
+    assert.deepEqual(JSON.parse(JSON.stringify(dom.controller.getSession())), session);
+    assert.equal(dom.loginButton.disabled, false); assert.equal(dom.uploadButton.disabled, false);
+  }
+});
+
+test("native success and cancellation show cleanup warnings without leaking other result fields", async () => {
+  const session = { uploaded: true, uidMasked: "UID 123***789" };
+  for (const [operation, method] of [["loginMaoyan", "loginMaoyan"], ["uploadSession", "uploadSessionFile"]]) {
+    for (const cancelled of [false, true]) {
+      const dom = mountLock({
+        runtimeInfo: { kind: "electron", canLoginMaoyan: true },
+        runtime: { [method]: async () => ({
+          ...(cancelled ? { cancelled: true } : { session }),
+          warnings: [{ code: "cleanup", message: "Temporary login cleanup failed. Please restart the application." }, { code: "raw", message: "sensitive-warning" }],
+          mtgsig: "sensitive-signature"
+        }) },
+        api: { "/api/lock/session/status": { session } }
+      });
+      await Promise.resolve(); await dom.controller[operation]();
+      assert.ok(dom.messages.some(({ message, type }) => /restart the application/.test(message) && type === "warn"));
+      assert.doesNotMatch(JSON.stringify(dom.messages), /sensitive/);
+      assert.equal(dom.controller.getSession().uploaded, !cancelled);
+    }
+  }
+});
+
+test("native promise rejections cannot display unprojected sensitive error messages", async () => {
+  for (const [operation, method] of [["loginMaoyan", "loginMaoyan"], ["uploadSession", "uploadSessionFile"]]) {
+    const dom = mountLock({
+      runtimeInfo: { kind: "electron", canLoginMaoyan: true },
+      runtime: { [method]: async () => { throw new Error("sensitive-cookie _csrf=secret mtgsig=secret"); } }
+    });
+    await Promise.resolve(); await dom.controller[operation]();
+    assert.equal(dom.messages.at(-1).type, "error");
+    assert.doesNotMatch(dom.messages.at(-1).message, /sensitive|_csrf|mtgsig|secret/);
+  }
+});
+
+test("profile reset clears a pending web upload without a stale completion re-disabling actions", async () => {
+  const fileText = deferred();
+  const replacementText = deferred();
+  let generation = 0;
+  const dom = mountLock({
+    runtimeInfo: { kind: "web", canLoginMaoyan: false },
+    getProfileGeneration: () => generation,
+    isProfileGenerationCurrent: (value) => value === generation
+  });
+  dom.fileInput.files = [{ size: 24, text: () => fileText.promise }];
+  const upload = dom.controller.uploadSession();
+  assert.equal(dom.uploadButton.disabled, true);
+  generation += 1;
+  dom.controller.reset();
+  assert.equal(dom.uploadButton.disabled, false);
+  dom.fileInput.files = [{ size: 24, text: () => replacementText.promise }];
+  const replacement = dom.controller.uploadSession();
+  assert.equal(dom.uploadButton.disabled, true);
+  fileText.resolve('{"cookies":["stale"]}');
+  await upload;
+  assert.equal(dom.uploadButton.disabled, true);
+  replacementText.resolve('{"cookies":["current"]}');
+  await replacement;
+  assert.equal(dom.uploadButton.disabled, false);
+});
+
+test("profile reset clears a pending electron login without a stale completion re-disabling actions", async () => {
+  const oldLogin = deferred();
+  const replacementLogin = deferred();
+  let attempts = 0;
+  let generation = 0;
+  const dom = mountLock({
+    runtimeInfo: { kind: "electron", canLoginMaoyan: true },
+    runtime: { loginMaoyan: () => ++attempts === 1 ? oldLogin.promise : replacementLogin.promise },
+    getProfileGeneration: () => generation,
+    isProfileGenerationCurrent: (value) => value === generation
+  });
+  await Promise.resolve();
+  const operation = dom.controller.loginMaoyan();
+  assert.equal(dom.loginButton.disabled, true);
+  generation += 1;
+  dom.controller.reset();
+  assert.equal(dom.loginButton.disabled, false);
+  const replacement = dom.controller.loginMaoyan();
+  assert.equal(dom.loginButton.disabled, true);
+  oldLogin.resolve({ session: { uploaded: true, uidMasked: "UID stale" } });
+  await operation;
+  assert.equal(dom.loginButton.disabled, true);
+  replacementLogin.resolve({ session: { uploaded: true, uidMasked: "UID current" } });
+  await replacement;
+  assert.equal(dom.loginButton.disabled, false);
+});
+
+test("rejected electron login preserves the previous public session and re-enables actions", async () => {
+  let attempts = 0;
+  const session = { uploaded: true, uidMasked: "UID 123***789", uploadedAt: "2026-09-15T10:01:00.000Z" };
+  const dom = mountLock({
+    runtimeInfo: { kind: "electron", canLoginMaoyan: true },
+    runtime: { loginMaoyan: async () => ++attempts === 1 ? { session } : Promise.reject(new Error("login rejected")) },
+    api: { "/api/lock/session/status": { session }, "/api/lock/rule": { rule: null } }
+  });
+  await Promise.resolve();
+  await dom.controller.loginMaoyan();
+  await dom.controller.loginMaoyan();
+  assert.deepEqual(JSON.parse(JSON.stringify(dom.controller.getSession())), session);
+  assert.equal(dom.loginButton.disabled, false);
+  assert.equal(dom.uploadButton.disabled, false);
+});
+
+test("rejected electron upload preserves the previous public session and re-enables actions", async () => {
+  let attempts = 0;
+  const session = { uploaded: true, uidMasked: "UID 789***123", uploadedAt: "2026-09-15T10:01:00.000Z" };
+  const dom = mountLock({
+    runtimeInfo: { kind: "electron", canLoginMaoyan: true },
+    runtime: { uploadSessionFile: async () => ++attempts === 1 ? { session } : Promise.reject(new Error("upload rejected")) },
+    api: { "/api/lock/session/status": { session }, "/api/lock/rule": { rule: null } }
+  });
+  await Promise.resolve();
+  await dom.controller.uploadSession();
+  await dom.controller.uploadSession();
+  assert.deepEqual(JSON.parse(JSON.stringify(dom.controller.getSession())), session);
+  assert.equal(dom.loginButton.disabled, false);
+  assert.equal(dom.uploadButton.disabled, false);
+});
+
+test("old lock refresh and seat responses cannot repopulate reset state", async () => {
+  const { createProfileGeneration } = loadRuntime();
+  const generation = createProfileGeneration();
+  const oldGeneration = generation.current();
+  const refresh = deferred();
+  const seats = deferred();
+  const state = { session: null, seatMap: null };
+
+  const operations = [
+    generation.run(oldGeneration, refresh.promise, (value) => { state.session = value; }),
+    generation.run(oldGeneration, seats.promise, (value) => { state.seatMap = value; })
+  ];
+  generation.invalidate();
+  refresh.resolve({ uploaded: true });
+  seats.resolve({ seats: [{ seatNo: "1-2-3" }] });
+
+  assert.deepEqual(await Promise.all(operations), [false, false]);
+  assert.deepEqual(state, { session: null, seatMap: null });
+});
+
 test("lock utilities expose selectable current-show templates only", () => {
   const { lockUtils } = loadLockModule();
   const templates = lockUtils.templatesFromMovies([

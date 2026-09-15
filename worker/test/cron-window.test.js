@@ -3,7 +3,7 @@
 // 批次在 runScheduledChecks 入口整体跳过(不抓上游、锁座链不执行; 手动「立即检查」不受限)。
 import test from "node:test";
 import assert from "node:assert/strict";
-import { MemoryKV } from "./helpers.js";
+import { createDB } from "./helpers.js";
 import {
   CRON_EXPRESSION,
   MONITOR_WINDOW,
@@ -12,7 +12,7 @@ import {
   describeCrons
 } from "../src/maoyan/cron.js";
 import { runScheduledChecks } from "../src/maoyan/tokens.js";
-import { userKey } from "../src/maoyan/user.js";
+import * as db from "../src/maoyan/db.js";
 
 async function withMockFetch(mock, callback) {
   const original = globalThis.fetch;
@@ -52,16 +52,16 @@ test("cronText 组装: 分钟步进描述 + 监控时段标签", () => {
 
 const tokenId = "22222222-2222-4222-8222-222222222222";
 
-function runtime() {
+async function runtime() {
   return {
-    MAOYAN_KV: new MemoryKV({
-      "meta:tokens": JSON.stringify([{ id: tokenId, token: "access-token" }]),
-      [userKey(tokenId, "config")]: JSON.stringify({
+    DB: await createDB({
+      tokens: [{ id: tokenId, token: "access-token" }],
+      configs: { [tokenId]: {
         enabled: true,
         cinemaId: "25428",
         selectedMovieIds: ["7"],
         monitorDdl: "2099-01-01T00:00:00.000Z"
-      })
+      } }
     })
   };
 }
@@ -74,7 +74,7 @@ const cinema = { showData: {
 } };
 
 test("窗口外批次整体跳过: 不抓上游, 锁座链(afterMonitor)不执行", async () => {
-  const env = runtime();
+  const env = await runtime();
   const OUT_NOW = Date.parse("2026-09-13T16:30:00.000Z"); // 北京 00:30
   let handoffs = 0;
   await withMockFetch(async () => {
@@ -84,11 +84,11 @@ test("窗口外批次整体跳过: 不抓上游, 锁座链(afterMonitor)不执�
   });
   assert.equal(handoffs, 0);
   // 不留任何检查痕迹
-  assert.equal(await env.MAOYAN_KV.get(userKey(tokenId, "status"), "json"), null);
+  assert.equal(await db.getStatus(env.DB, tokenId), null);
 });
 
 test("窗口内批次正常执行: 监控数据持久化并交接锁座", async () => {
-  const env = runtime();
+  const env = await runtime();
   const IN_NOW = Date.parse("2026-09-14T02:00:00.000Z"); // 北京 10:00
   let handoffs = 0;
   await withMockFetch(async (input) => {
@@ -104,5 +104,5 @@ test("窗口内批次正常执行: 监控数据持久化并交接锁座", async 
     }, { now: IN_NOW });
   });
   assert.equal(handoffs, 1);
-  assert.ok(await env.MAOYAN_KV.get(userKey(tokenId, "snapshot"), "json"));
+  assert.ok(Object.keys(await db.getSnapshot(env.DB, tokenId)).length > 0);
 });

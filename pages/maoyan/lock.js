@@ -173,12 +173,21 @@
     }
   }
 
-  function createMaoyanLockController({ api, getContext, onLog }) {
+  function publicSession(session) {
+    if (!session?.uploaded) return { uploaded: false };
+    const result = { uploaded: true };
+    for (const key of ["uidMasked", "sourceSavedAt", "uploadedAt"]) {
+      if (typeof session[key] === "string") result[key] = session[key];
+    }
+    return result;
+  }
+
+  function createMaoyanLockController({ api, runtime, getContext, onLog, getProfileGeneration, isProfileGenerationCurrent }) {
     const $ = (id) => document.getElementById(id);
     const els = {
       button: $("btn-lock-seats"), overlay: $("lock-overlay"), close: $("btn-lock-close"),
       cinema: $("lock-cinema"), movie: $("lock-movie"), template: $("lock-template"), date: $("lock-target-date"),
-      file: $("lock-session-file"), upload: $("btn-lock-upload"), removeSession: $("btn-lock-remove-session"),
+      file: $("lock-session-file"), login: $("btn-lock-login"), upload: $("btn-lock-upload"), removeSession: $("btn-lock-remove-session"),
       sessionStatus: $("lock-session-status"), seatGrid: $("lock-seat-grid"), seatCount: $("lock-seat-count"),
       risk: $("lock-risk-accepted"), ruleStatus: $("lock-rule-status"), cancelRule: $("btn-lock-cancel-rule"),
       templateLabel: $("lock-template-label"),
@@ -202,11 +211,22 @@
     const state = {
       context: null, session: { uploaded: false }, movieId: "", templateSeqNo: "", seatMap: null,
       selectedSeatNos: new Set(), rule: null, automationEnabled: false, templates: [], dateBounds: lockDateBounds(),
-      seatSeg: 2, zoom: 1, panX: 0, panY: 0, seatFeedback: { seqNo: "", at: 0 }
+      seatSeg: 2, zoom: 1, panX: 0, panY: 0, seatFeedback: { seqNo: "", at: 0 },
+      runtimeInfo: { kind: "web", canLoginMaoyan: false }, sessionActionBusy: false
     };
 
     function show(message, type = "info") {
       if (typeof root.showToast === "function") root.showToast(message, type);
+    }
+
+    function showNativeSessionResult(result, fallback, type) {
+      // Native IPC has already projected these messages; never display raw result fields.
+      const message = result?.ok === false && typeof result.message === "string" && result.message.trim()
+        ? result.message.slice(0, 1000) : fallback;
+      const warnings = Array.isArray(result?.warnings) ? result.warnings
+        .filter((warning) => warning?.code === "cleanup" && typeof warning.message === "string")
+        .slice(0, 1).map((warning) => warning.message.slice(0, 1000)) : [];
+      show([message, ...warnings].join("\n"), warnings.length && type !== "error" ? "warn" : type);
     }
 
     function buttonLoading(btn, text, task) {
@@ -214,11 +234,59 @@
       return task();
     }
 
+    function capturedProfileGeneration() {
+      return typeof getProfileGeneration === "function" ? getProfileGeneration() : null;
+    }
+
+    function isCurrentProfileGeneration(generation) {
+      return generation === null || typeof isProfileGenerationCurrent !== "function" || isProfileGenerationCurrent(generation);
+    }
+
     function loadingHtml(text) {
       return `<span class="spinner"></span>${text}`;
     }
 
     function setHidden(el, hidden) { el?.classList.toggle("hidden", hidden); }
+
+    function renderSessionActions() {
+      const info = state.runtimeInfo || { kind: "web", canLoginMaoyan: false };
+      const isElectron = info.kind === "electron";
+      const context = state.context || getContext?.() || {};
+      const loginAvailable = isElectron && info.canLoginMaoyan === true && context.connected && context.cinemaId && context.cinemaSelected;
+      if (els.login) {
+        els.login.textContent = isElectron
+          ? (info.canLoginMaoyan ? "一键登录猫眼" : "桌面端暂不支持一键登录")
+          : "Web端不支持一键登录";
+        els.login.disabled = !loginAvailable || state.sessionActionBusy;
+        els.login.title = loginAvailable ? "在桌面端登录猫眼" : (isElectron ? "请先连接 Worker 并选择影院" : "Web端不支持一键登录");
+      }
+      if (els.upload) {
+        els.upload.textContent = "手动上传登录态";
+        els.upload.disabled = state.sessionActionBusy;
+      }
+      if (els.file) setHidden(els.file, isElectron);
+    }
+
+    async function refreshRuntimeInfo() {
+      const generation = capturedProfileGeneration();
+      try {
+        const info = await runtime?.getRuntimeInfo?.();
+        if (!isCurrentProfileGeneration(generation)) return;
+        state.runtimeInfo = {
+          kind: info?.kind === "electron" ? "electron" : "web",
+          canLoginMaoyan: info?.canLoginMaoyan === true
+        };
+      } catch {
+        if (!isCurrentProfileGeneration(generation)) return;
+        state.runtimeInfo = { kind: "web", canLoginMaoyan: false };
+      }
+      renderSessionActions();
+    }
+
+    function setSessionActionBusy(busy) {
+      state.sessionActionBusy = busy;
+      renderSessionActions();
+    }
 
     function templateForCurrent() {
       return state.templates.find((item) => item.seqNo === state.templateSeqNo && item.movieId === state.movieId) || null;
@@ -302,6 +370,7 @@
     function renderSession() {
       const session = state.session || { uploaded: false };
       if (!els.sessionStatus) return;
+      renderSessionActions();
       const gated = !session.uploaded;
       renderGate(gated);
       if (gated) {
@@ -808,6 +877,7 @@
     let seatLoadSeq = 0;
     async function loadSeats() {
       const loadSeq = ++seatLoadSeq;
+      const generation = capturedProfileGeneration();
       resetSeats();
       renderOfficialCompare(null); // 先隐藏旧对比区, 加载成功后再渲染新片段
       if (!state.templateSeqNo || !state.context?.cinemaId) return;
@@ -822,7 +892,7 @@
         const params = new URLSearchParams({ cinemaId: state.context.cinemaId, movieId: state.movieId, seqNo: state.templateSeqNo });
         const { seatMap } = await api(`/api/lock/template-seats?${params}`);
         // 过期响应: 用户已切到其他场次, 丢弃, 不覆盖新渲染
-        if (loadSeq !== seatLoadSeq) return;
+        if (loadSeq !== seatLoadSeq || !isCurrentProfileGeneration(generation)) return;
         // 座号段判别: 两种影厅口径(区-座-排 / 区-排-座)自动适配, 布局与文案保持票面语义
         state.seatSeg = seatSegmentOf(seatMap?.seats);
         if (state.seatMapIsTemplate && seatMap?.seats) {
@@ -835,7 +905,7 @@
         els.seatFeedback?.classList.remove("attention");
       } catch (error) {
         // 失败的也可能是过期请求: 不让旧报错覆盖新场次的渲染
-        if (loadSeq !== seatLoadSeq) return;
+        if (loadSeq !== seatLoadSeq || !isCurrentProfileGeneration(generation)) return;
         state.seatMap = null;
         renderOfficialCompare(null);
         els.seatGrid.innerHTML = '<div class="lock-empty">座位表加载失败，请确认猫眼会话后重试</div>';
@@ -856,6 +926,7 @@
 
     // 座位解析失败反馈: 只上报当前影院/影片/场次标识, 服务端写 KV 供管理员排查(不要求已上传会话)
     async function sendSeatFeedback() {
+      const generation = capturedProfileGeneration();
       if (!state.context?.cinemaId) return show("请先选择影院", "warn");
       const seqNo = state.templateSeqNo || "";
       const key = seqNo || "na";
@@ -871,23 +942,27 @@
             method: "POST",
             body: JSON.stringify({ cinemaId: state.context.cinemaId, movieId: state.movieId, seqNo })
           });
+          if (!isCurrentProfileGeneration(generation)) return;
           state.seatFeedback = { seqNo: key, at: now };
           els.seatFeedback?.classList.remove("attention");
           show("已收到反馈，管理员会尽快处理", "success");
           onLog?.("ok", "座位问题已反馈（影院/影片/场次标识已记录）");
         } catch (error) {
+          if (!isCurrentProfileGeneration(generation)) return;
           show(error.message || "反馈失败", "error");
         }
       });
     }
 
     async function refreshRemoteState() {
+      const generation = capturedProfileGeneration();
       if (els.sessionStatus) els.sessionStatus.innerHTML = loadingHtml("正在加载锁座状态...");
       if (els.ruleStatus) els.ruleStatus.innerHTML = loadingHtml("正在加载锁座状态...");
       const [sessionResult, ruleResult] = await Promise.allSettled([
         api("/api/lock/session/status"), api("/api/lock/rule")
       ]);
-      state.session = sessionResult.status === "fulfilled" ? (sessionResult.value.session || { uploaded: false }) : { uploaded: false };
+      if (!isCurrentProfileGeneration(generation)) return;
+      state.session = sessionResult.status === "fulfilled" ? publicSession(sessionResult.value.session) : { uploaded: false };
       state.rule = ruleResult.status === "fulfilled" ? (ruleResult.value.rule || null) : null;
       state.automationEnabled = Boolean(state.rule?.automationEnabled);
       renderSession();
@@ -895,6 +970,9 @@
     }
 
     async function uploadSession() {
+      const generation = capturedProfileGeneration();
+      if (state.sessionActionBusy) return;
+      if (state.runtimeInfo.kind === "electron") return uploadElectronSession(generation);
       const file = els.file.files?.[0];
       if (!file) return show("请选择猫眼会话文件", "warn");
       if (file.size > 256 * 1024) {
@@ -903,30 +981,106 @@
       }
       await buttonLoading(els.upload, "上传中...", async () => {
         let sessionText = "";
+        setSessionActionBusy(true);
         try {
           sessionText = await file.text();
+          if (!isCurrentProfileGeneration(generation)) return;
           const { session } = await api("/api/lock/session", { method: "POST", body: sessionText });
-          state.session = session || { uploaded: false };
+          if (!isCurrentProfileGeneration(generation)) return;
+          state.session = publicSession(session);
           renderSession();
           renderSelection();
           show("猫眼会话已加密保存", "success");
           onLog?.("ok", "猫眼会话已上传，用于锁座（Beta）");
           await loadSeats(); // 门控解除后立即加载座位表, 免去手动刷新
         } catch (error) {
+          if (!isCurrentProfileGeneration(generation)) return;
           show(error.message || "上传失败", "error");
         } finally {
           sessionText = "";
           els.file.value = "";
+          if (isCurrentProfileGeneration(generation)) setSessionActionBusy(false);
+        }
+      });
+    }
+
+    async function uploadElectronSession(generation = capturedProfileGeneration()) {
+      await buttonLoading(els.upload, "上传中...", async () => {
+        setSessionActionBusy(true);
+        try {
+          const result = await runtime?.uploadSessionFile?.();
+          if (!isCurrentProfileGeneration(generation)) return;
+          if (result?.cancelled) {
+            showNativeSessionResult(result, "已取消选择登录态文件", "info");
+            return;
+          }
+          if (result?.ok === false || !result?.session) {
+            showNativeSessionResult(result, "上传登录态失败", "error");
+            return;
+          }
+          state.session = publicSession(result.session);
+          renderSession();
+          renderSelection();
+          showNativeSessionResult(result, "猫眼会话已加密保存", "success");
+          onLog?.("ok", "猫眼会话已上传，用于锁座（Beta）");
+          await refreshRemoteState();
+          if (!isCurrentProfileGeneration(generation)) return;
+          await loadSeats();
+        } catch {
+          if (!isCurrentProfileGeneration(generation)) return;
+          show("上传登录态失败", "error");
+        } finally {
+          if (isCurrentProfileGeneration(generation)) setSessionActionBusy(false);
+        }
+      });
+    }
+
+    async function loginMaoyan() {
+      const generation = capturedProfileGeneration();
+      if (state.sessionActionBusy) return;
+      const context = state.context || getContext?.() || {};
+      if (state.runtimeInfo.kind !== "electron" || state.runtimeInfo.canLoginMaoyan !== true || !context.connected || !context.cinemaId || !context.cinemaSelected) {
+        return;
+      }
+      await buttonLoading(els.login, "登录中...", async () => {
+        setSessionActionBusy(true);
+        try {
+          const result = await runtime?.loginMaoyan?.(context.cinemaId);
+          if (!isCurrentProfileGeneration(generation)) return;
+          if (result?.cancelled) {
+            showNativeSessionResult(result, "已取消猫眼登录", "info");
+            return;
+          }
+          if (result?.ok === false || !result?.session) {
+            showNativeSessionResult(result, "猫眼登录失败", "error");
+            return;
+          }
+          state.session = publicSession(result.session);
+          renderSession();
+          renderSelection();
+          showNativeSessionResult(result, "猫眼登录态已保存", "success");
+          onLog?.("ok", "猫眼一键登录已完成，用于锁座（Beta）");
+          await refreshRemoteState();
+          if (!isCurrentProfileGeneration(generation)) return;
+          await loadSeats();
+        } catch {
+          if (!isCurrentProfileGeneration(generation)) return;
+          show("猫眼登录失败", "error");
+        } finally {
+          if (isCurrentProfileGeneration(generation)) setSessionActionBusy(false);
         }
       });
     }
 
     async function removeSession() {
+      const generation = capturedProfileGeneration();
       const confirmed = await root.showConfirm("删除后将不能查询座位或自动锁座，是否继续？", { title: "删除猫眼会话", okText: "删除", danger: true });
       if (!confirmed) return;
+      if (!isCurrentProfileGeneration(generation)) return;
       await buttonLoading(els.removeSession, "删除中...", async () => {
         try {
           await api("/api/lock/session/remove", { method: "POST" });
+          if (!isCurrentProfileGeneration(generation)) return;
           state.session = { uploaded: false };
           state.rule = null;
           state.automationEnabled = false;
@@ -935,12 +1089,14 @@
           renderRule();
           show("猫眼会话已删除", "success");
         } catch (error) {
+          if (!isCurrentProfileGeneration(generation)) return;
           show(error.message || "删除失败", "error");
         }
       });
     }
 
     async function createRule() {
+      const generation = capturedProfileGeneration();
       const action = lockAction(state.showMode);
       if (state.showMode === "target") {
         const template = templateForCurrent();
@@ -958,6 +1114,7 @@
           { title: "确认立即锁座", okText: "立即锁座", danger: true }
         );
         if (!confirmed) return;
+        if (!isCurrentProfileGeneration(generation)) return;
       }
       const payload = {
         cinemaId: state.context.cinemaId, movieId: state.movieId, templateSeqNo: state.templateSeqNo,
@@ -967,6 +1124,7 @@
         await buttonLoading(els.submit, action.loadingText, async () => {
           try {
             const { rule } = await api("/api/lock/rule", { method: "POST", body: JSON.stringify(payload) });
+            if (!isCurrentProfileGeneration(generation)) return;
             state.rule = rule || null;
             state.automationEnabled = Boolean(rule?.automationEnabled);
             renderRule();
@@ -977,25 +1135,30 @@
             }
             onLog?.("ok", state.showMode === "target" ? "锁座（Beta）已提交" : "锁座（Beta）规则已保存");
           } catch (error) {
+            if (!isCurrentProfileGeneration(generation)) return;
             show(error.message || "保存锁座规则失败", "error");
           }
         });
       } finally {
-        renderSelection();
+        if (isCurrentProfileGeneration(generation)) renderSelection();
       }
     }
 
     async function cancelRule() {
+      const generation = capturedProfileGeneration();
       const confirmed = await root.showConfirm("取消后不会影响已上传的猫眼会话，是否继续？", { title: "取消锁座规则", okText: "取消规则", danger: true });
       if (!confirmed) return;
+      if (!isCurrentProfileGeneration(generation)) return;
       await buttonLoading(els.cancelRule, "取消中...", async () => {
         try {
           await api("/api/lock/rule/cancel", { method: "POST" });
+          if (!isCurrentProfileGeneration(generation)) return;
           state.rule = null;
           state.automationEnabled = false;
           renderRule();
           show("锁座规则已取消", "success");
         } catch (error) {
+          if (!isCurrentProfileGeneration(generation)) return;
           show(error.message || "取消失败", "error");
         }
       });
@@ -1004,6 +1167,28 @@
     function close() {
       els.overlay.classList.add("hidden");
       document.removeEventListener("keydown", onKeydown);
+    }
+
+    function reset() {
+      close();
+      state.context = null;
+      state.session = { uploaded: false };
+      state.sessionActionBusy = false;
+      state.movieId = "";
+      state.templateSeqNo = "";
+      state.rule = null;
+      state.automationEnabled = false;
+      state.templates = [];
+      resetSeats({ clearSource: true });
+      state.seatSeg = 2;
+      state.seatFeedback = { seqNo: "", at: 0 };
+      if (els.file) els.file.value = "";
+      if (els.cinema) els.cinema.value = "";
+      if (els.risk) els.risk.checked = false;
+      renderTemplates();
+      renderSession();
+      renderRule();
+      renderOfficialCompare(null);
     }
 
     function onKeydown(event) { if (event.key === "Escape") close(); }
@@ -1019,12 +1204,16 @@
           : context?.monitorEnabled === false
             ? "监控已停止，开始监控后才能锁座"
             : "请先在影院设置中选择影院";
+      renderSessionActions();
       return available;
     }
 
     async function open() {
+      const generation = capturedProfileGeneration();
       if (!syncAvailability()) return show("请先在影院设置中选择影院", "warn");
       state.context = getContext();
+      await refreshRuntimeInfo();
+      if (!isCurrentProfileGeneration(generation)) return;
       els.cinema.value = state.context.cinemaName || `影院 ${state.context.cinemaId}`;
       els.risk.checked = false;
       renderTemplates();
@@ -1033,6 +1222,7 @@
       document.addEventListener("keydown", onKeydown);
       // 串行: 座位加载依赖最新会话状态, 并发会读到过期的 uploaded:false 误入门控(首次打开不加载座位的根因)
       await refreshRemoteState();
+      if (!isCurrentProfileGeneration(generation)) return;
       await loadSeats();
     }
 
@@ -1058,6 +1248,7 @@
       await loadSeats();
     });
     els.risk.addEventListener("change", renderSelection);
+    els.login?.addEventListener("click", loginMaoyan);
     els.upload.addEventListener("click", uploadSession);
     els.removeSession.addEventListener("click", removeSession);
     els.submit.addEventListener("click", createRule);
@@ -1130,15 +1321,20 @@
       }, true);
     }
     resetSeats({ clearSource: true });
+    renderSessionActions();
+    void refreshRuntimeInfo();
 
-    return { syncAvailability, open, refreshTemplates: renderTemplates, close };
+    return {
+      syncAvailability, open, refreshTemplates: renderTemplates, close, reset,
+      loginMaoyan, uploadSession, getSession: () => publicSession(state.session)
+    };
   }
 
   const exported = {
     createMaoyanLockController,
     lockUtils: {
       templatesFromMovies, chinaDateBounds, lockDateBounds, seatPosition, seatDisplayLabel, seatSegmentOf, couplePartnerOf,
-      isReadyToSubmit, isLockAvailable, lockAction, changeMovieSelection, preferredTargetShow, clearSeatSelection
+      isReadyToSubmit, isLockAvailable, lockAction, changeMovieSelection, preferredTargetShow, clearSeatSelection, publicSession
     }
   };
   if (typeof module !== "undefined" && module.exports) module.exports = exported;

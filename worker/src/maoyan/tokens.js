@@ -1,6 +1,7 @@
-// ---------------- 令牌管理(KV 存储) + 鉴权 ----------------
-// 令牌唯一来源: KV meta:tokens: [{id, token, remark, createdAt}]
+// ---------------- 令牌管理(D1 存储) + 鉴权 ----------------
+// 令牌唯一来源: D1 tokens 表(id, token UNIQUE, remark, created_at), 鉴权按 token 点查一行。
 
+import * as db from "./db.js";
 import { cleanupUserData, getUserConfig } from "./user.js";
 import { isExpired } from "./ddl.js";
 import { json } from "../common/http.js";
@@ -8,6 +9,7 @@ import { runCheck } from "./check.js";
 import { monitorError } from "./log.js";
 import { inMonitorWindow } from "./cron.js";
 import { listSeatFeedback, deleteSeatFeedback } from "./seat-feedback.js";
+import { migrateKvToD1 } from "./migrate.js";
 
 export function randomToken() {
   const bytes = new Uint8Array(16);
@@ -23,12 +25,11 @@ function maskToken(token) {
 }
 
 export async function getManagedTokens(env) {
-  const tokens = await env.MAOYAN_KV.get("meta:tokens", "json");
-  return Array.isArray(tokens) ? tokens.filter((token) => token && token.id && token.token) : [];
+  return await db.listTokens(env.DB);
 }
 
 async function saveManagedTokens(env, list) {
-  await env.MAOYAN_KV.put("meta:tokens", JSON.stringify(list));
+  await db.saveTokens(env.DB, list);
 }
 
 function checkAdminAuth(request, env) {
@@ -48,10 +49,10 @@ async function publicTokenRecord(env, token) {
   };
 }
 
-// 仅认 X-Token; 返回随机 namespace ID，而不是令牌本身。
+// 仅认 X-Token; 返回随机 namespace ID，而不是令牌本身。按 token 点查(D1 unique 索引)。
 export async function checkAuthFull(request, env) {
   const given = request.headers.get("X-Token") || "";
-  const hit = (await getManagedTokens(env)).find((token) => token.token === given);
+  const hit = await db.findTokenByToken(env.DB, given);
   return hit ? hit.id : null;
 }
 
@@ -118,6 +119,10 @@ export async function handleAdminTokens(request, env, url) {
         return json({ ok: false, error: "无效的反馈记录" }, 400);
       }
       return json({ ok: true });
+    }
+    if (url.pathname === "/api/admin/migrate-kv-to-d1" && request.method === "POST") {
+      // 一次性 KV→D1 迁移(upsert, 可重复执行; 不删 KV 数据, 回滚=重新部署 KV 版)
+      return json({ ok: true, ...(await migrateKvToD1(env)) });
     }
     return json({ error: "Method Not Allowed" }, 405);
   } catch (e) {

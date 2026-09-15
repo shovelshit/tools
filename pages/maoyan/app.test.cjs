@@ -3,10 +3,139 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 
+function loadRuntime() {
+  const source = fs.readFileSync(path.join(__dirname, "runtime.js"), "utf8");
+  const window = { window: null };
+  window.window = window;
+  require("node:vm").runInNewContext(source, { window }, { filename: "runtime.js" });
+  return window;
+}
+
+function createAppStateFixture(initial = {}) {
+  return {
+    cinemaId: "",
+    selectedMovies: [],
+    lockOpen: true,
+    profileKey: "https://first.example",
+    ...initial
+  };
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
 // 统一按 LF 读取: 源码在多平台检出时可能是 CRLF, 不能让行尾符决定测试结果
 function readSource(file) {
   return fs.readFileSync(path.join(__dirname, file), "utf8").replace(/\r\n/g, "\n");
 }
+
+async function startWebApp({ savedWorker, requestedWorker, savedToken = "token-a", tokens = {} }) {
+  const source = readSource("app.js");
+  const entries = new Map(Object.entries(tokens));
+  if (savedWorker !== undefined) entries.set("workerUrl", savedWorker);
+  entries.set("token", savedToken);
+  const requests = [];
+  const opened = [];
+  const links = ["https://apps.apple.com/cn/app/id1403753865", "https://sct.ftqq.com/sendkey"].map((href) => ({ href, addEventListener(event, callback) { this[event] = callback; } }));
+  const els = { workerUrl: { value: "" }, token: { value: "" } };
+  const location = { hostname: "page.example", origin: "https://page.example", protocol: "https:", search: requestedWorker ? `?worker=${encodeURIComponent(requestedWorker)}` : "" };
+  const window = loadRuntime();
+  window.maoyanRuntime = window.createWebRuntime({
+    getWorkerUrl: () => els.workerUrl.value, getToken: () => els.token.value,
+    fetchImpl: async (url, options) => { requests.push({ url, token: options.headers["X-Token"] }); return { ok: true, json: async () => ({}) }; }
+  });
+  window.maoyanRuntime.openExternal = async (url) => { opened.push(url); return { opened: true }; };
+  const context = {
+    window, URL, URLSearchParams, location, els, DEFAULT_WORKER: "https://ltools.asia", SAME_ORIGIN: false,
+    document: { querySelectorAll: () => links },
+    runtimeInfo: { kind: "web" }, tokenProfileKey: "", updateBatchTip() {}, checkForDesktopUpdate() {}, showLoginHint() {},
+    console: { warn() {} },
+    localStorage: { getItem: (key) => entries.get(key) ?? null, setItem: (key, value) => entries.set(key, value), removeItem: (key) => entries.delete(key) },
+    secureGet: async (key) => entries.get(key) ?? "",
+    secureSet: async (key, value) => value ? entries.set(key, value) : entries.delete(key)
+  };
+  const vm = require("node:vm");
+  const helpers = source.slice(source.indexOf("function normalizedWorkerUrl("), source.indexOf("\nasync function api("));
+  vm.runInNewContext(helpers, context);
+  const bindingStart = source.indexOf("function bindSetupLinks(");
+  if (bindingStart !== -1) vm.runInNewContext(source.slice(bindingStart, source.indexOf("\nfunction ", bindingStart + 1)), context);
+  context.connect = () => window.maoyanRuntime.connectWorker({ workerUrl: context.normalizedWorkerUrl(), token: els.token.value });
+  await vm.runInNewContext(source.slice(source.indexOf("(async function init()")), context);
+  return { requests, entries, els, opened, links };
+}
+
+test("Web startup URL override never sends another Worker's legacy token", async () => {
+  const app = await startWebApp({ savedWorker: "https://a.example", requestedWorker: "https://b.example" });
+  assert.deepEqual(app.requests, [{ url: "https://b.example/api/status", token: "" }]);
+  assert.equal(app.els.token.value, "");
+});
+
+test("Web startup restores only the requested profile and migrates bound legacy credentials", async () => {
+  const equivalent = await startWebApp({ savedWorker: "HTTPS://A.EXAMPLE:443/", requestedWorker: "https://a.example" });
+  assert.deepEqual(equivalent.requests, [{ url: "https://a.example/api/status", token: "token-a" }]);
+  assert.equal(equivalent.entries.get("token:https%3A%2F%2Fa.example"), "token-a");
+  assert.equal(equivalent.entries.has("token"), false);
+  const another = await startWebApp({ savedWorker: "https://a.example", requestedWorker: "https://b.example", tokens: { "token:https%3A%2F%2Fb.example": "token-b" } });
+  assert.deepEqual(another.requests, [{ url: "https://b.example/api/status", token: "token-b" }]);
+  assert.equal(another.entries.get("token:https%3A%2F%2Fa.example"), "token-a");
+  const unbound = await startWebApp({ requestedWorker: "https://b.example" });
+  assert.equal(unbound.requests[0].token, "");
+  assert.equal(unbound.entries.has("token"), false);
+});
+
+test("setup link clicks use runtime external navigation and suppress window creation", async () => {
+  const app = await startWebApp({ savedWorker: "https://a.example" });
+  for (const link of app.links) {
+    assert.equal(typeof link.click, "function");
+    let prevented = false;
+    await link.click({ preventDefault() { prevented = true; } });
+    assert.equal(prevented, true);
+  }
+  assert.deepEqual(app.opened, ["https://apps.apple.com/cn/app/id1403753865", "https://sct.ftqq.com/sendkey"]);
+});
+
+test("login markup exposes the Worker URL input", () => {
+  const indexHtml = readSource("index.html");
+  assert.doesNotMatch(indexHtml, /id="worker-url"[^>]*class="hidden"/);
+});
+
+test("connection security distinguishes HTTPS, loopback HTTP, and remote HTTP", () => {
+  const source = readSource("app.js");
+  const start = source.indexOf("function setConnectionState(");
+  const end = source.indexOf("\nfunction ", start + 1);
+  const security = { textContent: "", classList: { toggle(_name, enabled) { security.risk = enabled; } } };
+  const context = { URL, els: { workerProfile: {}, workerSecurity: security } };
+  require("node:vm").runInNewContext(source.slice(start, end), context);
+  for (const [workerUrl, httpRisk, label, risk] of [
+    ["https://worker.example", false, "HTTPS", false],
+    ["http://localhost:8787", false, "本机 HTTP", false],
+    ["http://127.0.0.1:8787", false, "本机 HTTP", false],
+    ["http://[::1]:8787", false, "本机 HTTP", false],
+    ["http://worker.example", true, "不安全 HTTP 连接", true],
+    ["http://localhost.evil.example", false, "不安全 HTTP 连接", true],
+    ["", false, "未连接", false]
+  ]) {
+    context.setConnectionState({ profileKey: "profile-id", workerUrl, httpRisk });
+    assert.equal(security.textContent, label, workerUrl);
+    assert.equal(security.risk, risk, workerUrl);
+  }
+});
+
+test("switching profiles clears cinema and lock state before reconnect", async () => {
+  const { switchWorkerProfile } = loadRuntime();
+  const state = createAppStateFixture({ cinemaId: "25428", selectedMovies: ["1"] });
+
+  await switchWorkerProfile(state, "https://second.example");
+
+  assert.equal(state.cinemaId, "");
+  assert.deepEqual(state.selectedMovies, []);
+  assert.equal(state.lockOpen, false);
+  assert.equal(state.profileKey, "https://second.example");
+});
 
 test("switching connections clears only the Maoyan user connection", () => {
   const source = readSource("app.js");
@@ -16,9 +145,47 @@ test("switching connections clears only the Maoyan user connection", () => {
   assert.match(source, /secureSet\("token", ""\)/);
 });
 
+test("logout resets Worker-scoped UI before another profile can connect", () => {
+  const source = readSource("app.js");
+  assert.match(source, /els\.btnLogout\.addEventListener\("click", async \(\) => \{\s*resetProfileUi\(""\);/);
+  assert.match(source, /function resetProfileUi[\s\S]*?selectedCity = null;/);
+  assert.match(source, /function resetProfileUi[\s\S]*?allCities = \[\];/);
+  assert.match(source, /function resetProfileUi[\s\S]*?monitorEnabled = false;/);
+  assert.match(source, /function resetProfileUi[\s\S]*?monitorDdl = null;/);
+  assert.match(source, /function resetProfileUi[\s\S]*?lockController\.reset\?\.\(\);/);
+});
+
+test("Electron clears a typed token even when Worker connection fails", () => {
+  const source = readSource("app.js");
+  assert.match(source, /if \(runtimeInfo\.kind === "electron"\) els\.token\.value = "";[\s\S]{0,300}?await window\.maoyanRuntime\.connectWorker\(connection\)/);
+});
+
+test("old config, cinema search, and change responses do not update a reset profile", async () => {
+  const { createProfileGeneration } = loadRuntime();
+  const generation = createProfileGeneration();
+  const oldGeneration = generation.current();
+  const config = deferred();
+  const search = deferred();
+  const changes = deferred();
+  const state = {};
+
+  const operations = [
+    generation.run(oldGeneration, config.promise, (value) => { state.config = value; }),
+    generation.run(oldGeneration, search.promise, (value) => { state.search = value; }),
+    generation.run(oldGeneration, changes.promise, (value) => { state.changes = value; })
+  ];
+  generation.invalidate();
+  config.resolve({ cinemaId: "25428" });
+  search.resolve([{ id: "old-cinema" }]);
+  changes.resolve([{ text: "old change" }]);
+
+  assert.deepEqual(await Promise.all(operations), [false, false, false]);
+  assert.deepEqual(state, {});
+});
+
 test("lock submission restores disabled state after the loading button resets", () => {
   const source = readSource("lock.js");
-  assert.match(source, /await buttonLoading\(els\.submit,[\s\S]*?\n\s*renderSelection\(\);\n\s*}/);
+  assert.match(source, /await buttonLoading\(els\.submit,[\s\S]*?finally \{\s*if \(isCurrentProfileGeneration\(generation\)\) renderSelection\(\);\s*}/);
 });
 
 test("monitor start stays disabled until the current push configuration is tested", () => {
@@ -151,4 +318,16 @@ test("lock entry follows the monitor switch and explains a paused lock rule", ()
   assert.match(source, /monitorEnabled, \/\/ 锁座随监控启停/);
   assert.match(source, /lockController\.syncAvailability\(\);\s*[\s\S]{0,400}?\/\/ 停止监控时若挂着进行中的自动锁座规则/);
   assert.match(source, /已随监控暂停，重新开始监控后自动继续/);
+});
+
+test("Electron shows an official update affordance and keeps the HTTP warning visible", () => {
+  const source = readSource("app.js");
+  const html = readSource("index.html");
+  assert.match(html, /id="update-status"/);
+  assert.match(html, /id="btn-open-update"/);
+  assert.match(source, /async function checkForDesktopUpdate\(\)/);
+  assert.match(source, /window\.maoyanRuntime\.checkForUpdates\(\)/);
+  assert.match(source, /未经签名验证/);
+  assert.match(source, /window\.maoyanRuntime\.openExternal\(releaseUrl\)/);
+  assert.match(source, /不安全 HTTP 连接/);
 });

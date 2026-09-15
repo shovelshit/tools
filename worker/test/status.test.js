@@ -1,13 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import worker from "../src/index.js";
-import { MemoryKV } from "./helpers.js";
+import { createDB } from "./helpers.js";
 
-function runtime(enabled) {
+const tokenId = "11111111-1111-4111-8111-111111111111";
+
+async function runtime(enabled) {
   return {
     LOCK_SERVICE_ENABLED: enabled,
-    MAOYAN_KV: new MemoryKV({
-      "meta:tokens": JSON.stringify([{ id: "token-id", token: "access-token" }])
+    DB: await createDB({
+      tokens: [{ id: tokenId, token: "access-token" }]
     })
   };
 }
@@ -17,7 +19,7 @@ test("status exposes the single lock-service capability switch", async () => {
     const request = new Request("https://worker.example/api/status", {
       headers: { "X-Token": "access-token" }
     });
-    const response = await worker.fetch(request, runtime(value));
+    const response = await worker.fetch(request, await runtime(value));
     const body = await response.json();
     assert.equal(response.status, 200);
     assert.equal(body.lockServiceEnabled, expected);
