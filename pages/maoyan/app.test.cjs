@@ -21,6 +21,13 @@ function createAppStateFixture(initial = {}) {
   };
 }
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
 // 统一按 LF 读取: 源码在多平台检出时可能是 CRLF, 不能让行尾符决定测试结果
 function readSource(file) {
   return fs.readFileSync(path.join(__dirname, file), "utf8").replace(/\r\n/g, "\n");
@@ -66,9 +73,32 @@ test("Electron clears a typed token even when Worker connection fails", () => {
   assert.match(source, /if \(runtimeInfo\.kind === "electron"\) els\.token\.value = "";[\s\S]{0,300}?await window\.maoyanRuntime\.connectWorker\(connection\)/);
 });
 
+test("old config, cinema search, and change responses do not update a reset profile", async () => {
+  const { createProfileGeneration } = loadRuntime();
+  const generation = createProfileGeneration();
+  const oldGeneration = generation.current();
+  const config = deferred();
+  const search = deferred();
+  const changes = deferred();
+  const state = {};
+
+  const operations = [
+    generation.run(oldGeneration, config.promise, (value) => { state.config = value; }),
+    generation.run(oldGeneration, search.promise, (value) => { state.search = value; }),
+    generation.run(oldGeneration, changes.promise, (value) => { state.changes = value; })
+  ];
+  generation.invalidate();
+  config.resolve({ cinemaId: "25428" });
+  search.resolve([{ id: "old-cinema" }]);
+  changes.resolve([{ text: "old change" }]);
+
+  assert.deepEqual(await Promise.all(operations), [false, false, false]);
+  assert.deepEqual(state, {});
+});
+
 test("lock submission restores disabled state after the loading button resets", () => {
   const source = readSource("lock.js");
-  assert.match(source, /await buttonLoading\(els\.submit,[\s\S]*?\n\s*renderSelection\(\);\n\s*}/);
+  assert.match(source, /await buttonLoading\(els\.submit,[\s\S]*?finally \{\s*if \(isCurrentProfileGeneration\(generation\)\) renderSelection\(\);\s*}/);
 });
 
 test("monitor start stays disabled until the current push configuration is tested", () => {

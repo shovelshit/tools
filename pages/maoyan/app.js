@@ -48,6 +48,7 @@ const els = {
 
 let cinemaMovies = []; // [{id, nm, showCount, checked}]
 let connected = false;
+const profileGeneration = window.createProfileGeneration();
 let activeProfileKey = "";
 let runtimeInfo = { kind: window.maoyanRuntime?.kind || "web", canLoginMaoyan: false, persistentTokenStorage: false };
 let tokenProfileKey = "";
@@ -77,16 +78,34 @@ function normalizedWorkerUrl() {
 }
 
 async function api(path, options = {}) {
+  const generation = profileGeneration.current();
   startTopProgress();
   try {
-    return await window.maoyanRuntime.requestWorker(path, options);
+    const result = await window.maoyanRuntime.requestWorker(path, options);
+    if (!profileGeneration.isCurrent(generation)) throw staleProfileError();
+    return result;
+  } catch (error) {
+    if (!profileGeneration.isCurrent(generation)) throw staleProfileError();
+    throw error;
   } finally {
     stopTopProgress();
   }
 }
 
+function staleProfileError() {
+  const error = new Error("连接已切换");
+  error.staleProfile = true;
+  return error;
+}
+
+function isStaleProfileError(error) {
+  return error?.staleProfile === true;
+}
+
 const lockController = window.createMaoyanLockController({
   api,
+  getProfileGeneration: () => profileGeneration.current(),
+  isProfileGenerationCurrent: (generation) => profileGeneration.isCurrent(generation),
   getContext: () => ({
     connected,
     cinemaId: selectedCinemaId,
@@ -125,6 +144,7 @@ function setConnectionState({ profileKey = "", httpRisk = false } = {}) {
 }
 
 function resetProfileUi(nextProfileKey) {
+  profileGeneration.invalidate();
   window.switchWorkerProfile({
     cinemaId: selectedCinemaId,
     selectedMovies: getSelectedIds(),
@@ -149,6 +169,12 @@ function resetProfileUi(nextProfileKey) {
   cinemaLoadSeq += 1;
   clearTimeout(cinemaSearchTimer);
   cinemaSearchTimer = null;
+  clearTimeout(movieSaveTimer);
+  movieSaveTimer = null;
+  lastSavedSig = "";
+  saving = false;
+  savePending = false;
+  restoring = false;
   allCities = [];
   els.cityInput.value = "";
   els.cityInput.disabled = false;
@@ -233,6 +259,7 @@ async function connect() {
       if (runtimeInfo.kind === "web") await secureSet("token", "");
     }
   }
+  const generation = profileGeneration.current();
   els.loginError.classList.add("hidden");
   if (els.loginHint) els.loginHint.classList.add("hidden");
   try {
@@ -245,6 +272,7 @@ async function connect() {
         if (typedToken) connection.token = typedToken;
         if (runtimeInfo.kind === "electron") els.token.value = "";
         const { status: st, profile, httpRisk } = await window.maoyanRuntime.connectWorker(connection);
+        if (!profileGeneration.isCurrent(generation)) return;
         connected = true;
         activeProfileKey = workerUrl;
         tokenProfileKey = workerUrl;
@@ -264,12 +292,14 @@ async function connect() {
         lockController.syncAvailability();
         log("ok", "云端连接成功");
         await Promise.all([loadCities(), restoreConfig()]);
+        if (!profileGeneration.isCurrent(generation)) return;
         refreshChanges();
       } finally {
-        hideBlockOverlay();
+        if (profileGeneration.isCurrent(generation)) hideBlockOverlay();
       }
     });
   } catch (e) {
+    if (!profileGeneration.isCurrent(generation) || isStaleProfileError(e)) return;
     connected = false;
     setStatus("连接失败", "stopped");
     // 令牌错误只做简短提示, 不暴露 Worker 名称与配置步骤(多人使用场景)
@@ -305,6 +335,7 @@ els.btnLogout.addEventListener("click", async () => {
 });
 
 async function restoreConfig() {
+  const generation = profileGeneration.current();
   restoring = true; // 恢复期间自动保存全部跳过, 避免每次连接都冗余写 KV
   let cloudConfig = null;
   let restoredOk = false;
@@ -322,10 +353,12 @@ async function restoreConfig() {
     if (selectedCinemaId) {
       // 恢复加载成功才视为已选择(失败保持未选, 锁座禁用待重试)
       restoredOk = (await loadCinema(selectedCinemaId, prevSelected, { restore: true })) === true;
+      if (!profileGeneration.isCurrent(generation)) return;
       cinemaSelected = restoredOk;
     }
     lockController.syncAvailability();
   } finally {
+    if (!profileGeneration.isCurrent(generation)) return;
     // 恢复完成: 记录当前状态签名, 与云端一致的内容不再重复写入。
     // 恢复加载失败时以云端原值为基线 — 否则后续任何其他字段的保存都会把影院勾选清空
     const baseline = restoredOk || !cloudConfig
@@ -436,6 +469,7 @@ let savePending = false;
 let restoring = false;
 
 async function autoSaveConfig(extra = {}, { msg = "配置已自动保存", silent = false } = {}) {
+  const generation = profileGeneration.current();
   if (restoring) return; // 恢复配置期间不写
   const body = pushConfigBody(extra);
   const sig = JSON.stringify(body);
@@ -452,14 +486,17 @@ async function autoSaveConfig(extra = {}, { msg = "配置已自动保存", silen
     updateMonitorBtn();
     if (res.notice) {
       await refreshChanges(); // 拉取服务端刚写入的告警与最新状态
+      if (!profileGeneration.isCurrent(generation)) return;
       log("warn", res.notice);
       return;
     }
     if (!silent) log("ok", msg);
   } catch (e) {
+    if (!profileGeneration.isCurrent(generation) || isStaleProfileError(e)) return;
     lastSavedSig = ""; // 失败允许重试
     showToast("自动保存失败：" + e.message, "error");
   } finally {
+    if (!profileGeneration.isCurrent(generation)) return;
     saving = false;
     if (savePending) {
       savePending = false;
@@ -547,10 +584,12 @@ function updateMonitorBtn() {
 
 els.btnToggleMonitor.addEventListener("click", async () => {
   if (!connected) return showToast("请先连接云端", "warn");
+  const generation = profileGeneration.current();
   await withButtonLoading(els.btnToggleMonitor, "处理中...", async () => {
     try {
       const target = !monitorEnabled;
       const res = await api("/api/config", { method: "POST", body: JSON.stringify({ enabled: target }) });
+      if (!profileGeneration.isCurrent(generation)) return;
       monitorEnabled = target;
       pushVerified = res.config?.notifyVerified === true;
       if (res.config) monitorDdl = res.config.monitorDdl || monitorDdl;
@@ -579,6 +618,7 @@ els.btnToggleMonitor.addEventListener("click", async () => {
         } catch {}
       }
     } catch (e) {
+      if (!profileGeneration.isCurrent(generation) || isStaleProfileError(e)) return;
       showToast("操作失败：" + e.message, "error");
     }
   });
@@ -587,6 +627,7 @@ els.btnToggleMonitor.addEventListener("click", async () => {
 
 // ---------------- 城市选择 ----------------
 async function loadCities() {
+  const generation = profileGeneration.current();
   try {
     const res = await api("/api/cities");
     allCities = (res.cities || []).map((c) => ({
@@ -595,6 +636,7 @@ async function loadCities() {
       pinyin: String(c.pinyin || "").toLowerCase(),
     }));
   } catch (e) {
+    if (!profileGeneration.isCurrent(generation) || isStaleProfileError(e)) return;
     // 云端暂不支持城市/影院搜索接口, 降级为仅手动输入
     allCities = [];
     selectedCity = null;
@@ -685,6 +727,7 @@ function scheduleCinemaSearch(immediate = false) {
 }
 
 async function searchCinemas() {
+  const generation = profileGeneration.current();
   if (!allCities.length) return; // 城市接口不可用时整体禁用
   if (!selectedCity) {
     els.cinemaDropdown.innerHTML = "";
@@ -704,8 +747,10 @@ async function searchCinemas() {
     const res = await api(
       `/api/cinemas?cityId=${encodeURIComponent(selectedCity.id)}&kw=${encodeURIComponent(kw)}`
     );
+    if (!profileGeneration.isCurrent(generation)) return;
     renderCinemaResults(res.cinemas || []);
   } catch (e) {
+    if (!profileGeneration.isCurrent(generation) || isStaleProfileError(e)) return;
     els.cinemaDropdown.innerHTML = "";
     appendSuggestMsg(els.cinemaDropdown, "搜索失败：" + e.message);
     els.cinemaDropdown.classList.remove("hidden");
@@ -783,11 +828,14 @@ document.addEventListener("click", (e) => {
 // ---------------- 影院加载 ----------------
 // 拉取影院排期, 自动重试 2 次(猫眼接口偶发失败)
 async function fetchShowsWithRetry(cinemaId) {
+  const generation = profileGeneration.current();
   let lastErr;
   for (let i = 0; i < 3; i++) {
+    if (!profileGeneration.isCurrent(generation)) throw staleProfileError();
     try {
       return await api("/api/shows?cinemaId=" + encodeURIComponent(cinemaId));
     } catch (e) {
+      if (!profileGeneration.isCurrent(generation) || isStaleProfileError(e)) throw staleProfileError();
       lastErr = e;
       if (i < 2) await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
     }
@@ -799,12 +847,13 @@ async function fetchShowsWithRetry(cinemaId) {
 let cinemaLoadSeq = 0;
 
 async function loadCinema(cinemaId, prevSelected, { restore = false } = {}) {
+  const generation = profileGeneration.current();
   const seq = ++cinemaLoadSeq;
   setPanelLoading(els.movieList, "正在加载影院影片...");
   return await withButtonLoading(null, "加载中...", async () => {
     try {
       const res = await fetchShowsWithRetry(cinemaId);
-      if (seq !== cinemaLoadSeq) return true; // 过期响应: 已有更新的选择在加载, 丢弃本次结果(不更新界面/不保存云端)
+      if (!profileGeneration.isCurrent(generation) || seq !== cinemaLoadSeq) return true; // 过期响应: 已有更新的选择在加载, 丢弃本次结果(不更新界面/不保存云端)
       selectedCinemaId = String(res.cinemaId); // 以接口返回为准, 搜索与恢复两条路径在此汇合
       cinemaSelected = true;
       els.cinemaName.textContent = `🎬 ${res.cinemaName}（ID: ${res.cinemaId}）`;
@@ -823,7 +872,7 @@ async function loadCinema(cinemaId, prevSelected, { restore = false } = {}) {
       );
       return true;
     } catch (e) {
-      if (seq !== cinemaLoadSeq) return true; // 过期请求的失败不提示、不回滚新选择的状态
+      if (!profileGeneration.isCurrent(generation) || isStaleProfileError(e) || seq !== cinemaLoadSeq) return true; // 过期请求的失败不提示、不回滚新选择的状态
       // 加载失败: 影院选择视为未完成(排期未就绪不可锁座), 待重新搜索/刷新后恢复
       cinemaSelected = false;
       selectedCinema = null;
@@ -937,12 +986,15 @@ els.btnToggleAll.addEventListener("click", () => {
 // ---------------- 检查 / 测试 ----------------
 els.btnCheck.addEventListener("click", async () => {
   if (!connected) return showToast("请先连接云端", "warn");
+  const generation = profileGeneration.current();
   await withButtonLoading(els.btnCheck, "检查中...", async () => {
     try {
       const res = await api("/api/check", { method: "POST" });
+      if (!profileGeneration.isCurrent(generation)) return;
       log(res.newTotal ? "new" : "ok", `检查完成: ${res.cinemaName || ""}，新增 ${res.newTotal ?? 0} 场`);
       await refreshChanges();
     } catch (e) {
+      if (!profileGeneration.isCurrent(generation) || isStaleProfileError(e)) return;
       showToast("检查失败：" + e.message, "error");
     }
   });
@@ -950,6 +1002,7 @@ els.btnCheck.addEventListener("click", async () => {
 
 els.btnTestPush.addEventListener("click", async () => {
   if (!connected) return showToast("请先连接云端", "warn");
+  const generation = profileGeneration.current();
   await withButtonLoading(els.btnTestPush, "发送中...", async () => {
     try {
       // 先保存当前渠道的推送配置再测试(密钥从内存取, 输入框里是掩码)
@@ -959,12 +1012,14 @@ els.btnTestPush.addEventListener("click", async () => {
         pushSaved = true;
       }
       const res = await api("/api/test-push", { method: "POST" });
+      if (!profileGeneration.isCurrent(generation)) return;
       const label = res.label || CHANNEL_LABELS[getChannel()];
       pushVerified = true;
       updateMonitorBtn();
       showToast(`测试推送已发送（${label}），请查收`, "success");
       log("ok", `${label} 测试推送已发送`);
     } catch (e) {
+      if (!profileGeneration.isCurrent(generation) || isStaleProfileError(e)) return;
       showToast("测试失败：" + e.message, "error");
     }
   });
@@ -973,9 +1028,11 @@ els.btnTestPush.addEventListener("click", async () => {
 // ---------------- 变化记录 ----------------
 // showLoading: 手动刷新时显示面板占位, 自动轮询不显示(避免闪烁)
 async function refreshChanges(showLoading = false) {
+  const generation = profileGeneration.current();
   try {
     if (showLoading) setPanelLoading(els.logPanel, "正在加载变化记录...");
     const data = await api("/api/status");
+    if (!profileGeneration.isCurrent(generation)) return;
     const { status, changes } = data;
     lockServiceEnabled = data.lockServiceEnabled === true;
     lockController.syncAvailability();
@@ -1010,6 +1067,7 @@ async function refreshChanges(showLoading = false) {
       els.logPanel.innerHTML = '<div class="log-entry log-info">暂无变化记录，点「立即检查」试试</div>';
     }
   } catch (e) {
+    if (!profileGeneration.isCurrent(generation) || isStaleProfileError(e)) return;
     if (showLoading) els.logPanel.innerHTML = '<div class="log-entry log-error">加载失败，请重试</div>';
     log("error", "获取变化记录失败: " + e.message);
   }

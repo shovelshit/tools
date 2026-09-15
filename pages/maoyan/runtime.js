@@ -1,4 +1,25 @@
 (function (root) {
+  function createProfileGeneration() {
+    let value = 0;
+    const isCurrent = (generation) => generation === value;
+    return {
+      current: () => value,
+      invalidate: () => ++value,
+      isCurrent,
+      async run(generation, operation, apply) {
+        try {
+          const result = await operation;
+          if (!isCurrent(generation)) return false;
+          apply(result);
+          return true;
+        } catch (error) {
+          if (!isCurrent(generation)) return false;
+          throw error;
+        }
+      }
+    };
+  }
+
   function switchWorkerProfile(state, normalizedUrl) {
     state.cinemaId = "";
     state.selectedMovies.length = 0;
@@ -69,6 +90,7 @@
 
   root.createWebRuntime = createWebRuntime;
   root.createElectronRuntime = createElectronRuntime;
+  root.createProfileGeneration = createProfileGeneration;
   root.switchWorkerProfile = switchWorkerProfile;
   root.maoyanRuntime = bridgeRuntime(root);
 })(window);

@@ -173,7 +173,7 @@
     }
   }
 
-  function createMaoyanLockController({ api, getContext, onLog }) {
+  function createMaoyanLockController({ api, getContext, onLog, getProfileGeneration, isProfileGenerationCurrent }) {
     const $ = (id) => document.getElementById(id);
     const els = {
       button: $("btn-lock-seats"), overlay: $("lock-overlay"), close: $("btn-lock-close"),
@@ -212,6 +212,14 @@
     function buttonLoading(btn, text, task) {
       if (typeof root.withButtonLoading === "function") return root.withButtonLoading(btn, text, task);
       return task();
+    }
+
+    function capturedProfileGeneration() {
+      return typeof getProfileGeneration === "function" ? getProfileGeneration() : null;
+    }
+
+    function isCurrentProfileGeneration(generation) {
+      return generation === null || typeof isProfileGenerationCurrent !== "function" || isProfileGenerationCurrent(generation);
     }
 
     function loadingHtml(text) {
@@ -804,6 +812,7 @@
     }
 
     async function loadSeats() {
+      const generation = capturedProfileGeneration();
       resetSeats();
       renderOfficialCompare(null); // 先隐藏旧对比区, 加载成功后再渲染新片段
       if (!state.templateSeqNo || !state.context?.cinemaId) return;
@@ -817,6 +826,7 @@
         renderSeatSource();
         const params = new URLSearchParams({ cinemaId: state.context.cinemaId, movieId: state.movieId, seqNo: state.templateSeqNo });
         const { seatMap } = await api(`/api/lock/template-seats?${params}`);
+        if (!isCurrentProfileGeneration(generation)) return;
         // 座号段判别: 两种影厅口径(区-座-排 / 区-排-座)自动适配, 布局与文案保持票面语义
         state.seatSeg = seatSegmentOf(seatMap?.seats);
         if (state.seatMapIsTemplate && seatMap?.seats) {
@@ -828,6 +838,7 @@
         renderOfficialCompare(seatMap);
         els.seatFeedback?.classList.remove("attention");
       } catch (error) {
+        if (!isCurrentProfileGeneration(generation)) return;
         state.seatMap = null;
         renderOfficialCompare(null);
         els.seatGrid.innerHTML = '<div class="lock-empty">座位表加载失败，请确认猫眼会话后重试</div>';
@@ -848,6 +859,7 @@
 
     // 座位解析失败反馈: 只上报当前影院/影片/场次标识, 服务端写 KV 供管理员排查(不要求已上传会话)
     async function sendSeatFeedback() {
+      const generation = capturedProfileGeneration();
       if (!state.context?.cinemaId) return show("请先选择影院", "warn");
       const seqNo = state.templateSeqNo || "";
       const key = seqNo || "na";
@@ -863,22 +875,26 @@
             method: "POST",
             body: JSON.stringify({ cinemaId: state.context.cinemaId, movieId: state.movieId, seqNo })
           });
+          if (!isCurrentProfileGeneration(generation)) return;
           state.seatFeedback = { seqNo: key, at: now };
           els.seatFeedback?.classList.remove("attention");
           show("已收到反馈，管理员会尽快处理", "success");
           onLog?.("ok", "座位问题已反馈（影院/影片/场次标识已记录）");
         } catch (error) {
+          if (!isCurrentProfileGeneration(generation)) return;
           show(error.message || "反馈失败", "error");
         }
       });
     }
 
     async function refreshRemoteState() {
+      const generation = capturedProfileGeneration();
       if (els.sessionStatus) els.sessionStatus.innerHTML = loadingHtml("正在加载锁座状态...");
       if (els.ruleStatus) els.ruleStatus.innerHTML = loadingHtml("正在加载锁座状态...");
       const [sessionResult, ruleResult] = await Promise.allSettled([
         api("/api/lock/session/status"), api("/api/lock/rule")
       ]);
+      if (!isCurrentProfileGeneration(generation)) return;
       state.session = sessionResult.status === "fulfilled" ? (sessionResult.value.session || { uploaded: false }) : { uploaded: false };
       state.rule = ruleResult.status === "fulfilled" ? (ruleResult.value.rule || null) : null;
       state.automationEnabled = Boolean(state.rule?.automationEnabled);
@@ -887,6 +903,7 @@
     }
 
     async function uploadSession() {
+      const generation = capturedProfileGeneration();
       const file = els.file.files?.[0];
       if (!file) return show("请选择猫眼会话文件", "warn");
       if (file.size > 256 * 1024) {
@@ -897,7 +914,9 @@
         let sessionText = "";
         try {
           sessionText = await file.text();
+          if (!isCurrentProfileGeneration(generation)) return;
           const { session } = await api("/api/lock/session", { method: "POST", body: sessionText });
+          if (!isCurrentProfileGeneration(generation)) return;
           state.session = session || { uploaded: false };
           renderSession();
           renderSelection();
@@ -905,6 +924,7 @@
           onLog?.("ok", "猫眼会话已上传，用于锁座（Beta）");
           await loadSeats(); // 门控解除后立即加载座位表, 免去手动刷新
         } catch (error) {
+          if (!isCurrentProfileGeneration(generation)) return;
           show(error.message || "上传失败", "error");
         } finally {
           sessionText = "";
@@ -914,11 +934,14 @@
     }
 
     async function removeSession() {
+      const generation = capturedProfileGeneration();
       const confirmed = await root.showConfirm("删除后将不能查询座位或自动锁座，是否继续？", { title: "删除猫眼会话", okText: "删除", danger: true });
       if (!confirmed) return;
+      if (!isCurrentProfileGeneration(generation)) return;
       await buttonLoading(els.removeSession, "删除中...", async () => {
         try {
           await api("/api/lock/session/remove", { method: "POST" });
+          if (!isCurrentProfileGeneration(generation)) return;
           state.session = { uploaded: false };
           state.rule = null;
           state.automationEnabled = false;
@@ -927,12 +950,14 @@
           renderRule();
           show("猫眼会话已删除", "success");
         } catch (error) {
+          if (!isCurrentProfileGeneration(generation)) return;
           show(error.message || "删除失败", "error");
         }
       });
     }
 
     async function createRule() {
+      const generation = capturedProfileGeneration();
       const action = lockAction(state.showMode);
       if (state.showMode === "target") {
         const template = templateForCurrent();
@@ -950,6 +975,7 @@
           { title: "确认立即锁座", okText: "立即锁座", danger: true }
         );
         if (!confirmed) return;
+        if (!isCurrentProfileGeneration(generation)) return;
       }
       const payload = {
         cinemaId: state.context.cinemaId, movieId: state.movieId, templateSeqNo: state.templateSeqNo,
@@ -959,6 +985,7 @@
         await buttonLoading(els.submit, action.loadingText, async () => {
           try {
             const { rule } = await api("/api/lock/rule", { method: "POST", body: JSON.stringify(payload) });
+            if (!isCurrentProfileGeneration(generation)) return;
             state.rule = rule || null;
             state.automationEnabled = Boolean(rule?.automationEnabled);
             renderRule();
@@ -969,25 +996,30 @@
             }
             onLog?.("ok", state.showMode === "target" ? "锁座（Beta）已提交" : "锁座（Beta）规则已保存");
           } catch (error) {
+            if (!isCurrentProfileGeneration(generation)) return;
             show(error.message || "保存锁座规则失败", "error");
           }
         });
       } finally {
-        renderSelection();
+        if (isCurrentProfileGeneration(generation)) renderSelection();
       }
     }
 
     async function cancelRule() {
+      const generation = capturedProfileGeneration();
       const confirmed = await root.showConfirm("取消后不会影响已上传的猫眼会话，是否继续？", { title: "取消锁座规则", okText: "取消规则", danger: true });
       if (!confirmed) return;
+      if (!isCurrentProfileGeneration(generation)) return;
       await buttonLoading(els.cancelRule, "取消中...", async () => {
         try {
           await api("/api/lock/rule/cancel", { method: "POST" });
+          if (!isCurrentProfileGeneration(generation)) return;
           state.rule = null;
           state.automationEnabled = false;
           renderRule();
           show("锁座规则已取消", "success");
         } catch (error) {
+          if (!isCurrentProfileGeneration(generation)) return;
           show(error.message || "取消失败", "error");
         }
       });
@@ -1007,6 +1039,8 @@
       state.rule = null;
       state.automationEnabled = false;
       state.templates = [];
+      resetSeats({ clearSource: true });
+      state.seatSeg = 2;
       state.seatFeedback = { seqNo: "", at: 0 };
       if (els.file) els.file.value = "";
       if (els.cinema) els.cinema.value = "";
@@ -1034,6 +1068,7 @@
     }
 
     async function open() {
+      const generation = capturedProfileGeneration();
       if (!syncAvailability()) return show("请先在影院设置中选择影院", "warn");
       state.context = getContext();
       els.cinema.value = state.context.cinemaName || `影院 ${state.context.cinemaId}`;
@@ -1044,6 +1079,7 @@
       document.addEventListener("keydown", onKeydown);
       // 串行: 座位加载依赖最新会话状态, 并发会读到过期的 uploaded:false 误入门控(首次打开不加载座位的根因)
       await refreshRemoteState();
+      if (!isCurrentProfileGeneration(generation)) return;
       await loadSeats();
     }
 

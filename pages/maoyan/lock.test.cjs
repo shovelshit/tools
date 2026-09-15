@@ -11,6 +11,41 @@ function loadLockModule() {
   return context.module.exports;
 }
 
+function loadRuntime() {
+  const source = fs.readFileSync(path.join(__dirname, "runtime.js"), "utf8");
+  const window = { window: null };
+  window.window = window;
+  vm.runInNewContext(source, { window }, { filename: "runtime.js" });
+  return window;
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
+test("old lock refresh and seat responses cannot repopulate reset state", async () => {
+  const { createProfileGeneration } = loadRuntime();
+  const generation = createProfileGeneration();
+  const oldGeneration = generation.current();
+  const refresh = deferred();
+  const seats = deferred();
+  const state = { session: null, seatMap: null };
+
+  const operations = [
+    generation.run(oldGeneration, refresh.promise, (value) => { state.session = value; }),
+    generation.run(oldGeneration, seats.promise, (value) => { state.seatMap = value; })
+  ];
+  generation.invalidate();
+  refresh.resolve({ uploaded: true });
+  seats.resolve({ seats: [{ seatNo: "1-2-3" }] });
+
+  assert.deepEqual(await Promise.all(operations), [false, false]);
+  assert.deepEqual(state, { session: null, seatMap: null });
+});
+
 test("lock utilities expose selectable current-show templates only", () => {
   const { lockUtils } = loadLockModule();
   const templates = lockUtils.templatesFromMovies([
