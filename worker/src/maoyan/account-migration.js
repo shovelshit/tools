@@ -20,14 +20,14 @@ export async function migrateAccounts(env, { nowMs = Date.now() } = {}) {
   }
 
   const settings = await env.DB.prepare(
-    "SELECT max_users,default_valid_days FROM service_settings WHERE id=1"
+    "SELECT max_users,default_valid_days FROM service_settings WHERE business_line='maoyan'"
   ).first();
   if (!settings) throw new Error("账号容量尚未配置");
   const { results: legacy } = await env.DB.prepare(
     "SELECT id,token,remark,created_at FROM tokens ORDER BY rowid"
   ).all();
   const existing = await env.DB.prepare(
-    "SELECT COUNT(*) AS n FROM users WHERE role='user' AND state!='revoked' AND expires_at>?"
+    "SELECT COUNT(*) AS n FROM users WHERE role='user' AND state!='revoked' AND expires_at>? AND business_line='maoyan'"
   ).bind(nowMs).first();
   if (Number(existing?.n || 0) + legacy.length > Number(settings.max_users)) {
     throw new Error(`存量普通账号超过账号上限 ${settings.max_users}`);
@@ -48,9 +48,9 @@ export async function migrateAccounts(env, { nowMs = Date.now() } = {}) {
   await env.DB.batch([
     env.DB.prepare("INSERT INTO account_migrations(name,activated_at) VALUES (?,?)").bind(MIGRATION_NAME, nowMs),
     env.DB.prepare(
-      "INSERT INTO users(id,role,remark,state,created_at,expires_at,source,version) " +
+      "INSERT INTO users(id,role,remark,state,created_at,expires_at,source,business_line,version) " +
       "SELECT json_extract(value,'$.id'),'user',json_extract(value,'$.remark'),'active'," +
-      "json_extract(value,'$.createdAt'),json_extract(value,'$.expiresAt'),'migration',1 " +
+      "json_extract(value,'$.createdAt'),json_extract(value,'$.expiresAt'),'migration','maoyan',1 " +
       "FROM json_each(?) WHERE true"
     ).bind(payload),
     env.DB.prepare(
@@ -87,14 +87,14 @@ export async function importLegacyAccount(env, token) {
   if (existingKey) return { imported: true, accountMigrationApplied: true };
 
   const settings = await env.DB.prepare(
-    "SELECT max_users,default_valid_days FROM service_settings WHERE id=1"
+    "SELECT max_users,default_valid_days FROM service_settings WHERE business_line='maoyan'"
   ).first();
   if (!settings) throw new Error("账号容量尚未配置");
   const activatedAt = Number(migration.activated_at);
   const expiresAt = activatedAt + Number(settings.default_valid_days) * DAY_MS;
   if (!existing) {
     const used = await env.DB.prepare(
-      "SELECT COUNT(*) AS n FROM users WHERE role='user' AND state!='revoked' AND expires_at>?"
+      "SELECT COUNT(*) AS n FROM users WHERE role='user' AND state!='revoked' AND expires_at>? AND business_line='maoyan'"
     ).bind(Date.now()).first();
     if (Number(used?.n || 0) >= Number(settings.max_users)) throw new Error("存量普通账号超过账号上限");
   }
@@ -104,8 +104,8 @@ export async function importLegacyAccount(env, token) {
   const statements = [];
   if (!existing) {
     statements.push(env.DB.prepare(
-      "INSERT INTO users(id,role,remark,state,created_at,expires_at,source,version) VALUES (?,?,?,?,?,?,?,1)"
-    ).bind(token.id, "user", token.remark || "", "active", createdAt, expiresAt, "migration"));
+      "INSERT INTO users(id,role,remark,state,created_at,expires_at,source,business_line,version) VALUES (?,?,?,?,?,?,?,?,1)"
+    ).bind(token.id, "user", token.remark || "", "active", createdAt, expiresAt, "migration", "maoyan"));
   }
   statements.push(
     env.DB.prepare(

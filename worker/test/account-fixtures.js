@@ -25,6 +25,7 @@ export async function seedAccount(env, {
   role = "user",
   state = "active",
   expiresAt,
+  businessLine = "maoyan",
   fingerprint = null,
   config = {}
 } = {}) {
@@ -32,8 +33,8 @@ export async function seedAccount(env, {
   const actualExpiry = role === "admin" ? null : (expiresAt ?? nowMs + 15 * DAY_MS);
   const tokenHash = await hashAccessKey(key);
   await env.DB.prepare(
-    "INSERT INTO users(id,role,remark,state,created_at,expires_at,source,version) VALUES (?,?,?,?,?,?,?,1)"
-  ).bind(id, role, remark, state, nowMs, actualExpiry, "test").run();
+    "INSERT INTO users(id,role,remark,state,created_at,expires_at,source,business_line,version) VALUES (?,?,?,?,?,?,?,?,1)"
+  ).bind(id, role, remark, state, nowMs, actualExpiry, "test", businessLine).run();
   await env.DB.prepare(
     "INSERT INTO access_keys(user_id,token_hash,key_prefix,key_suffix,created_at) VALUES (?,?,?,?,?)"
   ).bind(id, tokenHash, key.slice(0, 4), key.slice(-4), nowMs).run();

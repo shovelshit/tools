@@ -26,9 +26,13 @@ CREATE TABLE IF NOT EXISTS users (
   archive_reason TEXT,
   revoked_at INTEGER,
   source TEXT NOT NULL DEFAULT 'public',
+  business_line TEXT NOT NULL DEFAULT 'maoyan' CHECK (business_line IN ('maoyan', 'store')),
   version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
   CHECK ((role = 'admin' AND expires_at IS NULL) OR role = 'user')
 );
+
+CREATE INDEX IF NOT EXISTS idx_users_business_state_expiry
+  ON users(business_line, state, expires_at);
 
 CREATE TABLE IF NOT EXISTS access_keys (
   user_id TEXT NOT NULL UNIQUE REFERENCES users(id),
@@ -88,7 +92,8 @@ CREATE TABLE IF NOT EXISTS fingerprint_bindings (
 );
 
 CREATE TABLE IF NOT EXISTS service_settings (
-  id INTEGER PRIMARY KEY CHECK (id = 1),
+  id INTEGER PRIMARY KEY CHECK (id IN (1, 2)),
+  business_line TEXT NOT NULL UNIQUE CHECK (business_line IN ('maoyan', 'store')),
   max_users INTEGER NOT NULL DEFAULT 20 CHECK (max_users >= 0),
   default_valid_days INTEGER NOT NULL DEFAULT 15 CHECK (default_valid_days > 0),
   public_signup_enabled INTEGER NOT NULL DEFAULT 0 CHECK (public_signup_enabled IN (0, 1)),
@@ -97,8 +102,12 @@ CREATE TABLE IF NOT EXISTS service_settings (
 );
 
 INSERT OR IGNORE INTO service_settings
-  (id, max_users, default_valid_days, public_signup_enabled, version, updated_at)
-VALUES (1, 20, 15, 0, 1, 0);
+  (id, business_line, max_users, default_valid_days, public_signup_enabled, version, updated_at)
+VALUES (1, 'maoyan', 20, 15, 0, 1, 0);
+
+INSERT OR IGNORE INTO service_settings
+  (id, business_line, max_users, default_valid_days, public_signup_enabled, version, updated_at)
+VALUES (2, 'store', 20, 15, 0, 1, 0);
 
 CREATE TABLE IF NOT EXISTS audit_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -133,12 +142,12 @@ CREATE TABLE IF NOT EXISTS account_operations (
 );
 
 CREATE VIEW IF NOT EXISTS capacity_usage AS
-SELECT 'user' AS kind, id AS resource_id
+SELECT business_line, 'user' AS kind, id AS resource_id
 FROM users
 WHERE role = 'user' AND state != 'revoked'
   AND expires_at > CAST(unixepoch('subsec') * 1000 AS INTEGER)
 UNION ALL
-SELECT 'reservation' AS kind, reservation_id AS resource_id
+SELECT 'maoyan' AS business_line, 'reservation' AS kind, reservation_id AS resource_id
 FROM enrollment_reservations
 WHERE expires_at > CAST(unixepoch('subsec') * 1000 AS INTEGER);
 
@@ -146,36 +155,36 @@ CREATE TRIGGER IF NOT EXISTS users_capacity_insert AFTER INSERT ON users
 WHEN NEW.role = 'user' AND NEW.state != 'revoked'
   AND NEW.expires_at > CAST(unixepoch('subsec') * 1000 AS INTEGER)
 BEGIN
-  SELECT CASE WHEN (SELECT COUNT(*) FROM capacity_usage) >
-    COALESCE((SELECT max_users FROM service_settings WHERE id = 1), -1)
+  SELECT CASE WHEN (SELECT COUNT(*) FROM capacity_usage WHERE business_line = NEW.business_line) >
+    COALESCE((SELECT max_users FROM service_settings WHERE business_line = NEW.business_line), -1)
     THEN RAISE(ABORT, 'CAPACITY_FULL') END;
 END;
 
-CREATE TRIGGER IF NOT EXISTS users_capacity_update AFTER UPDATE OF role, state, expires_at ON users
+CREATE TRIGGER IF NOT EXISTS users_capacity_update AFTER UPDATE OF role, state, expires_at, business_line ON users
 BEGIN
-  SELECT CASE WHEN (SELECT COUNT(*) FROM capacity_usage) >
-    COALESCE((SELECT max_users FROM service_settings WHERE id = 1), -1)
+  SELECT CASE WHEN (SELECT COUNT(*) FROM capacity_usage WHERE business_line = NEW.business_line) >
+    COALESCE((SELECT max_users FROM service_settings WHERE business_line = NEW.business_line), -1)
     THEN RAISE(ABORT, 'CAPACITY_FULL') END;
 END;
 
 CREATE TRIGGER IF NOT EXISTS reservations_capacity_insert AFTER INSERT ON enrollment_reservations
 WHEN NEW.expires_at > CAST(unixepoch('subsec') * 1000 AS INTEGER)
 BEGIN
-  SELECT CASE WHEN (SELECT COUNT(*) FROM capacity_usage) >
-    COALESCE((SELECT max_users FROM service_settings WHERE id = 1), -1)
+  SELECT CASE WHEN (SELECT COUNT(*) FROM capacity_usage WHERE business_line = 'maoyan') >
+    COALESCE((SELECT max_users FROM service_settings WHERE business_line = 'maoyan'), -1)
     THEN RAISE(ABORT, 'CAPACITY_FULL') END;
 END;
 
 CREATE TRIGGER IF NOT EXISTS reservations_capacity_update AFTER UPDATE OF expires_at ON enrollment_reservations
 BEGIN
-  SELECT CASE WHEN (SELECT COUNT(*) FROM capacity_usage) >
-    COALESCE((SELECT max_users FROM service_settings WHERE id = 1), -1)
+  SELECT CASE WHEN (SELECT COUNT(*) FROM capacity_usage WHERE business_line = 'maoyan') >
+    COALESCE((SELECT max_users FROM service_settings WHERE business_line = 'maoyan'), -1)
     THEN RAISE(ABORT, 'CAPACITY_FULL') END;
 END;
 
 CREATE TRIGGER IF NOT EXISTS settings_capacity_update BEFORE UPDATE OF max_users ON service_settings
 BEGIN
-  SELECT CASE WHEN NEW.max_users < (SELECT COUNT(*) FROM capacity_usage)
+  SELECT CASE WHEN NEW.max_users < (SELECT COUNT(*) FROM capacity_usage WHERE business_line = NEW.business_line)
     THEN RAISE(ABORT, 'CAPACITY_BELOW_USAGE') END;
 END;
 

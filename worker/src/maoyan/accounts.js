@@ -11,6 +11,7 @@ function mapAccount(row) {
     archiveReason: row.archive_reason || null,
     revokedAt: row.revoked_at === null ? null : Number(row.revoked_at),
     source: row.source,
+    businessLine: row.business_line,
     version: Number(row.version)
   };
 }
@@ -29,7 +30,7 @@ export async function hashAccessKey(raw) {
   return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-const ACCOUNT_COLUMNS = "id,role,remark,state,created_at,expires_at,archived_at,archive_reason,revoked_at,source,version";
+const ACCOUNT_COLUMNS = "id,role,remark,state,created_at,expires_at,archived_at,archive_reason,revoked_at,source,business_line,version";
 
 export async function getAccount(DB, userId) {
   const row = await DB.prepare(`SELECT ${ACCOUNT_COLUMNS} FROM users WHERE id=?`).bind(String(userId || "")).first();

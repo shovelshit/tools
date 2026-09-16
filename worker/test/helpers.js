@@ -50,11 +50,39 @@ export class MemoryKV {
 // 记录写语句供断言「哪些表被写过/写过几次」(对应 KV 版 MemoryKV.ops)。
 
 const SCHEMA_SQL = readFileSync(new URL("../schema.sql", import.meta.url), "utf8");
+const PRE_ACCOUNT_SCHEMA_SQL = `
+CREATE TABLE user_config (
+  token_id TEXT PRIMARY KEY,
+  data TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE monitor_status (
+  token_id TEXT PRIMARY KEY,
+  data TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE change_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  token_id TEXT NOT NULL,
+  time TEXT NOT NULL,
+  type TEXT,
+  text TEXT
+);
+`;
+const PRE_BUSINESS_SCHEMA_SQL = PRE_ACCOUNT_SCHEMA_SQL + [
+  "../migrations/0001-accounts.sql",
+  "../migrations/0002-session-versions.sql",
+  "../migrations/0003-config-version.sql",
+  "../migrations/0004-monitoring.sql"
+].map((path) => readFileSync(new URL(path, import.meta.url), "utf8")).join("\n");
+const BUSINESS_MIGRATION_SQL = readFileSync(
+  new URL("../migrations/0002-business-lines.sql", import.meta.url), "utf8"
+);
 
 export class MemoryD1 {
-  constructor() {
+  constructor(schemaSql = SCHEMA_SQL) {
     this.sqlite = new DatabaseSync(":memory:");
-    this.sqlite.exec(SCHEMA_SQL);
+    this.sqlite.exec(schemaSql);
     // 写语句记录: [{table}], 仅 INSERT/UPDATE/DELETE
     this.writes = [];
     this.queries = [];
@@ -116,6 +144,14 @@ export class MemoryD1 {
   resetWrites() {
     this.writes = [];
   }
+}
+
+export function createPreBusinessLineD1() {
+  return new MemoryD1(PRE_BUSINESS_SCHEMA_SQL);
+}
+
+export function migrateBusinessLines(DB) {
+  DB.sqlite.exec(BUSINESS_MIGRATION_SQL);
 }
 
 // D1 种子工厂: 复用 db.js 写入器构造测试夹具(同时验证写入器本身)。

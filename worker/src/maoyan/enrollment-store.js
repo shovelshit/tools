@@ -2,6 +2,7 @@ import { accountStatus, getAccount, hashAccessKey } from "./accounts.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const RESERVATION_MS = 5 * 60 * 1000;
+const BUSINESS_LINES = new Set(["maoyan", "store"]);
 
 class EnrollmentError extends Error {
   constructor(code, message) {
@@ -17,6 +18,12 @@ function fail(code, message) {
 function required(value, code = "INVALID_REQUEST") {
   const normalized = String(value || "").trim();
   if (!normalized) fail(code, "请求参数无效");
+  return normalized;
+}
+
+function businessLine(value) {
+  const normalized = value === undefined ? "maoyan" : String(value).trim();
+  if (!BUSINESS_LINES.has(normalized)) fail("INVALID_REQUEST", "业务线无效");
   return normalized;
 }
 
@@ -39,18 +46,18 @@ function translateDatabaseError(error) {
   return error;
 }
 
-async function settings(DB) {
+async function settings(DB, line = "maoyan") {
   const row = await DB.prepare(
-    "SELECT max_users,default_valid_days FROM service_settings WHERE id=1"
-  ).first();
+    "SELECT max_users,default_valid_days FROM service_settings WHERE business_line=?"
+  ).bind(businessLine(line)).first();
   if (!row) fail("SERVICE_UNAVAILABLE", "账号容量尚未配置");
   return { maxUsers: Number(row.max_users), defaultValidDays: Number(row.default_valid_days) };
 }
 
-export async function readServiceSettings(DB) {
+export async function readServiceSettings(DB, line = "maoyan") {
   const row = await DB.prepare(
-    "SELECT max_users,default_valid_days,public_signup_enabled,version,updated_at FROM service_settings WHERE id=1"
-  ).first();
+    "SELECT max_users,default_valid_days,public_signup_enabled,version,updated_at FROM service_settings WHERE business_line=?"
+  ).bind(businessLine(line)).first();
   if (!row) fail("SERVICE_UNAVAILABLE", "账号容量尚未配置");
   return {
     maxUsers: Number(row.max_users),
@@ -62,6 +69,7 @@ export async function readServiceSettings(DB) {
 }
 
 export async function updateServiceSettings(env, input) {
+  const line = businessLine(input?.businessLine);
   const expectedVersion = Number(input?.expectedVersion);
   const maxUsers = Number(input?.maxUsers);
   const defaultValidDays = Number(input?.defaultValidDays);
@@ -76,23 +84,24 @@ export async function updateServiceSettings(env, input) {
   try {
     result = await env.DB.prepare(
       "UPDATE service_settings SET max_users=?,default_valid_days=?,public_signup_enabled=?," +
-      "version=version+1,updated_at=? WHERE id=1 AND version=?"
-    ).bind(maxUsers, defaultValidDays, publicSignupEnabled, nowMs, expectedVersion).run();
+      "version=version+1,updated_at=? WHERE business_line=? AND version=?"
+    ).bind(maxUsers, defaultValidDays, publicSignupEnabled, nowMs, line, expectedVersion).run();
   } catch (error) {
     throw translateDatabaseError(error);
   }
   if (Number(result?.meta?.changes || 0) !== 1) fail("VERSION_CONFLICT", "账号设置已变化");
-  return await readServiceSettings(env.DB);
+  return await readServiceSettings(env.DB, line);
 }
 
-export async function readCapacity(DB, nowMs = Date.now()) {
-  const config = await settings(DB);
+export async function readCapacity(DB, nowMs = Date.now(), line = "maoyan") {
+  const selectedLine = businessLine(line);
+  const config = await settings(DB, selectedLine);
   const users = await DB.prepare(
-    "SELECT COUNT(*) AS n FROM users WHERE role='user' AND state!='revoked' AND expires_at>?"
-  ).bind(nowMs).first();
+    "SELECT COUNT(*) AS n FROM users WHERE role='user' AND state!='revoked' AND expires_at>? AND business_line=?"
+  ).bind(nowMs, selectedLine).first();
   const reservations = await DB.prepare(
-    "SELECT COUNT(*) AS n FROM enrollment_reservations WHERE expires_at>?"
-  ).bind(nowMs).first();
+    "SELECT COUNT(*) AS n FROM enrollment_reservations WHERE expires_at>? AND ?='maoyan'"
+  ).bind(nowMs, selectedLine).first();
   const used = Number(users?.n || 0) + Number(reservations?.n || 0);
   return { maxUsers: config.maxUsers, used, remaining: Math.max(0, config.maxUsers - used) };
 }
@@ -193,7 +202,7 @@ export async function confirmEnrollment(env, input) {
   const reservation = await reservationByRequest(env.DB, requestId);
   if (!reservation || reservation.token_hash !== tokenHash) fail("INVALID_RESERVATION", "领取凭据无效");
   if (Number(reservation.expires_at) <= nowMs) fail("RESERVATION_EXPIRED", "领取预留已过期，请重新申请");
-  const config = await settings(env.DB);
+  const config = await settings(env.DB, "maoyan");
   const expiresAt = nowMs + config.defaultValidDays * DAY_MS;
   try {
     await env.DB.batch([
@@ -206,7 +215,7 @@ export async function confirmEnrollment(env, input) {
       ).bind(reservation.fingerprint_digest, reservation.reservation_id),
       env.DB.prepare("DELETE FROM enrollment_reservations WHERE request_id=?").bind(requestId),
       env.DB.prepare(
-        "INSERT INTO users(id,role,state,created_at,expires_at,source,version) VALUES (?,'user','active',?,?,'public',1)"
+        "INSERT INTO users(id,role,state,created_at,expires_at,source,business_line,version) VALUES (?,'user','active',?,?,'public','maoyan',1)"
       ).bind(reservation.user_id, nowMs, expiresAt),
       env.DB.prepare(
         "INSERT INTO access_keys(user_id,token_hash,key_prefix,key_suffix,created_at) VALUES (?,?,?,?,?)"
@@ -250,7 +259,7 @@ export async function renewAccount(env, input) {
   if (accountStatus(account, nowMs) !== "expired") fail("ACCOUNT_NOT_EXPIRED", "账号尚未到期");
   if (account.version !== expectedVersion) fail("VERSION_CONFLICT", "账号状态已变化");
 
-  const config = await settings(env.DB);
+  const config = await settings(env.DB, account.businessLine);
   const expiresAt = nowMs + config.defaultValidDays * DAY_MS;
   const claim = await env.DB.prepare(
     "SELECT fingerprint_digest,fingerprint_version FROM enrollment_claims WHERE user_id=? " +
@@ -309,10 +318,15 @@ export async function renewAccount(env, input) {
 
 export async function createManagedAccount(env, input) {
   const requestId = required(input?.requestId);
+  const line = businessLine(input?.businessLine);
   const nowMs = Number(input?.nowMs ?? Date.now());
   const prior = await claimByRequest(env.DB, requestId);
-  if (prior) return { account: await getAccount(env.DB, prior.user_id), replayed: true };
-  const config = await settings(env.DB);
+  if (prior) {
+    const account = await getAccount(env.DB, prior.user_id);
+    if (account?.businessLine !== line) fail("REQUEST_CONFLICT", "申请标识已被使用");
+    return { account, replayed: true };
+  }
+  const config = await settings(env.DB, line);
   const userId = crypto.randomUUID();
   const key = randomKey();
   const tokenHash = await hashAccessKey(key);
@@ -320,8 +334,8 @@ export async function createManagedAccount(env, input) {
   try {
     await env.DB.batch([
       env.DB.prepare(
-        "INSERT INTO users(id,role,remark,state,created_at,expires_at,source,version) VALUES (?,'user',?,'active',?,?,'managed',1)"
-      ).bind(userId, String(input?.remark || "").trim(), nowMs, expiresAt),
+        "INSERT INTO users(id,role,remark,state,created_at,expires_at,source,business_line,version) VALUES (?,'user',?,'active',?,?,'managed',?,1)"
+      ).bind(userId, String(input?.remark || "").trim(), nowMs, expiresAt, line),
       env.DB.prepare(
         "INSERT INTO access_keys(user_id,token_hash,key_prefix,key_suffix,created_at) VALUES (?,?,?,?,?)"
       ).bind(userId, tokenHash, key.slice(0, 4), key.slice(-4), nowMs),
@@ -334,7 +348,11 @@ export async function createManagedAccount(env, input) {
     ]);
   } catch (error) {
     const concurrent = await claimByRequest(env.DB, requestId);
-    if (concurrent) return { account: await getAccount(env.DB, concurrent.user_id), replayed: true };
+    if (concurrent) {
+      const account = await getAccount(env.DB, concurrent.user_id);
+      if (account?.businessLine === line) return { account, replayed: true };
+      fail("REQUEST_CONFLICT", "申请标识已被使用");
+    }
     throw translateDatabaseError(error);
   }
   return { account: await getAccount(env.DB, userId), key, replayed: false };
