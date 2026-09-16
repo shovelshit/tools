@@ -163,7 +163,7 @@ async function assertLockShell(page, name) {
 
 async function assertLockReachableAfterScroll(page, name) {
   const body = page.locator(".lock-dialog-body");
-  for (const target of [".lock-seat-scroll", "#lock-section-risk", "#btn-lock-submit"]) {
+  for (const target of [".lock-seat-scroll", "#lock-section-risk", "#lock-risk-accepted", "#btn-lock-submit", "#btn-lock-cancel"]) {
     await page.locator(target).scrollIntoViewIfNeeded();
     const layout = await page.evaluate((selector) => {
       const get = (value) => {
@@ -178,7 +178,7 @@ async function assertLockReachableAfterScroll(page, name) {
       return { body, target, footer, visible: visible(target), insideBody: inside(target, body), footerVisible: visible(footer), submitVisible: visible(get("#btn-lock-submit")) };
     }, target);
     assert.ok(layout.visible, `${name}: ${target} is not visible after scrolling ${JSON.stringify(layout)}`);
-    assert.ok(layout.insideBody || target === "#btn-lock-submit", `${name}: ${target} escaped the body viewport ${JSON.stringify(layout)}`);
+    assert.ok(layout.insideBody || target === "#btn-lock-submit" || target === "#btn-lock-cancel", `${name}: ${target} escaped the body viewport ${JSON.stringify(layout)}`);
     if (target === ".lock-seat-scroll") {
       assert.ok(layout.target.bottom <= layout.footer.y + 1, `${name}: seat viewport overlaps dialog footer after scrolling ${JSON.stringify(layout)}`);
     }
@@ -324,6 +324,24 @@ async function main() {
     await page.locator("#lock-official-toggle").uncheck();
     assert.equal(await page.locator("#lock-official-frame").getAttribute("srcdoc"), null);
     await page.screenshot({ path: path.join(outputDirectory, "lock-desktop.png"), fullPage: true });
+    // Hold a seat request open and assert the loading state before resolving it.
+    let resolveLoadingRequest;
+    let loadingRequestStarted;
+    const loadingStarted = new Promise((resolve) => { loadingRequestStarted = resolve; });
+    const loadingRelease = new Promise((resolve) => { resolveLoadingRequest = resolve; });
+    await page.route("**/api/lock/template-seats?*", async (route) => {
+      loadingRequestStarted();
+      await loadingRelease;
+      await route.continue();
+    });
+    await page.locator("#lock-template").selectOption("901");
+    await loadingStarted;
+    await page.waitForFunction(() => /正在加载座位表/.test(document.querySelector("#lock-seat-grid")?.textContent || "")
+      && document.querySelector("#lock-seat-grid .spinner"));
+    assert.equal(await page.locator("#lock-seat-grid .spinner").isVisible(), true, "seat loading spinner is not visible");
+    resolveLoadingRequest();
+    await page.waitForFunction(() => document.querySelectorAll("#lock-seat-grid [data-availability]").length === 150);
+    await page.unroute("**/api/lock/template-seats?*");
     await page.setViewportSize({ width: 390, height: 844 });
     const lockOverflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
     assert.ok(lockOverflow <= 1, `lock dialog overflow: ${lockOverflow}`);
@@ -337,6 +355,13 @@ async function main() {
     await page.unroute("**/api/lock/template-seats?*");
     for (const viewport of [{ width: 1024, height: 600 }, { width: 390, height: 844 }, { width: 320, height: 844 }]) {
       await page.setViewportSize(viewport);
+      const lockHidden = await page.locator("#lock-overlay").evaluate((element) => element.classList.contains("hidden"));
+      if (lockHidden) {
+        await page.locator("#btn-lock-seats").click();
+        await page.waitForFunction(() => !document.querySelector("#lock-overlay")?.classList.contains("hidden"));
+      }
+      await page.locator("#lock-target-date").fill("2026-09-30");
+      await page.waitForFunction(() => document.querySelector("#lock-section-risk")?.offsetParent !== null);
       const label = `lock reachability ${viewport.width}x${viewport.height}`;
       await assertLockShell(page, label);
       await assertLockReachableAfterScroll(page, label);
