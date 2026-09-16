@@ -88,6 +88,15 @@
     return {
       kind: "electron",
       ...bridge,
+      async requestWorker(path, options = {}) {
+        const { signal, ...serializable } = options;
+        if (signal?.aborted) {
+          const error = new Error("请求已取消");
+          error.name = "AbortError";
+          throw error;
+        }
+        return bridge.requestWorker(path, serializable);
+      },
       getRuntimeInfo: async () => ({ persistentTokenStorage: true, ...(await bridge.getRuntimeInfo()) })
     };
   }

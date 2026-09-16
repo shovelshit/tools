@@ -1108,9 +1108,11 @@ summary:focus-visible {
 .lock-legend { color: var(--muted); font-size: 10px; }
 .lock-feedback.attention { border-color: var(--danger); color: var(--danger); }
 .legend-seat { width: 12px; height: 12px; display: inline-block; border: 1px solid var(--border-subtle); border-radius: 3px; }
-.legend-seat.available { border-color: #75bba0; background: #e9f7f1; }
-.legend-seat.selected { border-color: var(--primary); background: var(--primary); }
-.legend-seat.unavailable { background: #dfe5e8; }
+.legend-seat.available { border-color: #cbd1d6; background: #fff; }
+.legend-seat.sold { border-color: #d62d28; background: #f03d37; }
+.legend-seat.selected { border-color: #578c00; background: #73b800; }
+.legend-seat.unavailable { border-color: #cfd5dc; background: #e9ecef; }
+.lock-official-toggle { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 11px; }
 .lock-zoom-bar { margin-bottom: 4px; }
 .lock-zoom-bar .btn { padding: 0 8px; }
 #lock-zoom-label { min-width: 38px; color: var(--muted); font-size: 10px; text-align: center; }
@@ -1147,16 +1149,16 @@ summary:focus-visible {
 .lock-seat-grid { min-width: max-content; display: grid; grid-auto-columns: 28px; gap: 4px; }
 .lock-seat-grid > * { grid-row: 1; }
 .lock-seat { width: 28px; height: 28px; padding: 0; border: 1px solid; border-radius: 4px; font-size: 10px; line-height: 1; }
-.lock-seat.available { border-color: #75bba0; background: #e9f7f1; color: #126b48; cursor: pointer; }
-.lock-seat.available:hover { border-color: var(--success); }
-.lock-seat.selected { border-color: var(--primary); background: var(--primary); color: #fff; }
-.lock-seat.unavailable { border-color: #cad3d7; background: #dfe5e8; color: #87949b; cursor: not-allowed; }
-.lock-seat.lover-left,
-.lock-seat.lover-right { border-color: #df8ca4; background: #fae8ee; color: #98415e; }
+.lock-seat[data-availability="available"] { border-color: #cbd1d6; background: #fff; color: #263238; cursor: pointer; }
+.lock-seat[data-availability="available"]:hover { border-color: #78858d; }
+.lock-seat[data-availability="sold"] { border-color: #d62d28; background: #f03d37; color: #fff; cursor: not-allowed; }
+.lock-seat[data-availability="unknown"],
+.lock-seat[data-availability="unavailable"] { border-color: #cfd5dc; background: #e9ecef; color: #727b84; cursor: not-allowed; }
+.lock-seat.is-selected { border-color: #578c00; background: #73b800; color: #fff; }
 .lock-seat.lover-left { z-index: 1; width: 32px; margin-right: -4px; border-right: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; }
 .lock-seat.lover-right { border-top-left-radius: 0; border-bottom-left-radius: 0; }
-.lock-seat.lover-left.selected,
-.lock-seat.lover-right.selected { border-color: var(--primary); background: var(--primary); color: #fff; }
+.lock-seat.lover-left.is-selected,
+.lock-seat.lover-right.is-selected { border-color: #578c00; background: #73b800; color: #fff; }
 .lock-col-label { width: 28px; color: var(--muted); font-size: 9px; text-align: center; }
 .lock-empty { min-width: 320px; padding: 18px 10px; color: var(--muted); font-size: 11px; text-align: center; }
 

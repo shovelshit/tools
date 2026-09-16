@@ -17,6 +17,7 @@ const LOCK_ROUTES = new Map([
   ["/api/lock/session/status", ["GET"]],
   ["/api/lock/session/remove", ["POST"]],
   ["/api/lock/template-seats", ["GET"]],
+  ["/api/lock/official-seats", ["GET"]],
   ["/api/lock/rule", ["POST", "GET"]],
   ["/api/lock/rule/cancel", ["POST"]],
   ["/api/lock/seat-feedback", ["POST"]]
@@ -103,14 +104,14 @@ function publicSeatMap(seatMap) {
     sectionName: String(seatMap.sectionName),
     // 每排物理格总数(含过道占位): 前端复现主站物理布局用, 旧解析无此字段时为 0
     cols: Number(seatMap.cols) || 0,
-    // 官方座位图片段(1:1 对比用, 已剥 script/埋点属性): 提取失败为空串, 前端隐藏对比区
-    officialHtml: String(seatMap.officialHtml || ""),
-    seats: (seatMap.seats || []).map(({ seatNo, rowId, columnId, type, available, orderIndex }) => ({
+    seats: (seatMap.seats || []).map(({ seatNo, rowId, columnId, type, available, availability, disabledReason, orderIndex }) => ({
       seatNo: String(seatNo),
       rowId: String(rowId),
       columnId: String(columnId),
       type: String(type || ""),
       available: available === true,
+      availability: ["available", "sold", "unavailable", "unknown"].includes(availability) ? availability : available === true ? "available" : "unknown",
+      disabledReason: disabledReason == null ? null : String(disabledReason),
       // 排内物理位次(含过道占位计数): 主站同款布局锚点
       orderIndex: Number(orderIndex) || 0
     }))
@@ -157,6 +158,16 @@ export async function handleLockApi(request, env, url, tokenId) {
         200,
         { "Cache-Control": "no-store" }
       );
+    }
+    if (url.pathname === "/api/lock/official-seats" && request.method === "GET") {
+      const cinemaId = exactDecimal(url.searchParams.get("cinemaId"), "cinemaId");
+      const movieId = exactDecimal(url.searchParams.get("movieId"), "movieId");
+      const seqNo = exactDecimal(url.searchParams.get("seqNo"), "seqNo");
+      const session = await requireSession(env, tokenId);
+      const seatMap = await fetchSeatMap(session, { cinemaId, movieId, seqNo, includeOfficial: true });
+      return response({ seqNo: String(seatMap.seqNo), officialHtml: String(seatMap.officialHtml || "") }, 200, {
+        "Cache-Control": "no-store"
+      });
     }
     if (url.pathname === "/api/lock/rule" && request.method === "POST") {
       let body;

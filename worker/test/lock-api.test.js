@@ -85,7 +85,7 @@ test("API response secrecy: session routes expose only masked session status", a
   });
 });
 
-test("API response secrecy: template seats expose the sanitized seat map only", async () => {
+test("API response secrecy: template seats omit official HTML and comparison is fetched separately", async () => {
   const runtime = await env();
   await handleLockApi(request("/api/lock/session", { method: "POST", body: JSON.stringify(validSession()) }), runtime, new URL("https://worker.example/api/lock/session"), "token-a");
   const originalFetch = globalThis.fetch;
@@ -102,15 +102,24 @@ test("API response secrecy: template seats expose the sanitized seat map only", 
     );
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("Cache-Control"), "no-store");
-    // officialHtml 为官方座位图片段(剥离脚本/埋点), 供前端沙箱 iframe 1:1 对比渲染
     const seatMapBody = (await body(response)).seatMap;
-    assert.equal(typeof seatMapBody.officialHtml, "string");
-    assert.ok(seatMapBody.officialHtml.startsWith('<div class="seats-block"'));
-    assert.ok(!/<script/i.test(seatMapBody.officialHtml));
-    assert.deepEqual({ ...seatMapBody, officialHtml: "" }, {
-      seqNo: "100", sectionId: "1", sectionName: "1号厅", cols: 0, officialHtml: "",
-      seats: [{ seatNo: "1-6-18", rowId: "6", columnId: "18", type: "N", available: true, orderIndex: 1 }]
+    assert.equal(Object.hasOwn(seatMapBody, "officialHtml"), false);
+    assert.deepEqual(seatMapBody, {
+      seqNo: "100", sectionId: "1", sectionName: "1号厅", cols: 0,
+      seats: [{ seatNo: "1-6-18", rowId: "6", columnId: "18", type: "N", available: true, availability: "available", disabledReason: null, orderIndex: 1 }]
     });
+    const officialResponse = await handleLockApi(
+      request("/api/lock/official-seats?cinemaId=25428&movieId=7&seqNo=100"),
+      runtime,
+      new URL("https://worker.example/api/lock/official-seats?cinemaId=25428&movieId=7&seqNo=100"),
+      "token-a"
+    );
+    assert.equal(officialResponse.status, 200);
+    assert.equal(officialResponse.headers.get("Cache-Control"), "no-store");
+    const official = await body(officialResponse);
+    assert.equal(official.seqNo, "100");
+    assert.match(official.officialHtml, /^<div class="seats-block"/);
+    assert.doesNotMatch(official.officialHtml, /<script/i);
   } finally {
     globalThis.fetch = originalFetch;
   }

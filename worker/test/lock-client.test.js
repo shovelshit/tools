@@ -60,9 +60,29 @@ test("parses available and unavailable seats without losing layout", () => {
   // cols: 无 data-cols 的旧页为 0; orderIndex: 排内 DOM 位次(含过道占位符计数)
   assert.equal(map.cols, 0);
   assert.deepEqual(map.seats, [
-    { rowId: "6", columnId: "18", seatNo: "1-6-18", type: "N", available: true, orderIndex: 1 },
-    { rowId: "6", columnId: "19", seatNo: "1-6-19", type: "N", available: false, orderIndex: 2 }
+    { rowId: "6", columnId: "18", seatNo: "1-6-18", type: "N", available: true, availability: "available", disabledReason: null, orderIndex: 1 },
+    { rowId: "6", columnId: "19", seatNo: "1-6-19", type: "N", available: false, availability: "sold", disabledReason: "已售", orderIndex: 2 }
   ]);
+});
+
+test("sold class overrides selectable and a disabled seat is not mislabeled sold", () => {
+  const map = parseSeatPage(`<div class="seats-block" data-section-id="1" data-section-name="A" data-seq-no="9">
+    <span class="seat sold selectable" data-row-id="1" data-column-id="1" data-no="1-1-1" data-st="N"></span>
+    <span class="seat disabled" data-row-id="1" data-column-id="2" data-no="1-1-2" data-st="N"></span>
+    <span class="seat" data-row-id="1" data-column-id="3" data-no="1-1-3" data-st="N"></span>
+  </div>`);
+  assert.deepEqual(map.seats.map((seat) => [seat.availability, seat.available]), [
+    ["sold", false], ["unavailable", false], ["unknown", false]
+  ]);
+});
+
+test("seat map omits official HTML unless explicitly requested", async () => {
+  await withMockFetch(async () => new Response(seatHtml), async () => {
+    const normal = await fetchSeatMap(session, { cinemaId: "25428", movieId: "7", seqNo: "2026091201" });
+    assert.equal(Object.hasOwn(normal, "officialHtml"), false);
+    const withOfficial = await fetchSeatMap(session, { cinemaId: "25428", movieId: "7", seqNo: "2026091201", includeOfficial: true });
+    assert.match(withOfficial.officialHtml, /seats-block/);
+  });
 });
 
 test("keeps aisle placeholders in orderIndex and parses data-cols (HuanYing IMAX real layout)", () => {  // 真实原页锚定(寰映影城 1号激光IMAX厅, 2026-09-14): 每排 37 物理格(data-cols),

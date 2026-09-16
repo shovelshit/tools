@@ -192,12 +192,20 @@ export function parseSeatPage(html) {
     const seatNo = String(seatAttributes["data-no"] || "");
     const columnId = String(seatAttributes["data-column-id"] || "");
     if (!seatNo || !rowId || !columnId) continue;
+    const sold = hasClass(seatAttributes.class, "sold");
+    const selectable = !sold && hasClass(seatAttributes.class, "selectable");
+    const explicitlyUnavailable = hasClass(seatAttributes.class, "disabled") || hasClass(seatAttributes.class, "unavailable");
+    const availability = sold ? "sold" : selectable ? "available" : explicitlyUnavailable ? "unavailable" : "unknown";
     seats.push({
       rowId,
       columnId,
       seatNo,
       type: String(seatAttributes["data-st"] || ""),
-      available: hasClass(seatAttributes.class, "selectable"),
+      available: availability === "available",
+      availability,
+      disabledReason: availability === "sold" ? "已售"
+        : availability === "unavailable" ? "不可用"
+          : availability === "unknown" ? "状态未知" : null,
       orderIndex
     });
   }
@@ -354,7 +362,7 @@ export function findCompatibleShows(data, { movieId, targetDate, templateTime, t
     String(left.seqNo || "").localeCompare(String(right.seqNo || "")));
 }
 
-export async function fetchSeatMap(session, { cinemaId, movieId, seqNo }) {
+export async function fetchSeatMap(session, { cinemaId, movieId, seqNo, includeOfficial = false }) {
   const url = new URL(`${ORIGIN}/xseats/${assertId(seqNo)}`);
   const normalizedMovieId = assertId(movieId);
   const normalizedCinemaId = assertId(cinemaId);
@@ -363,12 +371,13 @@ export async function fetchSeatMap(session, { cinemaId, movieId, seqNo }) {
   const response = await requestMaoyan(session, url.toString());
   const html = await response.text();
   try {
-    return {
+    const result = {
       ...parseSeatPage(html),
-      officialHtml: extractOfficialSeatHtml(html),
       movieId: normalizedMovieId,
       cinemaId: normalizedCinemaId
     };
+    if (includeOfficial) result.officialHtml = extractOfficialSeatHtml(html);
+    return result;
   } catch (error) {
     if (/^猫眼座位图格式无效$/.test(String(error?.message || ""))) {
       error.message = `${error.message}（${pageHint(html)}）`;

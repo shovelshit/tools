@@ -321,6 +321,17 @@ test("seat map centers, pans by drag, zooms at cursor; risk box only for inferre
   assert.match(seatScrollRule, /cursor:\s*grab/);
 });
 
+test("official seat comparison is opt-in, cancellable, and does not rewrite template inventory", () => {
+  const source = readSource("lock.js");
+  const html = readSource("index.html");
+  assert.match(html, /id="lock-official-toggle" type="checkbox"/);
+  assert.doesNotMatch(html, /id="lock-official-toggle"[^>]*checked/);
+  assert.match(source, /\/api\/lock\/official-seats\?/);
+  assert.match(source, /officialAbort\?\.abort/);
+  assert.match(source, /loadSeq !== officialLoadSeq/);
+  assert.doesNotMatch(source, /seatMap\.seats\s*=\s*seatMap\.seats\.map\(\(seat\)\s*=>\s*\(\{\s*\.\.\.seat,\s*available:\s*true/);
+});
+
 test("seat map auto-detects swapped seatNo segment order (Dolby vs laser IMAX halls)", () => {
   const source = readSource("lock.js");
   // 真实缺陷: 寰映IMAX厅 data-no=区-排-座, 固定把第二段当座号 → 同排座位挤进同一列(竖条)。

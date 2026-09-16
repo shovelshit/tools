@@ -39,6 +39,7 @@ function fakeElement() {
     addEventListener: (name, listener) => listeners.set(name, listener),
     closest: () => fakeElement(),
     append: () => {},
+    setAttribute(name, value) { this[name] = String(value); },
     removeAttribute: () => {},
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 1, height: 1 })
   };
@@ -52,7 +53,7 @@ function mountLock({
     "btn-lock-seats", "lock-overlay", "btn-lock-close", "lock-cinema", "lock-movie", "lock-template",
     "lock-target-date", "lock-session-file", "btn-lock-login", "btn-lock-upload", "btn-lock-remove-session",
     "lock-session-status", "lock-seat-grid", "lock-seat-count", "lock-risk-accepted", "lock-rule-status",
-    "btn-lock-cancel-rule", "lock-template-label", "lock-seat-source", "btn-lock-seat-feedback",
+    "btn-lock-cancel-rule", "lock-template-label", "lock-seat-source", "btn-lock-seat-feedback", "lock-official-toggle",
     "lock-official-wrap", "lock-official-frame", "btn-official-zoom-in", "btn-official-zoom-out",
     "btn-official-zoom-reset", "official-zoom-label", "lock-official-gesture", "lock-gate-hint",
     "lock-section-schedule", "lock-section-seats", "lock-section-risk", "lock-section-rules", "btn-lock-cancel",
@@ -122,6 +123,14 @@ function deferred() {
   const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
   return { promise, resolve, reject };
 }
+
+test("seat visual state prioritizes selection and never treats unknown as sold", () => {
+  const { lockUtils } = loadLockModule();
+  assert.equal(lockUtils.seatVisualState({ availability: "sold", available: false }), "sold");
+  assert.equal(lockUtils.seatVisualState({ availability: "unknown", available: false }), "unknown");
+  assert.equal(lockUtils.seatVisualState({ availability: "sold", available: false }, { selected: true }), "selected");
+  assert.equal(lockUtils.seatVisualState({ availability: "sold", available: false }, { isTemplate: true }), "available");
+});
 
 test("web mode disables one-click login and keeps manual upload", async () => {
   const dom = mountLock({ runtimeInfo: { kind: "web", canLoginMaoyan: false } });

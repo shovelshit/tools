@@ -38,6 +38,19 @@ test("electron runtime delegates login to the fixed bridge", async () => {
   assert.equal(calledWith, "25428");
 });
 
+test("electron runtime strips AbortSignal before crossing IPC", async () => {
+  const window = loadRuntime();
+  let received;
+  const bridge = {
+    async requestWorker(path, options) { received = { path, options }; return { ok: true }; },
+    async getRuntimeInfo() { return {}; }
+  };
+  const runtime = window.createElectronRuntime({ bridge });
+  await runtime.requestWorker("/api/lock/official-seats?seqNo=1", { signal: { aborted: false }, method: "GET" });
+  assert.equal(received.path, "/api/lock/official-seats?seqNo=1");
+  assert.deepEqual(JSON.parse(JSON.stringify(received.options)), { method: "GET" });
+});
+
 test("web runtime connects with the supplied worker credentials", async () => {
   const { createWebRuntime } = loadRuntime();
   const requests = [];

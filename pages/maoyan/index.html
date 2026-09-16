@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>猫眼影院场次监控</title>
-  <link rel="stylesheet" href="style.css?v=20260916c" />
+  <link rel="stylesheet" href="style.css?v=20260916d" />
 </head>
 <body>
   <div id="ambient-background" class="ambient-background" aria-hidden="true">
@@ -271,7 +271,8 @@
           <div class="lock-seat-heading">
             <h3>座位选择</h3>
             <div class="lock-heading-tools">
-              <div class="lock-legend" aria-label="座位图图例"><span class="legend-seat available"></span>可选 <span class="legend-seat selected"></span>已选 <span class="legend-seat unavailable"></span>不可选</div>
+              <div class="lock-legend" aria-label="座位图图例"><span class="legend-seat available"></span>可选 <span class="legend-seat sold"></span>已售 <span class="legend-seat selected"></span>已选 <span class="legend-seat unavailable"></span>不可用</div>
+              <label class="lock-official-toggle"><input id="lock-official-toggle" type="checkbox" /> 官方对照</label>
               <button id="btn-lock-seat-feedback" class="btn small ghost lock-feedback" type="button">反馈座位问题</button>
             </div>
           </div>
@@ -324,12 +325,12 @@
       <script src="account.js?v=20260916b"></script>
       <script src="connection-profile.js?v=20260916a"></script>
       <script src="platform.js?v=20260916a"></script>
-      <script src="runtime.js?v=20260916a"></script>
+      <script src="runtime.js?v=20260916b"></script>
   <script src="secure-store.js?v=20260912b"></script>
   <script src="ui.js?v=20260915c"></script>
   <script src="workflow.js?v=20260916a"></script>
   <script src="polling.js?v=20260916a"></script>
-  <script src="lock.js?v=20260914h"></script>
+  <script src="lock.js?v=20260916a"></script>
   <script src="app.js?v=20260916b"></script>
 </body>
 </html>

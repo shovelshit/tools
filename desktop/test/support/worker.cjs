@@ -53,6 +53,23 @@ async function startMockWorker({ rejectUpload = false } = {}) {
     if (route === "/api/check" && request.method === "POST") return reply({ ok: true, cinemaName: "寰映影城（大融城激光IMAX店）", newTotal: 0 });
     if (route === "/api/lock/rule" && request.method === "GET") return reply({ ok: true, rule: null });
     if (route === "/api/lock/session/status") return reply({ session: sessions.get(profile) });
+    if (route === "/api/lock/template-seats" && request.method === "GET") return reply({
+      seatMap: {
+        seqNo: url.searchParams.get("seqNo") || "900",
+        sectionId: "1",
+        sectionName: "1号激光IMAX厅",
+        cols: 4,
+        seats: [
+          { seatNo: "1-1-1", rowId: "1", columnId: "1", type: "N", available: true, availability: "available", disabledReason: null, orderIndex: 1 },
+          { seatNo: "1-1-2", rowId: "1", columnId: "2", type: "N", available: false, availability: "sold", disabledReason: "已售", orderIndex: 2 },
+          { seatNo: "1-1-3", rowId: "1", columnId: "3", type: "N", available: false, availability: "unknown", disabledReason: "状态未知", orderIndex: 3 },
+        ],
+      },
+    });
+    if (route === "/api/lock/official-seats" && request.method === "GET") return reply({
+      seqNo: url.searchParams.get("seqNo") || "900",
+      officialHtml: '<div class="seats-block" data-section-id="1" data-section-name="1号激光IMAX厅" data-seq-no="900"><span class="seat selectable" data-row-id="1" data-column-id="1" data-no="1-1-1" data-st="N"></span></div>',
+    });
     if (route === "/api/lock/session/remove" && request.method === "POST") {
       sessions.set(profile, { uploaded: false });
       return reply({ removed: true });

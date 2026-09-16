@@ -131,6 +131,14 @@
       Number(candidate.columnId) === expected) || null;
   }
 
+  function seatVisualState(seat, { selected = false, isTemplate = false } = {}) {
+    if (selected) return "selected";
+    if (isTemplate) return "available";
+    const availability = String(seat?.availability || "");
+    if (["available", "sold", "unavailable", "unknown"].includes(availability)) return availability;
+    return seat?.available === true ? "available" : "unknown";
+  }
+
   function isActiveLockRule(rule) {
     return rule?.state === "waiting_schedule" || rule?.state === "matching" || rule?.state === "unknown";
   }
@@ -195,6 +203,7 @@
       templateLabel: $("lock-template-label"),
       seatSource: $("lock-seat-source"),
       seatFeedback: $("btn-lock-seat-feedback"),
+      officialToggle: $("lock-official-toggle"),
       officialWrap: $("lock-official-wrap"), officialFrame: $("lock-official-frame"),
       officialZoomIn: $("btn-official-zoom-in"), officialZoomOut: $("btn-official-zoom-out"),
       officialZoomReset: $("btn-official-zoom-reset"), officialZoomLabel: $("official-zoom-label"),
@@ -209,6 +218,8 @@
     };
     // 官方对比区视图状态: fit=onload 适应缩放, zoom=用户缩放(1=适应), 视觉缩放=fit*zoom
     const officialView = { fit: 1, zoom: 1, panX: 0, panY: 0, w: 0, h: 0 };
+    let officialLoadSeq = 0;
+    let officialAbort = null;
     if (els.officialFrame) { bindOfficialAutoScale(els.officialFrame); bindOfficialZoom(); }
     const state = {
       context: null, session: { uploaded: false }, movieId: "", templateSeqNo: "", seatMap: null,
@@ -620,34 +631,47 @@
           const partner = couplePartner(seat);
           const isLover = seat.type === "L" || seat.type === "R";
           const loverClass = seat.type === "L" ? " lover-left" : seat.type === "R" ? " lover-right" : "";
-          // 情侣座另一半已售(或缺失)时整格置灰: 半对无法单独下单
-          const selectable = Boolean(seat.available) && (!isLover || Boolean(partner?.available));
+          // 情侣座另一半不可用(或缺失)时整格置灰: 半对无法单独下单
+          const seatState = seatVisualState(seat, { isTemplate: state.seatMapIsTemplate });
+          const partnerState = partner ? seatVisualState(partner, { isTemplate: state.seatMapIsTemplate }) : "unknown";
+          const selectable = seatState === "available" && (!isLover || partnerState === "available");
           const pairHint = isLover
-            ? (partner?.available ? " · 情侣座需成对选择" : " · 情侣座另一半已售，无法单独购买")
+            ? (partnerState === "available" ? " · 情侣座需成对选择" : " · 情侣座另一半不可用，无法单独购买")
             : "";
-          button.className = `lock-seat${selectable ? " available" : " unavailable"}${loverClass}`;
+          const selected = state.selectedSeatNos.has(String(seat.seatNo));
+          button.className = `lock-seat ${seatState}${selected ? " is-selected" : ""}${loverClass}`;
+          button.dataset.availability = seatState;
           // 格位: 物理格模式用 orderIndex(与主站 DOM 位次一致, 过道留空); 回落模式用票面座号。
           // 文字一律票面座号, 用户凭「X排Y座」对号入座
           const seatNumber = seatPosition(seat, state.seatSeg)?.seatNumber ?? Number(seat.columnId);
           const cellIndex = hasOrder && Number(seat.orderIndex) > 0 ? Number(seat.orderIndex) : seatNumber;
           button.style.gridColumn = String(cellIndex);
           button.textContent = String(seatNumber);
-          button.title = `${seatDisplayLabel(seat, state.seatSeg)}${pairHint}${selectable ? "" : "（不可选）"}`;
+          const stateHint = state.seatMapIsTemplate ? " · 布局参考"
+            : seatState === "sold" ? " · 已售"
+              : seatState === "available" ? ""
+                : ` · ${seat.disabledReason || (seatState === "unknown" ? "状态未知" : "不可用")}`;
+          button.title = `${seatDisplayLabel(seat, state.seatSeg)}${pairHint}${stateHint}${selectable ? "" : "（不可选）"}`;
+          button.setAttribute("aria-label", button.title);
+          button.setAttribute("aria-pressed", String(selected));
           button.disabled = !selectable;
           button.dataset.seatNo = String(seat.seatNo);
-          button.classList.toggle("selected", state.selectedSeatNos.has(String(seat.seatNo)));
           if (selectable) {
             button.addEventListener("click", () => {
               // 情侣座以「对」为单位整体选中/取消: 点一个自动带上相邻的另一半
               const keys = [String(seat.seatNo)];
-              if (partner?.available) keys.push(String(partner.seatNo));
+              if (partnerState === "available") keys.push(String(partner.seatNo));
               const allSelected = keys.every((key) => state.selectedSeatNos.has(key));
               for (const key of keys) {
                 if (allSelected) state.selectedSeatNos.delete(key);
                 else state.selectedSeatNos.add(key);
               }
               for (const el of grid.children) {
-                if (el.dataset.seatNo) el.classList.toggle("selected", state.selectedSeatNos.has(el.dataset.seatNo));
+                if (el.dataset.seatNo) {
+                  const isSelected = state.selectedSeatNos.has(el.dataset.seatNo);
+                  el.classList.toggle("is-selected", isSelected);
+                  el.setAttribute("aria-pressed", String(isSelected));
+                }
               }
               renderSelection();
             });
@@ -739,6 +763,37 @@
         + `.seats-block .screen-container .screen{margin-left:auto;margin-right:auto}</style>`
         + `</head><body>${html}</body></html>`;
       els.officialWrap.classList.remove("hidden");
+      els.officialWrap.open = true;
+    }
+
+    function clearOfficialCompare({ resetToggle = false } = {}) {
+      officialLoadSeq += 1;
+      officialAbort?.abort?.();
+      officialAbort = null;
+      renderOfficialCompare(null);
+      if (resetToggle && els.officialToggle) els.officialToggle.checked = false;
+    }
+
+    async function loadOfficialCompare() {
+      if (!els.officialToggle?.checked || !state.seatMap || !state.context?.cinemaId || !state.movieId || !state.templateSeqNo) return;
+      const loadSeq = ++officialLoadSeq;
+      officialAbort?.abort?.();
+      officialAbort = typeof AbortController === "function" ? new AbortController() : null;
+      const generation = capturedProfileGeneration();
+      const expectedSeqNo = String(state.templateSeqNo);
+      const params = new URLSearchParams({ cinemaId: state.context.cinemaId, movieId: state.movieId, seqNo: expectedSeqNo });
+      try {
+        const result = await api(`/api/lock/official-seats?${params}`, officialAbort ? { signal: officialAbort.signal } : {});
+        if (loadSeq !== officialLoadSeq || !els.officialToggle.checked || !isCurrentProfileGeneration(generation) ||
+          String(state.templateSeqNo) !== expectedSeqNo || String(result.seqNo) !== expectedSeqNo) return;
+        renderOfficialCompare({ ...state.seatMap, officialHtml: result.officialHtml });
+      } catch (error) {
+        if (loadSeq !== officialLoadSeq || error?.name === "AbortError" || !isCurrentProfileGeneration(generation)) return;
+        renderOfficialCompare(null);
+        show("官方座位图暂时不可用，工具座位选择不受影响", "warn");
+      } finally {
+        if (loadSeq === officialLoadSeq) officialAbort = null;
+      }
     }
 
     // 官方片段自适应缩放: 主站选座页由 JS 把座位图缩到约 0.4 适配容器(座位格基准 40px, 37 格内容约 1520px),
@@ -888,7 +943,7 @@
       const loadSeq = ++seatLoadSeq;
       const generation = capturedProfileGeneration();
       resetSeats();
-      renderOfficialCompare(null); // 先隐藏旧对比区, 加载成功后再渲染新片段
+      clearOfficialCompare();
       if (!state.templateSeqNo || !state.context?.cinemaId) return;
       if (!state.session?.uploaded) {
         // 门控期不发请求: 无会话必然失败, 只提示先上传
@@ -904,19 +959,15 @@
         if (loadSeq !== seatLoadSeq || !isCurrentProfileGeneration(generation)) return;
         // 座号段判别: 两种影厅口径(区-座-排 / 区-排-座)自动适配, 布局与文案保持票面语义
         state.seatSeg = seatSegmentOf(seatMap?.seats);
-        if (state.seatMapIsTemplate && seatMap?.seats) {
-          // 未来推断: 尚未开售, 模板座位全部视为可选
-          seatMap.seats = seatMap.seats.map((seat) => ({ ...seat, available: true }));
-        }
         state.seatMap = seatMap;
         renderSeatMap();
-        renderOfficialCompare(seatMap);
+        if (els.officialToggle?.checked) void loadOfficialCompare();
         els.seatFeedback?.classList.remove("attention");
       } catch (error) {
         // 失败的也可能是过期请求: 不让旧报错覆盖新场次的渲染
         if (loadSeq !== seatLoadSeq || !isCurrentProfileGeneration(generation)) return;
         state.seatMap = null;
-        renderOfficialCompare(null);
+        clearOfficialCompare();
         els.seatGrid.innerHTML = '<div class="lock-empty">座位表加载失败，请确认猫眼会话后重试</div>';
         // 加载失败红显反馈按钮, 引导用户上报场次标识供管理员排查
         els.seatFeedback?.classList.add("attention");
@@ -1174,6 +1225,7 @@
     }
 
     function close() {
+      clearOfficialCompare();
       els.overlay.classList.add("hidden");
       document.removeEventListener("keydown", onKeydown);
       emitPollingState();
@@ -1198,7 +1250,7 @@
       renderTemplates();
       renderSession();
       renderRule();
-      renderOfficialCompare(null);
+      clearOfficialCompare({ resetToggle: true });
     }
 
     function onKeydown(event) { if (event.key === "Escape") close(); }
@@ -1265,6 +1317,10 @@
     els.submit.addEventListener("click", createRule);
     els.cancelRule.addEventListener("click", cancelRule);
     els.seatFeedback?.addEventListener("click", () => { sendSeatFeedback(); });
+    els.officialToggle?.addEventListener("change", () => {
+      if (els.officialToggle.checked) void loadOfficialCompare();
+      else clearOfficialCompare();
+    });
     els.zoomIn.addEventListener("click", () => changeZoom(0.2));
     els.zoomOut.addEventListener("click", () => changeZoom(-0.2));
     els.zoomReset.addEventListener("click", resetZoom);
@@ -1345,7 +1401,7 @@
     createMaoyanLockController,
     lockUtils: {
       templatesFromMovies, chinaDateBounds, lockDateBounds, seatPosition, seatDisplayLabel, seatSegmentOf, couplePartnerOf,
-      isReadyToSubmit, isLockAvailable, lockAction, changeMovieSelection, preferredTargetShow, clearSeatSelection, publicSession
+      seatVisualState, isReadyToSubmit, isLockAvailable, lockAction, changeMovieSelection, preferredTargetShow, clearSeatSelection, publicSession
     }
   };
   if (typeof module !== "undefined" && module.exports) module.exports = exported;
