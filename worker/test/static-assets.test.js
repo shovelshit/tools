@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { parse as parseToml } from "smol-toml";
 import { buildAssets, STATIC_ASSET_FILES } from "../scripts/build-assets.mjs";
 
 async function walk(root, prefix = "") {
@@ -53,24 +54,31 @@ test("static asset build includes the isolated Store browser application", async
   assert.ok((await walk(target)).includes("store/auth.css"));
 });
 
-test("wrangler routes HTML through the Worker while leaving versioned files on Static Assets", async () => {
-  const config = await readFile(new URL("../wrangler.example.toml", import.meta.url), "utf8");
-  assert.match(config, /run_worker_first[^\n]+\/maoyan\/[^\n]+\/maoyan\/\*\.html/);
-  assert.doesNotMatch(config, /"\/maoyan\/\*"/);
-});
-
-test("Worker configuration routes Store browser auth through the Worker", async () => {
-  const [config, example] = await Promise.all([
+test("parsed Worker configurations keep custom routes at the top level", async () => {
+  const [configText, exampleText] = await Promise.all([
     readFile(new URL("../wrangler.toml", import.meta.url), "utf8"),
     readFile(new URL("../wrangler.example.toml", import.meta.url), "utf8")
   ]);
+  const expectedRouteSuffixes = [
+    "/api/*", "/api/*",
+    "/store", "/store",
+    "/store/*", "/store/*",
+    "/store/auth/*", "/store/auth/*",
+    "/store/api/*", "/store/api/*",
+    "/store/file*", "/store/file*"
+  ];
 
-  for (const text of [config, example]) {
-    assert.match(text, /run_worker_first[^\n]+\/store\/auth\/\*/);
-    assert.match(text, /run_worker_first[^\n]+\/store[^\n]+\/store\/[^\n]+\/store\/\*\.html/);
+  for (const text of [configText, exampleText]) {
+    const config = parseToml(text);
+    assert.equal(config.assets.routes, undefined);
+    assert.equal(Array.isArray(config.routes), true);
+    assert.deepEqual(
+      config.routes.map((route) => route.pattern.slice(route.pattern.indexOf("/"))),
+      expectedRouteSuffixes
+    );
+    assert.ok(config.assets.run_worker_first.includes("/store/auth/*"));
+    assert.ok(config.assets.run_worker_first.includes("/store/*.html"));
+    assert.ok(config.assets.run_worker_first.includes("/maoyan/*.html"));
+    assert.equal(config.assets.run_worker_first.includes("/maoyan/*"), false);
   }
-  assert.match(config, /ltools\.asia\/store\/auth\/\*/);
-  assert.match(config, /www\.ltools\.asia\/store\/auth\/\*/);
-  assert.match(config, /ltools\.asia\/store\/\*/);
-  assert.match(config, /www\.ltools\.asia\/store\/\*/);
 });

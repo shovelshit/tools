@@ -5,13 +5,8 @@ workers_dev = true
 # 保留 Dashboard 中配置的明文变量(部署时不删除/不覆盖不在 toml 中的变量)
 keep_vars = true
 
-[assets]
-directory = "./public"
-binding = "ASSETS"
-run_worker_first = ["/api/*", "/store", "/store/", "/store/*.html", "/store/auth/*", "/store/api/*", "/store/file*", "/maoyan", "/maoyan/", "/maoyan/*.html"]
-
 # ============ 自定义域名路由 (zone: ltools.asia) ============
-# 注意: routes 必须在 [triggers] 之前, 否则会被解析为 triggers 的子字段
+# 注意: routes 必须在第一个 [table] 之前，否则会被解析为前一个 table 的子字段
 routes = [
   { pattern = "ltools.asia/api/*", zone_name = "ltools.asia" },
   { pattern = "www.ltools.asia/api/*", zone_name = "ltools.asia" },
@@ -26,6 +21,11 @@ routes = [
   { pattern = "ltools.asia/store/file*", zone_name = "ltools.asia" },
   { pattern = "www.ltools.asia/store/file*", zone_name = "ltools.asia" }
 ]
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = ["/api/*", "/store", "/store/", "/store/*.html", "/store/auth/*", "/store/api/*", "/store/file*", "/maoyan", "/maoyan/", "/maoyan/*.html"]
 
 # ============ 定时触发 ============
 # 监控与未来锁座共用此 cron。Dashboard 调整后两者频率同步变化。

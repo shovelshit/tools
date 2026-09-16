@@ -1339,9 +1339,7 @@
   function updateBadges() {
     CATEGORIES.forEach((cat, i) => {
       const el = document.getElementById(`badge-${i}`);
-      if (el && state.badgeCache[cat.path] !== undefined) {
-        el.textContent = state.badgeCache[cat.path];
-      }
+      if (el) el.textContent = state.badgeCache[cat.path] ?? '';
     });
   }
 
@@ -1678,6 +1676,16 @@
     if (event && event.target === document.getElementById('lightboxImg')) return;
     document.getElementById('lightbox').classList.remove('open');
   }
+  function clearLightbox() {
+    const lightbox = document.getElementById('lightbox');
+    const image = document.getElementById('lightboxImg');
+    const caption = document.getElementById('lightboxCaption');
+    if (!lightbox || !image || !caption) return;
+    lightbox.classList.remove('open');
+    image.removeAttribute('src');
+    image.alt = '';
+    caption.textContent = '';
+  }
   // 事件委托：有 data-lb-src 属性的图片点击就放大
   document.addEventListener('click', e => {
     const img = e.target.closest('img[data-lb-src]');
@@ -1693,11 +1701,13 @@
   });
 
   // ===== 预加载其他分类的数量 =====
-  async function preloadBadges() {
+  async function preloadBadges(authGeneration) {
+    if (!storeSession?.isCurrent(authGeneration)) return;
     for (let i = 1; i < CATEGORIES.length; i++) {
+      if (!storeSession.isCurrent(authGeneration)) return;
       try {
         const data = await fetchList(CATEGORIES[i].path, 1);
-        if (!storeSession?.isAuthenticated()) return;
+        if (!storeSession.isCurrent(authGeneration)) return;
         state.badgeCache[CATEGORIES[i].path] = data.total || (data.content ? data.content.length : 0);
         updateBadges();
       } catch (e) { /* 静默失败 */ }
@@ -1711,12 +1721,16 @@
   let storeSession = null;
   window.addEventListener('store:authenticated', () => {
     document.getElementById('store-account').classList.remove('auth-hidden');
-    loadList(CATEGORIES[0].path, 1).then(() => preloadBadges());
+    const authGeneration = storeSession.generation();
+    loadList(CATEGORIES[0].path, 1).then(() => preloadBadges(authGeneration));
   });
   window.addEventListener('store:unauthenticated', () => {
     modalRequestId += 1;
     state.loading = false;
     state._lastItems = [];
+    state.badgeCache = {};
+    updateBadges();
+    clearLightbox();
     document.getElementById('store-account').classList.add('auth-hidden');
     document.getElementById('fileGrid').innerHTML = '';
     document.getElementById('pagination').innerHTML = '';

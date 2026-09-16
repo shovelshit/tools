@@ -21,7 +21,7 @@ npx wrangler d1 create my-maoyan-db
 npx wrangler kv namespace create MAOYAN_KV
 ```
 
-把命令返回的 D1 `database_id` 和 KV `id` 写入 `wrangler.local.toml`，不要保留 `REPLACE_WITH_*`。四个 Durable Object 及迁移声明已在模板中列出，无需单独创建。
+把命令返回的 D1 `database_id` 和 KV `id` 写入 `wrangler.local.toml`，不要保留 `REPLACE_WITH_*`。把模板顶部 `routes` 中的示例域名和 `zone_name` 一并替换为自己的域名；只使用 `workers.dev` 时删除整个 `routes` 数组。四个 Durable Object 及迁移声明已在模板中列出，无需单独创建。
 
 ## 3. 配置 secret
 
@@ -69,12 +69,34 @@ npx wrangler deploy --config wrangler.local.toml
 
 ## 更新与回滚
 
-新建 D1 继续执行第 4 节的 `schema.sql`。已有 D1 更新到带业务线的版本时，必须先执行一次业务线迁移，再执行 `schema.sql` 和部署：
+新建 D1 继续执行第 4 节的 `schema.sql`。已有 D1 更新到带业务线的版本时，不能采用“先迁移、稍后部署”，也不能在新旧版本之间做流量分割：旧版本不识别 `business_line`，一旦数据库中出现 Store 账号，旧版本可能把它当成猫眼账号参与管理或任务分发。
 
-```bash
-cd worker
-npx wrangler d1 execute my-maoyan-db --remote --file migrations/0002-business-lines.sql --config wrangler.local.toml
-npx wrangler d1 execute my-maoyan-db --remote --file schema.sql --config wrangler.local.toml
-```
+上线前准备并验证两个版本：本次业务线版本，以及一个维护版本。维护版本的 HTTP 请求统一返回 `503`，`scheduled` 和 Durable Object alarm 入口直接停止，不读取或写入 D1。按以下顺序操作：
 
-`0002-business-lines.sql` 为既有数据迁移，不可重复执行；它会为已有账号写入 `maoyan` 业务线并保留现有设置。其余更新重新执行 `npm ci`、`npm run build:assets`、测试和部署。回滚使用上一提交重新构建并部署；不要删除 D1、KV 或 Durable Object 数据。访问密钥无法找回，遗失后只能等待账号自然到期并重新申请。
+1. 完成本地构建、全部测试和预检，先上传两个版本但不要给业务线版本分配生产流量。记录当前生产版本 ID。
+2. 在迁移前记录 D1 Time Travel bookmark，并把输出保存在发布记录中：
+
+   ```bash
+   cd worker
+   npx wrangler d1 time-travel info my-maoyan-db --config wrangler.local.toml --json
+   ```
+
+3. 将生产流量和定时任务 100% 切到维护版本；确认页面/API 返回维护响应，等待已经开始的旧版本请求结束，并从日志确认旧版本不再访问 D1。不要保留旧版本百分比流量。
+4. 维护状态下执行一次迁移和 schema 收敛：
+
+   ```bash
+   npx wrangler d1 execute my-maoyan-db --remote --file migrations/0002-business-lines.sql --config wrangler.local.toml
+   npx wrangler d1 execute my-maoyan-db --remote --file schema.sql --config wrangler.local.toml
+   ```
+
+5. 立即将生产 100% 切到本次业务线版本。验证猫眼账号、Store 账号、两条业务线容量和定时任务后，再结束维护窗口。不要把迁移后的数据库暴露给迁移前版本。
+
+`0002-business-lines.sql` 为既有数据迁移，不可重复执行；它会为已有账号写入 `maoyan` 业务线并保留现有设置。
+
+### 故障恢复
+
+- 迁移执行前失败：可以直接从维护版本切回原生产版本，数据库尚未改变。
+- 迁移后失败：保持维护版本，不要使用 `wrangler rollback` 或重新部署迁移前提交。优先部署预先准备的“业务线 schema 兼容恢复版本”；它必须保留业务线鉴权、查询过滤和容量隔离，可以暂时关闭 Store 入口，但不能按旧模型读取账号。
+- 只有明确接受丢弃迁移后全部写入时，才可恢复到迁移前 bookmark。先保持维护状态，使用发布记录中的 bookmark 执行 `npx wrangler d1 time-travel restore my-maoyan-db --bookmark <BOOKMARK> --config wrangler.local.toml`，验证数据库已回到迁移前状态，再部署原生产版本并恢复流量。迁移后新增或修改的 Store/猫眼数据必须提前导出或明确放弃。
+
+不要删除 D1、KV 或 Durable Object 数据。访问密钥无法找回，遗失后只能等待账号自然到期并重新申请。

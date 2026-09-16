@@ -21,6 +21,7 @@ async function startMockWorker({ rejectUpload = false } = {}) {
     mode: "normal",
     deferred: null,
     loginDeferred: null,
+    logoutDeferred: null,
     detailAuthFailureDeferred: null,
     detailDeferred: null,
     fileDeferred: null,
@@ -64,6 +65,12 @@ async function startMockWorker({ rejectUpload = false } = {}) {
         return reply({ ok: true, account: store.account });
       }
       if (url.pathname === "/store/auth/logout" && request.method === "POST") {
+        if (store.logoutDeferred) {
+          const pending = store.logoutDeferred;
+          store.logoutDeferred = null;
+          pending.startedResolve();
+          await pending.promise;
+        }
         store.account = null;
         return reply({ ok: true }, 200, { "Set-Cookie": "store_session=; HttpOnly; SameSite=Lax; Path=/store/; Max-Age=0" });
       }
@@ -77,12 +84,19 @@ async function startMockWorker({ rejectUpload = false } = {}) {
       }
       if (url.pathname === "/store/api/fs/list") {
         store.catalogRequests += 1;
-        if (store.deferred) await store.deferred.promise;
+        let totalOverride = null;
+        if (store.deferred && (!store.deferred.path || store.deferred.path === body.path)) {
+          const pending = store.deferred;
+          store.deferred = null;
+          pending.startedResolve(body.path);
+          await pending.promise;
+          totalOverride = pending.total;
+        }
         if (store.mode === "error") return reply({ message: "provider unavailable" }, 502);
         const content = store.mode === "empty" ? [] : [
           { name: "Navigation.apk", is_dir: false, size: 1048576, modified: "2026-09-16T04:00:00Z" }
         ];
-        return reply({ code: 200, data: { content, total: content.length } });
+        return reply({ code: 200, data: { content, total: totalOverride ?? content.length } });
       }
       if (url.pathname === "/store/api/fs/get") {
         if (store.detailDeferred) {
@@ -205,10 +219,12 @@ async function startMockWorker({ rejectUpload = false } = {}) {
     uploads,
     store,
     setStoreMode(mode) { store.mode = mode; },
-    deferNextStoreList() {
+    deferNextStoreList({ path = "", total = null } = {}) {
       let release;
+      let startedResolve;
       const promise = new Promise((resolve) => { release = resolve; });
-      store.deferred = { promise, release: () => { store.deferred = null; release(); } };
+      const started = new Promise((resolve) => { startedResolve = resolve; });
+      store.deferred = { path, total, promise, started, startedResolve, release };
       return store.deferred;
     },
     deferNextStoreLogin() {
@@ -223,6 +239,14 @@ async function startMockWorker({ rejectUpload = false } = {}) {
         release: () => { store.loginDeferred = null; release(); }
       };
       return store.loginDeferred;
+    },
+    deferNextStoreLogout() {
+      let release;
+      let startedResolve;
+      const promise = new Promise((resolve) => { release = resolve; });
+      const started = new Promise((resolve) => { startedResolve = resolve; });
+      store.logoutDeferred = { promise, started, startedResolve, release };
+      return store.logoutDeferred;
     },
     deferNextStoreDetail() {
       let release;

@@ -67,7 +67,7 @@ async function main() {
 
     const pendingLogin = worker.deferNextStoreLogin();
     await page.evaluate(() => {
-      window.__storeRaceController = window.StoreAuth.createController();
+      window.__storeRaceController = window.StoreAuth.createController({ dispatch: () => {} });
       window.__storeRaceLogin = window.__storeRaceController.login("store-token");
     });
     await pendingLogin.started;
@@ -77,8 +77,60 @@ async function main() {
     await page.waitForTimeout(50);
     pendingLogin.release();
     await page.evaluate(() => Promise.all([window.__storeRaceLogin, window.__storeRaceLogout]));
-    assert.equal((await context.cookies(web.url)).some((cookie) => cookie.name === "store_session"), false);
+    assert.equal((await context.cookies(`${web.url}/store/`)).some((cookie) => cookie.name === "store_session"), false);
     assert.equal(await page.evaluate(() => fetch("/store/auth/session").then((response) => response.status)), 401);
+
+    const pendingLogout = worker.deferNextStoreLogout();
+    await page.evaluate(() => {
+      window.__storeReverseRaceController = window.StoreAuth.createController({ dispatch: () => {} });
+      window.__storeReverseRaceLogout = window.__storeReverseRaceController.logout();
+    });
+    await pendingLogout.started;
+    await page.evaluate(() => {
+      window.__storeReverseRaceLogin = window.__storeReverseRaceController.login("store-token");
+    });
+    await page.waitForTimeout(50);
+    pendingLogout.release();
+    await page.evaluate(() => Promise.all([window.__storeReverseRaceLogout, window.__storeReverseRaceLogin]));
+    assert.equal((await context.cookies(`${web.url}/store/`)).some((cookie) => cookie.name === "store_session"), true);
+    assert.equal(await page.evaluate(() => fetch("/store/auth/session").then((response) => response.status)), 200);
+
+    const staleInitial = worker.deferNextStoreList();
+    const beforeStaleInitial = worker.store.catalogRequests;
+    await login(page, "store-token");
+    await staleInitial.started;
+    await page.locator("#store-header-logout").evaluate((button) => button.click());
+    await page.locator("#store-login-form").waitFor({ state: "visible" });
+    await login(page, "store-token");
+    await page.locator("#store-app").waitFor({ state: "visible" });
+    await page.waitForTimeout(50);
+    assert.equal(worker.store.catalogRequests, beforeStaleInitial + 3);
+    staleInitial.release();
+    await page.locator(".file-card").waitFor();
+    await page.waitForTimeout(50);
+    assert.equal(worker.store.catalogRequests, beforeStaleInitial + 3);
+
+    await page.locator("#store-header-logout").click();
+    await page.locator("#store-login-form").waitFor({ state: "visible" });
+    const stalePreload = worker.deferNextStoreList({ path: "/CarMax/实用工具", total: 99 });
+    await login(page, "store-token");
+    await stalePreload.started;
+    await page.evaluate(() => openLightbox("http://appstore.cnmlynk.org/stale.png", "stale caption"));
+    await page.locator("#store-header-logout").evaluate((button) => button.click());
+    await page.locator("#store-login-form").waitFor({ state: "visible" });
+    assert.deepEqual(await page.locator(".menu-badge").allTextContents(), ["", ""]);
+    assert.equal(await page.locator("#lightbox").getAttribute("class"), "lightbox");
+    assert.equal(await page.locator("#lightboxImg").getAttribute("src"), null);
+    assert.equal(await page.locator("#lightboxImg").getAttribute("alt"), "");
+    assert.equal(await page.locator("#lightboxCaption").textContent(), "");
+    await login(page, "store-token");
+    await page.locator(".file-card").waitFor();
+    await page.waitForFunction(() => document.querySelector("#badge-1").textContent === "1");
+    stalePreload.release();
+    await page.waitForTimeout(50);
+    assert.equal(await page.locator("#badge-1").textContent(), "1");
+    await page.locator("#store-header-logout").click();
+    await page.locator("#store-login-form").waitFor({ state: "visible" });
 
     await login(page, "expired-store-token");
     await page.locator("#store-renew").waitFor({ state: "visible" });

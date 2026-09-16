@@ -72,6 +72,44 @@ test("a stale login reply cannot restore a session after logout", async () => {
   assert.equal(auth.events.at(-1).type, "store:unauthenticated");
 });
 
+test("a login started during logout owns the final session cookie", async () => {
+  const logoutStarted = deferred();
+  const logoutResponse = deferred();
+  const calls = [];
+  let cookie = "";
+  const fetchImpl = async (url, options = {}) => {
+    if (url === "/store/auth/session" && options.method === "POST") {
+      const key = JSON.parse(options.body).key;
+      calls.push(`login:${key}`);
+      cookie = `${key}-session`;
+      return { ok: true, json: async () => ({ ok: true, account: { accountStatus: "active", remark: key } }) };
+    }
+    if (url === "/store/auth/logout") {
+      calls.push("logout");
+      logoutStarted.resolve();
+      await logoutResponse.promise;
+      cookie = "";
+      return { ok: true, json: async () => ({ ok: true }) };
+    }
+    return { ok: false, status: 401, json: async () => ({ code: "UNAUTHORIZED" }) };
+  };
+  const auth = load(fetchImpl);
+  const controller = auth.createController({ fetchImpl });
+  await controller.login("old");
+
+  const loggingOut = controller.logout();
+  await logoutStarted.promise;
+  const loggingIn = controller.login("new");
+  await Promise.resolve();
+  assert.deepEqual(calls, ["login:old", "logout"]);
+
+  logoutResponse.resolve();
+  await Promise.all([loggingOut, loggingIn]);
+  assert.equal(cookie, "new-session");
+  assert.equal(controller.account().remark, "new");
+  assert.equal(controller.isAuthenticated(), true);
+});
+
 test("access failures invalidate missing sessions and restore expired account metadata", async () => {
   let session = { accountStatus: "active", version: 1 };
   const fetchImpl = async (url, options = {}) => {

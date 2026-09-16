@@ -7,6 +7,7 @@
     "deploy:preflight": "node scripts/deploy-preflight.mjs"
   },
   "devDependencies": {
-    "@thumbmarkjs/thumbmarkjs": "1.11.0"
+    "@thumbmarkjs/thumbmarkjs": "1.11.0",
+    "smol-toml": "1.8.0"
   }
 }

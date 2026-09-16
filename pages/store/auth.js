@@ -5,7 +5,7 @@
     let revision = 0;
     let active = false;
     let account = null;
-    const pendingLogins = new Set();
+    let cookieMutation = Promise.resolve();
 
     function emit(type, detail) {
       dispatch(new root.CustomEvent(type, { detail }));
@@ -30,6 +30,12 @@
       return data;
     }
 
+    function mutateCookie(operation) {
+      const result = cookieMutation.then(operation, operation);
+      cookieMutation = result.catch(() => {});
+      return result;
+    }
+
     async function restore() {
       const requestRevision = ++revision;
       try {
@@ -48,7 +54,7 @@
 
     async function login(key) {
       const requestRevision = ++revision;
-      const operation = (async () => {
+      return mutateCookie(async () => {
         const response = await fetchImpl("/store/auth/session", {
           method: "POST",
           credentials: "same-origin",
@@ -58,13 +64,7 @@
         const data = await responseJson(response);
         transition(data.account, requestRevision);
         return data.account;
-      })();
-      pendingLogins.add(operation);
-      try {
-        return await operation;
-      } finally {
-        pendingLogins.delete(operation);
-      }
+      });
     }
 
     async function renew() {
@@ -84,15 +84,16 @@
     async function logout() {
       const requestRevision = ++revision;
       transition(null, requestRevision);
-      await Promise.allSettled([...pendingLogins]);
-      try {
-        await fetchImpl("/store/auth/logout", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: "{}"
-        });
-      } catch {}
+      await mutateCookie(async () => {
+        try {
+          await fetchImpl("/store/auth/logout", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: "{}"
+          });
+        } catch {}
+      });
     }
 
     function invalidate() {

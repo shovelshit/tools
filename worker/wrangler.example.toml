@@ -4,6 +4,22 @@ compatibility_date = "2026-09-08"
 workers_dev = true
 keep_vars = true
 
+# Replace both hostnames and zone_name values with a zone in your account.
+routes = [
+  { pattern = "your-domain.example/api/*", zone_name = "your-domain.example" },
+  { pattern = "www.your-domain.example/api/*", zone_name = "your-domain.example" },
+  { pattern = "your-domain.example/store", zone_name = "your-domain.example" },
+  { pattern = "www.your-domain.example/store", zone_name = "your-domain.example" },
+  { pattern = "your-domain.example/store/*", zone_name = "your-domain.example" },
+  { pattern = "www.your-domain.example/store/*", zone_name = "your-domain.example" },
+  { pattern = "your-domain.example/store/auth/*", zone_name = "your-domain.example" },
+  { pattern = "www.your-domain.example/store/auth/*", zone_name = "your-domain.example" },
+  { pattern = "your-domain.example/store/api/*", zone_name = "your-domain.example" },
+  { pattern = "www.your-domain.example/store/api/*", zone_name = "your-domain.example" },
+  { pattern = "your-domain.example/store/file*", zone_name = "your-domain.example" },
+  { pattern = "www.your-domain.example/store/file*", zone_name = "your-domain.example" }
+]
+
 [assets]
 directory = "./public"
 binding = "ASSETS"
