@@ -209,6 +209,15 @@ test("monitor status no longer uses the retired independent deadline", () => {
   assert.match(source, /await refreshChanges\(\);/);
 });
 
+test("status polling uses incremental endpoints and has no fixed one-minute interval", () => {
+  const source = readSource("app.js");
+  const html = readSource("index.html");
+  assert.match(html, /<script src="polling\.js(?:\?[^\"]*)?"><\/script>/);
+  assert.match(source, /\/api\/status\?view=summary/);
+  assert.match(source, /\/api\/changes\?limit=20/);
+  assert.doesNotMatch(source, /setInterval\([\s\S]*?refreshChanges/);
+});
+
 test("expired accounts expose self-service renewal with optimistic versioning", () => {
   const source = readSource("app.js");
   const html = readSource("index.html");

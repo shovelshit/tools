@@ -15,6 +15,7 @@ export { MonitorDispatcher } from "./maoyan/monitor-dispatcher.js";
 export { MonitorCoordinator } from "./maoyan/monitor-coordinator.js";
 export { NotificationDispatcher } from "./maoyan/notification-outbox.js";
 import { dispatchMonitorBatch } from "./maoyan/monitor-dispatcher.js";
+import { handleStatusApi } from "./maoyan/status-api.js";
 
 const DECIMAL = /^\d+$/;
 
@@ -86,7 +87,11 @@ export default {
         }
       }
       const restrictedAccountRoute = url.pathname === "/api/status" && request.method === "GET";
-      if (!restrictedAccountRoute) await requireActiveAccount(env, token, serviceNow(env));
+      const restrictedHistoryRoute = url.pathname === "/api/changes" && request.method === "GET";
+      if (!restrictedAccountRoute && !restrictedHistoryRoute) await requireActiveAccount(env, token, serviceNow(env));
+
+      const statusResponse = await handleStatusApi(request, env, url, principal);
+      if (statusResponse) return statusResponse;
 
       const lockResponse = await handleLockApi(request, env, url, token);
       if (lockResponse) return lockResponse;

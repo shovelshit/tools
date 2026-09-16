@@ -68,6 +68,9 @@ let monitorEnabled = false; // 默认停止, 需显式「开始监控」
 let pushSaved = false; // 云端已存有当前渠道的推送配置(接口不回显时, 保存时避免误覆盖)
 let pushVerified = false; // 当前渠道 + 当前密钥已成功发送过测试推送
 let configVersion = 0;
+let pollingController = null;
+let lockPollingState = { open: false, active: false };
+let renderedChanges = [];
 
 // 城市 / 影院搜索
 let allCities = [];        // [{id, name, pinyin}]
@@ -101,6 +104,18 @@ function syncWorkflowUi(requestedStep = workflowStep) {
       ? "监控已启动"
       : (pushVerified ? "推送已验证" : "请先测试推送");
   }
+  syncPollingState();
+}
+
+function syncPollingState() {
+  pollingController?.update({
+    connected,
+    step: workflowStep,
+    monitorEnabled,
+    lockOpen: lockPollingState.open,
+    lockActive: lockPollingState.active,
+    profileKey: activeProfileKey
+  });
 }
 
 function navigateWorkflow(step) {
@@ -186,7 +201,11 @@ const lockController = window.createMaoyanLockController({
     cinemaLoaded: cinemaMovies.length > 0,
     movies: cinemaMovies.filter((movie) => movie.checked)
   }),
-  onLog: log
+  onLog: log,
+  onPollingState: (next) => {
+    lockPollingState = next;
+    syncPollingState();
+  }
 });
 
 function log(type, text) {
@@ -288,6 +307,7 @@ function resetProfileUi(nextProfileKey) {
   selectedCinema = null;
   selectedCinemaId = "";
   cinemaMovies = [];
+  renderedChanges = [];
   cinemaLoadSeq += 1;
   clearTimeout(cinemaSearchTimer);
   cinemaSearchTimer = null;
@@ -1214,53 +1234,72 @@ els.btnTestPush.addEventListener("click", async () => {
 });
 
 // ---------------- 变化记录 ----------------
-// showLoading: 手动刷新时显示面板占位, 自动轮询不显示(避免闪烁)
+function applyStatusSummary(data) {
+  const { status = {} } = data;
+  currentAccount = data.account || currentAccount;
+  lockServiceEnabled = data.lockServiceEnabled === true;
+  lockController.syncAvailability();
+  syncCronInfo(data);
+  const stopped = status.enabled === false;
+  const lastAt = status.lastCheck || status.lastCheckTs;
+  const lastTxt = lastAt ? fmtClock(new Date(lastAt).getTime()) : "从未";
+  const main = stopped ? "已停止" : status.lastError ? "检查异常" : "监控中";
+  setStatus(statusText(main, [
+    `上次检查 ${lastTxt}`,
+    !stopped && nextBatchText(),
+    !stopped && status.lastError && `失败原因: ${status.lastError}`,
+  ]), main === "监控中" ? "running" : "stopped");
+  if (stopped !== !monitorEnabled) {
+    monitorEnabled = !stopped;
+    updateMonitorBtn();
+  } else {
+    syncPollingState();
+  }
+}
+
+function renderChangePage(page, { reset = false } = {}) {
+  if (reset) renderedChanges = [];
+  const byId = new Map(renderedChanges.map((item) => [item.id, item]));
+  for (const item of page.items || []) byId.set(item.id, item);
+  renderedChanges = [...byId.values()].sort((a, b) => b.id - a.id).slice(0, 100);
+  els.logPanel.innerHTML = "";
+  for (const change of renderedChanges) {
+    const div = document.createElement("div");
+    div.className = `log-entry log-${change.type || "info"}`;
+    div.textContent = `[${new Date(change.time).toLocaleString("zh-CN", { hour12: false })}] ${change.text}`;
+    els.logPanel.append(div);
+  }
+  if (!renderedChanges.length) {
+    els.logPanel.innerHTML = '<div class="log-entry log-info">暂无变化记录，点「立即检查」试试</div>';
+  }
+}
+
+pollingController = window.createMaoyanPollingController({
+  document,
+  requestStatus: () => api("/api/status?view=summary"),
+  requestChanges: (afterId) => api(`/api/changes?limit=20${afterId == null ? "" : `&after_id=${afterId}`}`),
+  requestLock: () => lockController.refreshRemoteState(),
+  onStatus: applyStatusSummary,
+  onChanges: renderChangePage
+});
+syncPollingState();
+
+// showLoading: 手动刷新时显示面板占位，自动轮询不显示，避免闪烁。
 async function refreshChanges(showLoading = false) {
   const generation = profileGeneration.current();
   try {
     if (showLoading) setPanelLoading(els.logPanel, "正在加载变化记录...");
-    const data = await api("/api/status");
-    if (!profileGeneration.isCurrent(generation)) return;
-    const { status, changes } = data;
-    lockServiceEnabled = data.lockServiceEnabled === true;
-    lockController.syncAvailability();
-    syncCronInfo(data); // 批次描述保持与服务端一致
-    const stopped = status.enabled === false;
-    const lastTxt = status.lastCheck ? fmtClock(new Date(status.lastCheck).getTime()) : "从未";
-    const main = stopped ? "已停止" : status.lastError ? "检查异常" : "监控中";
-    const segments = [
-      `上次检查 ${lastTxt}`,
-      !stopped && nextBatchText(),
-      !stopped && status.lastError && `失败原因: ${status.lastError}`,
-    ];
-    setStatus(statusText(main, segments), main === "监控中" ? "running" : "stopped");
-    if (stopped !== !monitorEnabled) {
-      monitorEnabled = !stopped;
-      updateMonitorBtn();
-    }
-    els.logPanel.innerHTML = "";
-    for (const c of [...changes].reverse()) {
-      const div = document.createElement("div");
-      div.className = `log-entry log-${c.type || "info"}`;
-      div.textContent = `[${new Date(c.time).toLocaleString("zh-CN", { hour12: false })}] ${c.text}`;
-      els.logPanel.prepend(div);
-    }
-    if (!changes.length) {
-      els.logPanel.innerHTML = '<div class="log-entry log-info">暂无变化记录，点「立即检查」试试</div>';
-    }
-  } catch (e) {
-    if (!profileGeneration.isCurrent(generation) || isStaleProfileError(e)) return;
+    await pollingController.refresh({ forceChanges: showLoading });
+  } catch (error) {
+    if (!profileGeneration.isCurrent(generation) || isStaleProfileError(error)) return;
     if (showLoading) els.logPanel.innerHTML = '<div class="log-entry log-error">加载失败，请重试</div>';
-    log("error", "获取变化记录失败: " + e.message);
+    log("error", "获取变化记录失败: " + error.message);
   }
 }
 
 els.btnRefresh.addEventListener("click", () =>
   withButtonLoading(els.btnRefresh, "刷新中...", () => refreshChanges(true))
 );
-
-// 每 60 秒自动刷新状态与记录
-setInterval(() => { if (connected) refreshChanges(); }, 60000);
 
 // ---------------- 初始化 ----------------
 let cronMinutes = 10; // 云端 cron 批次(分钟), 连接后以服务端下发为准

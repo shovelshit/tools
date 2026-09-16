@@ -189,7 +189,8 @@ CREATE TABLE IF NOT EXISTS user_config (
 CREATE TABLE IF NOT EXISTS monitor_status (
   token_id TEXT PRIMARY KEY,
   data TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  changes_version INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS monitor_snapshot (
@@ -209,6 +210,13 @@ CREATE TABLE IF NOT EXISTS change_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_change_log_token ON change_log (token_id, id DESC);
+
+CREATE TRIGGER IF NOT EXISTS change_log_version_insert AFTER INSERT ON change_log
+BEGIN
+  INSERT INTO monitor_status(token_id,data,updated_at,changes_version)
+  VALUES (NEW.token_id,'{}',NEW.time,NEW.id)
+  ON CONFLICT(token_id) DO UPDATE SET changes_version=MAX(monitor_status.changes_version,NEW.id);
+END;
 
 -- ============ shared cinema monitoring ============
 CREATE TABLE IF NOT EXISTS monitor_subscriptions (

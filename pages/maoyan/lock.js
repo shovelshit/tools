@@ -182,7 +182,9 @@
     return result;
   }
 
-  function createMaoyanLockController({ api, runtime, getContext, onLog, getProfileGeneration, isProfileGenerationCurrent }) {
+  function createMaoyanLockController({
+    api, runtime, getContext, onLog, onPollingState, getProfileGeneration, isProfileGenerationCurrent
+  }) {
     const $ = (id) => document.getElementById(id);
     const els = {
       button: $("btn-lock-seats"), overlay: $("lock-overlay"), close: $("btn-lock-close"),
@@ -217,6 +219,11 @@
 
     function show(message, type = "info") {
       if (typeof root.showToast === "function") root.showToast(message, type);
+    }
+
+    function emitPollingState() {
+      const active = Boolean(state.rule && ["waiting_schedule", "matching"].includes(state.rule.state));
+      onPollingState?.({ open: !els.overlay.classList.contains("hidden"), active });
     }
 
     function showNativeSessionResult(result, fallback, type) {
@@ -390,6 +397,7 @@
         els.ruleStatus.textContent = "暂无已保存的锁座规则";
         setHidden(els.cancelRule, true);
         renderSelection();
+        emitPollingState();
         return;
       }
       // 规则里存的是内部座位标识(seatNo), 展示统一换成「几排几座」(排号=rowId); 影厅名一并展示。
@@ -408,6 +416,7 @@
       els.ruleStatus.textContent = `${rule.cinemaName || "影院"} · ${rule.movieName || "影片"}${hall} · ${rule.targetDate || ""} ${rule.templateTime || ""} · ${seats} · ${status}${suffix}`;
       setHidden(els.cancelRule, false);
       renderSelection();
+      emitPollingState();
     }
 
     function renderTemplates() {
@@ -1167,6 +1176,7 @@
     function close() {
       els.overlay.classList.add("hidden");
       document.removeEventListener("keydown", onKeydown);
+      emitPollingState();
     }
 
     function reset() {
@@ -1220,6 +1230,7 @@
       renderSelection();
       els.overlay.classList.remove("hidden");
       document.addEventListener("keydown", onKeydown);
+      emitPollingState();
       // 串行: 座位加载依赖最新会话状态, 并发会读到过期的 uploaded:false 误入门控(首次打开不加载座位的根因)
       await refreshRemoteState();
       if (!isCurrentProfileGeneration(generation)) return;
@@ -1326,7 +1337,7 @@
 
     return {
       syncAvailability, open, refreshTemplates: renderTemplates, close, reset,
-      loginMaoyan, uploadSession, getSession: () => publicSession(state.session)
+      refreshRemoteState, loginMaoyan, uploadSession, getSession: () => publicSession(state.session)
     };
   }
 

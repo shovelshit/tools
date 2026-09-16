@@ -67,3 +67,14 @@ SELECT u.id,COALESCE(json_extract(c.data,'$.cinemaId'),''),
   c.version,NULL,CAST(unixepoch('subsec') * 1000 AS INTEGER),CAST(unixepoch('subsec') * 1000 AS INTEGER)
 FROM users u JOIN user_config c ON c.token_id=u.id
 ON CONFLICT(user_id) DO NOTHING;
+
+ALTER TABLE monitor_status ADD COLUMN changes_version INTEGER NOT NULL DEFAULT 0;
+CREATE TRIGGER IF NOT EXISTS change_log_version_insert AFTER INSERT ON change_log
+BEGIN
+  INSERT INTO monitor_status(token_id,data,updated_at,changes_version)
+  VALUES (NEW.token_id,'{}',NEW.time,NEW.id)
+  ON CONFLICT(token_id) DO UPDATE SET changes_version=MAX(monitor_status.changes_version,NEW.id);
+END;
+INSERT INTO monitor_status(token_id,data,updated_at,changes_version)
+SELECT token_id,'{}',COALESCE(MAX(time),''),MAX(id) FROM change_log GROUP BY token_id
+ON CONFLICT(token_id) DO UPDATE SET changes_version=MAX(monitor_status.changes_version,excluded.changes_version);

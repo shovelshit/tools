@@ -171,6 +171,42 @@ export async function listChanges(db, tokenId, limit = 100) {
   return results.map((row) => ({ time: row.time, type: row.type, text: row.text }));
 }
 
+export async function listChangesAfter(db, tokenId, { afterId, beforeId, limit = 20 } = {}) {
+  const pageSize = Math.min(100, Math.max(1, Number(limit) || 20));
+  const after = afterId == null ? null : Number(afterId);
+  const before = beforeId == null ? null : Number(beforeId);
+  let results;
+  if (Number.isInteger(after) && after >= 0) {
+    ({ results } = await db.prepare(
+      "SELECT id,time,type,text FROM change_log WHERE token_id=? AND id>? ORDER BY id ASC LIMIT ?"
+    ).bind(tokenId, after, pageSize + 1).all());
+  } else if (Number.isInteger(before) && before > 0) {
+    ({ results } = await db.prepare(
+      "SELECT id,time,type,text FROM change_log WHERE token_id=? AND id<? ORDER BY id DESC LIMIT ?"
+    ).bind(tokenId, before, pageSize + 1).all());
+    results = results.reverse();
+  } else {
+    ({ results } = await db.prepare(
+      "SELECT id,time,type,text FROM change_log WHERE token_id=? ORDER BY id DESC LIMIT ?"
+    ).bind(tokenId, pageSize + 1).all());
+    results = results.reverse();
+  }
+  const hasMore = results.length > pageSize;
+  if (hasMore) {
+    if (after != null) results = results.slice(0, pageSize);
+    else results = results.slice(results.length - pageSize);
+  }
+  const items = results.map((row) => ({
+    id: Number(row.id), time: row.time, type: row.type, text: row.text
+  }));
+  return {
+    items,
+    nextAfterId: items.length ? items.at(-1).id : (after || null),
+    nextBeforeId: items.length ? items[0].id : (before || null),
+    hasMore
+  };
+}
+
 export async function appendChange(db, tokenId, entry) {
   await db.prepare("INSERT INTO change_log (token_id, time, type, text) VALUES (?, ?, ?, ?)")
     .bind(tokenId, entry.time, entry.type ?? null, entry.text ?? null).run();

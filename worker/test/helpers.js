@@ -57,6 +57,7 @@ export class MemoryD1 {
     this.sqlite.exec(SCHEMA_SQL);
     // 写语句记录: [{table}], 仅 INSERT/UPDATE/DELETE
     this.writes = [];
+    this.queries = [];
   }
 
   prepare(sql) {
@@ -70,11 +71,13 @@ export class MemoryD1 {
         return { success: true, meta: { changes: Number(result.changes || 0) } };
       },
       async first() {
+        shim.queries.push({ sql: sql.trim(), params });
         const stmt = shim.sqlite.prepare(sql);
         const row = params.length ? stmt.get(...params) : stmt.get();
         return row === undefined ? null : row;
       },
       async all() {
+        shim.queries.push({ sql: sql.trim(), params });
         const stmt = shim.sqlite.prepare(sql);
         const results = params.length ? stmt.all(...params) : stmt.all();
         return { results };
