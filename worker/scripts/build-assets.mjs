@@ -19,6 +19,10 @@ export const STATIC_ASSET_FILES = [
     target: `maoyan/${name}`
   })),
   {
+    source: join(REPO_ROOT, "pages", "maoyan", "assets", "cinema-background.webp"),
+    target: "maoyan/assets/cinema-background.webp"
+  },
+  {
     source: join(WORKER_ROOT, "node_modules", "@thumbmarkjs", "thumbmarkjs", "dist", "thumbmark.umd.js"),
     target: "maoyan/vendor/thumbmark.umd.js"
   },

@@ -7,6 +7,7 @@ const MIME = new Map([
   [".html", "text/html; charset=utf-8"],
   [".css", "text/css; charset=utf-8"],
   [".js", "text/javascript; charset=utf-8"],
+  [".webp", "image/webp"],
 ]);
 
 function proxyPath(pathname) {
@@ -46,11 +47,15 @@ async function startWebFixture({ workerUrl }) {
         return;
       }
       let relative = url.pathname === "/" || url.pathname === "/maoyan/" ? "index.html" : url.pathname.replace(/^\/maoyan\//, "");
-      if (!/^[\w.-]+$/.test(relative)) {
+      if (!/^[\w./-]+$/.test(relative) || relative.split("/").includes("..")) {
         response.writeHead(404).end();
         return;
       }
-      const file = path.join(ROOT, relative);
+      const file = path.resolve(ROOT, relative);
+      if (!file.startsWith(`${ROOT}${path.sep}`)) {
+        response.writeHead(404).end();
+        return;
+      }
       const bytes = await fs.readFile(file);
       response.writeHead(200, {
         "Content-Type": MIME.get(path.extname(file)) || "application/octet-stream",

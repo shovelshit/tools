@@ -22,6 +22,38 @@ function chromeExecutable() {
   return candidates.find((candidate) => fs.existsSync(candidate)) || "";
 }
 
+async function assertDarkTheme(page, panelSelector) {
+  const colors = await page.locator(panelSelector).evaluate((panel) => {
+    const components = (value) => (value.match(/[\d.]+/g) || []).map(Number);
+    const pageColor = components(getComputedStyle(document.body).backgroundColor);
+    const panelColor = components(getComputedStyle(panel).backgroundColor);
+    const textColor = components(getComputedStyle(panel).color);
+    return {
+      page: pageColor.slice(0, 3),
+      panel: panelColor.slice(0, 3),
+      panelAlpha: panelColor[3] ?? 1,
+      text: textColor.slice(0, 3),
+    };
+  });
+  assert.ok(Math.max(...colors.page) < 70, `page background is not dark: ${JSON.stringify(colors)}`);
+  assert.ok(Math.max(...colors.panel) < 90, `panel background is not dark: ${JSON.stringify(colors)}`);
+  assert.ok(colors.panelAlpha > 0.5, `panel background is too transparent: ${JSON.stringify(colors)}`);
+  assert.ok(Math.min(...colors.text) > 190, `panel text is not light enough: ${JSON.stringify(colors)}`);
+}
+
+async function assertCinemaBackground(page) {
+  const background = await page.locator(".ambient-cinema").evaluate((image) => ({
+    complete: image.complete,
+    naturalWidth: image.naturalWidth,
+    objectFit: getComputedStyle(image).objectFit,
+    opacity: Number(getComputedStyle(image).opacity),
+  }));
+  assert.equal(background.complete, true, JSON.stringify(background));
+  assert.ok(background.naturalWidth >= 1920, JSON.stringify(background));
+  assert.equal(background.objectFit, "cover", JSON.stringify(background));
+  assert.ok(background.opacity >= 0.5, JSON.stringify(background));
+}
+
 async function snapshotLayout(page, name, width, outputDirectory) {
   await page.setViewportSize({ width, height: width <= 390 ? 844 : 900 });
   const layout = await page.evaluate(() => {
@@ -86,6 +118,8 @@ async function main() {
     }
     await page.waitForFunction(() => document.querySelector('[data-workflow-panel="2"]')?.getAttribute("aria-hidden") === "false");
     await page.emulateMedia({ reducedMotion: "reduce" });
+    await assertDarkTheme(page, ".workflow-main");
+    await assertCinemaBackground(page);
 
     for (const width of [1440, 1200, 1024, 768, 390, 320]) {
       results.push(await snapshotLayout(page, "monitor", width, outputDirectory));
@@ -139,10 +173,17 @@ async function main() {
     const claim = await browser.newPage({ viewport: { width: 390, height: 844 } });
     await claim.goto(`${web.url}/maoyan/claim.html`);
     await claim.waitForFunction(() => !document.querySelector("#claim-full")?.classList.contains("hidden"));
+    await assertDarkTheme(claim, ".claim-panel");
     const claimOverflow = await claim.evaluate(() => document.documentElement.scrollWidth - innerWidth);
     assert.ok(claimOverflow <= 1, `claim page overflow: ${claimOverflow}`);
     await claim.screenshot({ path: path.join(outputDirectory, "claim-mobile.png"), fullPage: true });
     await claim.close();
+
+    const admin = await browser.newPage({ viewport: { width: 1200, height: 900 } });
+    await admin.goto(`${web.url}/maoyan/admin.html`);
+    await assertDarkTheme(admin, ".login-card");
+    await admin.screenshot({ path: path.join(outputDirectory, "admin-login-desktop.png"), fullPage: true });
+    await admin.close();
 
     fs.writeFileSync(path.join(outputDirectory, "results.json"), JSON.stringify({ ok: true, executablePath, viewports: results.map(({ viewport }) => viewport) }, null, 2));
     console.log(`UI E2E passed with ${executablePath}; screenshots: ${outputDirectory}`);

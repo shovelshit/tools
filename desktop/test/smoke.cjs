@@ -237,6 +237,14 @@ async function main() {
     // The main window deliberately blocks navigation away from the monitor page;
     // admin layout is covered by admin.test.cjs rather than opening a second window here.
     if (packaged) {
+      if (process.platform === "darwin") {
+        const hasPackagedIcon = await application.evaluate(() => {
+          const fs = process.getBuiltinModule("node:fs");
+          const path = process.getBuiltinModule("node:path");
+          return fs.existsSync(path.join(process.resourcesPath, "icon.icns"));
+        });
+        assert.equal(hasPackagedIcon, true, "Packaged macOS icon is missing");
+      }
       const entries = await application.evaluate(({ app }) => {
         const fs = process.getBuiltinModule("node:fs");
         const path = process.getBuiltinModule("node:path");
@@ -250,14 +258,14 @@ async function main() {
       assert.ok(entries.includes("desktop/main/index.js"));
       assert.ok(entries.includes("desktop/preload/index.js"));
       assert.ok(entries.includes("pages/maoyan/index.html"));
-      for (const required of ["account.js", "connection-profile.js", "platform.js", "polling.js", "workflow.js", "maoyan-seat.css"]) {
+      for (const required of ["account.js", "connection-profile.js", "platform.js", "polling.js", "workflow.js", "maoyan-seat.css", "assets/cinema-background.webp"]) {
         assert.ok(entries.includes(`pages/maoyan/${required}`), `Missing packaged monitor asset: ${required}`);
       }
       for (const forbidden of ["admin.html", "admin.js", "claim.html", "claim.js", "claim-page.js", "claim.css", "fingerprint.js"]) {
         assert.equal(entries.includes(`pages/maoyan/${forbidden}`), false, `Unexpected packaged asset: ${forbidden}`);
       }
       assert.equal(entries.some((entry) => /\.test\.cjs$/.test(entry)), false);
-      for (const entry of entries) assert.match(entry, /^(package\.json|desktop\/(main|preload)\/[\w-]+\.js|pages\/maoyan\/(index\.html|[\w-]+\.(js|css)))$/);
+      for (const entry of entries) assert.match(entry, /^(package\.json|desktop\/(main|preload)\/[\w-]+\.js|pages\/maoyan\/(index\.html|[\w-]+\.(js|css)|assets\/[\w-]+\.webp))$/);
       console.log(`Packaged asar allowlist verified: ${entries.length} files`);
     }
     console.log(`Electron smoke passed: ${mainPageUrl}; Worker URL visible; token isolated; screenshot ${screenshot}`);

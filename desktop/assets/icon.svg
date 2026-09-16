@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Maoyan Monitor</title>
+  <desc id="desc">A cinema screen above a compact seat grid with one red monitored seat.</desc>
+  <rect width="1024" height="1024" rx="224" fill="#172126"/>
+  <rect x="42" y="42" width="940" height="940" rx="204" fill="none" stroke="#33434a" stroke-width="10"/>
+  <rect x="185" y="154" width="654" height="300" rx="54" fill="#f5f7f7"/>
+  <rect x="217" y="186" width="590" height="236" rx="34" fill="#dbe4e5"/>
+  <path d="M247 374h530" stroke="#ffffff" stroke-width="16" stroke-linecap="round" opacity=".82"/>
+  <path d="M217 482h590" stroke="#51636a" stroke-width="14" stroke-linecap="round"/>
+  <defs>
+    <path id="seat" d="M22 0h56q10 0 13 10l9 39q3 13-11 13H11Q-3 62 0 49l9-39Q12 0 22 0Z"/>
+  </defs>
+  <g fill="#f5f7f7">
+    <use href="#seat" transform="translate(371 544) scale(.72)"/>
+    <use href="#seat" transform="translate(476 544) scale(.72)"/>
+    <use href="#seat" transform="translate(581 544) scale(.72)"/>
+    <use href="#seat" transform="translate(290 634) scale(.84)"/>
+    <use href="#seat" transform="translate(410 634) scale(.84)"/>
+    <use href="#seat" transform="translate(530 634) scale(.84)"/>
+    <use href="#seat" transform="translate(650 634) scale(.84)"/>
+    <use href="#seat" x="202" y="734"/>
+    <use href="#seat" x="332" y="734"/>
+    <use href="#seat" x="592" y="734"/>
+    <use href="#seat" x="722" y="734"/>
+  </g>
+  <use href="#seat" x="462" y="734" fill="#e8484d"/>
+  <path d="M256 858h512" stroke="#e8484d" stroke-width="20" stroke-linecap="round"/>
+  <circle cx="804" cy="858" r="16" fill="#f5f7f7"/>
+</svg>

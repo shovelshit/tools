@@ -34,6 +34,16 @@ test("built pages contain the local Thumbmark bundle and license", async () => {
   assert.match(await readFile(join(target, "maoyan/vendor/THUMBMARK-LICENSE"), "utf8"), /MIT License/);
 });
 
+test("built monitor page includes its cinema background image", async () => {
+  const root = await mkdtemp(join(tmpdir(), "maoyan-assets-"));
+  const target = join(root, "public");
+  await buildAssets({ target });
+  assert.match(await readFile(join(target, "maoyan/index.html"), "utf8"), /assets\/cinema-background\.webp/);
+  const image = await readFile(join(target, "maoyan/assets/cinema-background.webp"));
+  assert.equal(image.subarray(0, 4).toString("ascii"), "RIFF");
+  assert.ok(image.length > 10000);
+});
+
 test("wrangler routes HTML through the Worker while leaving versioned files on Static Assets", async () => {
   const config = await readFile(new URL("../wrangler.example.toml", import.meta.url), "utf8");
   assert.match(config, /run_worker_first[^\n]+\/maoyan\/[^\n]+\/maoyan\/\*\.html/);

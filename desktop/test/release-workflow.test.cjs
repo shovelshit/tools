@@ -63,10 +63,23 @@ test("desktop package uses an explicit monitor-only shared asset whitelist", () 
   const shared = packageJson.build.files.find((entry) => entry && typeof entry === "object" && entry.from === "../pages/maoyan");
   assert.ok(shared);
   const required = [
-    "index.html", "style.css", "maoyan-seat.css", "account.js", "app.js", "connection-profile.js",
+    "index.html", "style.css", "maoyan-seat.css", "assets/cinema-background.webp", "account.js", "app.js", "connection-profile.js",
     "lock.js", "platform.js", "polling.js", "runtime.js", "secure-store.js", "ui.js", "workflow.js"
   ];
   assert.deepEqual([...shared.filter].sort(), [...required].sort());
   assert.equal(packageJson.scripts["test:e2e"], "node test/ui-e2e.cjs");
   for (const entry of shared.filter) assert.doesNotMatch(entry, /\*|admin|claim|fingerprint|test/i);
+});
+
+test("desktop packages use the branded icon on macOS and Windows", () => {
+  assert.equal(packageJson.build.directories.buildResources, "assets");
+  assert.equal(packageJson.build.mac.identity, "-");
+  assert.equal(packageJson.build.mac.icon, "icon.icns");
+  assert.equal(packageJson.build.win.icon, "icon.ico");
+  assert.equal(packageJson.build.win.signAndEditExecutable, true);
+  assert.equal(packageJson.build.win.signExecutable, false);
+  for (const filename of ["icon.svg", "icon.png", "icon.icns", "icon.ico"]) {
+    const iconPath = path.resolve(__dirname, "../assets", filename);
+    assert.ok(fs.statSync(iconPath).size > 0, `Missing desktop icon: ${filename}`);
+  }
 });
