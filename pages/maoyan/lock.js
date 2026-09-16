@@ -211,7 +211,11 @@
 
   function detailOpenState(session, rule) {
     const uploaded = session?.uploaded === true;
-    const ruleNeedsAttention = ["failed", "unknown", "expired"].includes(String(rule?.state || ""));
+    const ruleState = String(rule?.state || "");
+    const ruleNeedsAttention = Boolean(rule) && (
+      ["failed", "unknown", "expired"].includes(ruleState)
+      || !Object.prototype.hasOwnProperty.call(RULE_LABELS, ruleState)
+    );
     return { session: !uploaded, rule: ruleNeedsAttention };
   }
 

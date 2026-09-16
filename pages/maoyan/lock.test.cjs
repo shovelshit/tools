@@ -18,6 +18,7 @@ test("lock shell keeps healthy details collapsed and opens actionable states", (
   assert.deepEqual(state({ uploaded: true }, { state: "waiting_schedule" }), { session: false, rule: false });
   assert.deepEqual(state({ uploaded: true }, { state: "unknown" }), { session: false, rule: true });
   assert.deepEqual(state({ uploaded: true }, { state: "failed" }), { session: false, rule: true });
+  assert.deepEqual(state({ uploaded: true }, { state: "provider_reconciled_v2" }), { session: false, rule: true });
 });
 
 test("lock layout source keeps the separate shell and scoped glass surfaces", () => {

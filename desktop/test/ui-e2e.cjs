@@ -149,19 +149,41 @@ async function assertSeatViewportFit(page, name) {
 }
 
 async function assertLockShell(page, name) {
-  if (await page.evaluate(() => innerHeight <= 600)) {
-    await page.locator(".lock-seat-scroll").scrollIntoViewIfNeeded();
-  }
   const layout = await page.evaluate(() => {
     const box = (selector) => {
       const rect = document.querySelector(selector)?.getBoundingClientRect();
-      return rect && { y: rect.y, height: rect.height, bottom: rect.bottom };
+      return rect && { x: rect.x, y: rect.y, width: rect.width, height: rect.height, right: rect.right, bottom: rect.bottom };
     };
-    return { header: box(".lock-dialog-header"), stage: box(".lock-seat-scroll"), footer: box(".lock-dialog-footer") };
+    return { header: box(".lock-dialog-header"), body: box(".lock-dialog-body"), stage: box(".lock-seat-scroll"), footer: box(".lock-dialog-footer") };
   });
-  assert.ok(layout.header && layout.stage && layout.footer, `${name}: missing lock shell region`);
-  assert.ok(layout.header.y + layout.header.height <= layout.stage.y + 1, `${name}: dialog header overlaps seat viewport ${JSON.stringify(layout)}`);
-  assert.ok(layout.stage.y + layout.stage.height <= layout.footer.y + 1, `${name}: seat viewport overlaps dialog footer ${JSON.stringify(layout)}`);
+  assert.ok(layout.header && layout.body && layout.stage && layout.footer, `${name}: missing lock shell region`);
+  assert.ok(layout.header.bottom <= layout.body.y + 1, `${name}: dialog header overlaps body ${JSON.stringify(layout)}`);
+  assert.ok(layout.body.bottom <= layout.footer.y + 1, `${name}: dialog body overlaps footer ${JSON.stringify(layout)}`);
+}
+
+async function assertLockReachableAfterScroll(page, name) {
+  const body = page.locator(".lock-dialog-body");
+  for (const target of [".lock-seat-scroll", "#lock-section-risk", "#btn-lock-submit"]) {
+    await page.locator(target).scrollIntoViewIfNeeded();
+    const layout = await page.evaluate((selector) => {
+      const get = (value) => {
+        const rect = document.querySelector(value)?.getBoundingClientRect();
+        return rect && { x: rect.x, left: rect.left, y: rect.y, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height };
+      };
+      const body = get(".lock-dialog-body");
+      const target = get(selector);
+      const footer = get(".lock-dialog-footer");
+      const visible = (rect) => Boolean(rect && rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight);
+      const inside = (rect, parent) => Boolean(rect && parent && rect.top >= parent.top - 1 && rect.bottom <= parent.bottom + 1 && rect.left >= parent.left - 1 && rect.right <= parent.right + 1);
+      return { body, target, footer, visible: visible(target), insideBody: inside(target, body), footerVisible: visible(footer), submitVisible: visible(get("#btn-lock-submit")) };
+    }, target);
+    assert.ok(layout.visible, `${name}: ${target} is not visible after scrolling ${JSON.stringify(layout)}`);
+    assert.ok(layout.insideBody || target === "#btn-lock-submit", `${name}: ${target} escaped the body viewport ${JSON.stringify(layout)}`);
+    if (target === ".lock-seat-scroll") {
+      assert.ok(layout.target.bottom <= layout.footer.y + 1, `${name}: seat viewport overlaps dialog footer after scrolling ${JSON.stringify(layout)}`);
+    }
+    assert.ok(layout.footerVisible && layout.submitVisible, `${name}: footer/submit not reachable while checking ${target} ${JSON.stringify(layout)}`);
+  }
 }
 
 async function main() {
@@ -306,8 +328,21 @@ async function main() {
     const lockOverflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
     assert.ok(lockOverflow <= 1, `lock dialog overflow: ${lockOverflow}`);
     await page.screenshot({ path: path.join(outputDirectory, "lock-mobile.png"), fullPage: true });
+    // Exercise the inferred-seat risk/error state with a deterministic failed seat request.
+    await page.locator("#lock-target-date").fill("2026-09-30");
+    await page.waitForFunction(() => document.querySelector("#lock-section-risk")?.offsetParent !== null);
+    await page.route("**/api/lock/template-seats?*", (route) => route.abort());
+    await page.locator("#lock-template").selectOption("900");
+    await page.waitForFunction(() => /座位表加载失败/.test(document.querySelector("#lock-seat-grid")?.textContent || ""));
+    await page.unroute("**/api/lock/template-seats?*");
+    for (const viewport of [{ width: 1024, height: 600 }, { width: 390, height: 844 }, { width: 320, height: 844 }]) {
+      await page.setViewportSize(viewport);
+      const label = `lock reachability ${viewport.width}x${viewport.height}`;
+      await assertLockShell(page, label);
+      await assertLockReachableAfterScroll(page, label);
+      await page.screenshot({ path: path.join(outputDirectory, `lock-reachability-${viewport.width}x${viewport.height}.png`), fullPage: true });
+    }
     await page.setViewportSize({ width: 1024, height: 600 });
-    await assertLockShell(page, "lock shell short viewport");
     await page.screenshot({ path: path.join(outputDirectory, "lock-short-1024x600.png"), fullPage: true });
     assert.deepEqual(errors, []);
     await context.close();
