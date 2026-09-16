@@ -3,6 +3,7 @@ import { newShowsNotification } from "./notification-copy.js";
 import { wakeNotificationDispatcher } from "./notification-outbox.js";
 import { advanceSubscriber, getCommittedCinemaBatch, listSubscribers, persistCinemaSnapshot } from "./monitor-store.js";
 import { runScheduledLockAfterMonitor } from "./lock-runner.js";
+import { allowManualOperation } from "./resource-budget.js";
 
 function eventText(event) {
   const first = event.shows[0] || {};
@@ -93,6 +94,7 @@ export class MonitorCoordinator {
     this.env = env;
     this.deps = deps;
     this.tail = Promise.resolve();
+    this.manualFetch = null;
   }
 
   async exclusive(operation) {
@@ -104,7 +106,31 @@ export class MonitorCoordinator {
   }
 
   async fetch(request) {
-    if (request.method !== "POST" || new URL(request.url).pathname !== "/internal/batch") {
+    const pathname = new URL(request.url).pathname;
+    if (request.method === "POST" && pathname === "/internal/manual-check") {
+      try {
+        const body = await request.json();
+        const rate = await allowManualOperation(this.state.storage, {
+          userId: body.userId,
+          cinemaId: body.cinemaId,
+          kind: "check",
+          nowMs: body.nowMs
+        });
+        if (!rate.allowed) return Response.json({ ok: false, code: "RATE_LIMITED", ...rate }, {
+          status: 429,
+          headers: { "Retry-After": String(rate.retryAfterSeconds) }
+        });
+        if (!this.manualFetch) {
+          const fetchCinema = this.deps.fetchCinema || fetchCinemaDetail;
+          this.manualFetch = fetchWithTimeout(fetchCinema, String(body.cinemaId))
+            .finally(() => { this.manualFetch = null; });
+        }
+        return Response.json({ ok: true, data: await this.manualFetch });
+      } catch {
+        return Response.json({ ok: false, error: "影院场次暂时不可用" }, { status: 502 });
+      }
+    }
+    if (request.method !== "POST" || pathname !== "/internal/batch") {
       return Response.json({ error: "Not Found" }, { status: 404 });
     }
     try {
@@ -115,4 +141,21 @@ export class MonitorCoordinator {
       return Response.json({ ok: false, error: "影院批次处理失败" }, { status: 502 });
     }
   }
+}
+
+export async function fetchManualCinemaThroughCoordinator(env, { userId, cinemaId, nowMs }) {
+  if (!env.MONITOR_COORDINATOR) return null;
+  const stub = env.MONITOR_COORDINATOR.get(env.MONITOR_COORDINATOR.idFromName(String(cinemaId)));
+  const response = await stub.fetch(new Request("https://internal/internal/manual-check", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userId, cinemaId, nowMs })
+  }));
+  const body = await response.json().catch(() => ({}));
+  if (response.status === 429) return {
+    allowed: false,
+    retryAfterSeconds: Number(response.headers.get("Retry-After") || body.retryAfterSeconds || 30)
+  };
+  if (!response.ok || !body.data) throw new Error("影院场次暂时不可用");
+  return { allowed: true, retryAfterSeconds: 0, data: body.data };
 }

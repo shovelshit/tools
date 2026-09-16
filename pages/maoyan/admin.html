@@ -51,6 +51,14 @@
       <button id="btn-save-settings" class="btn small primary">保存设置</button>
     </section>
 
+    <section class="admin-toolbar resource-summary" aria-label="资源状态">
+      <div><span class="muted">活跃影院</span><strong id="resource-cinemas">--</strong></div>
+      <div><span class="muted">通知积压</span><strong id="resource-pending">--</strong></div>
+      <div><span class="muted">通知失败</span><strong id="resource-failed">--</strong></div>
+      <div><span class="muted">准入预算</span><strong id="resource-admission">--</strong></div>
+      <small id="resource-note" class="muted">仅在打开或刷新管理页时读取</small>
+    </section>
+
     <section class="admin-toolbar" aria-label="新增和筛选账号">
       <div class="admin-create">
         <input id="new-account-remark" type="text" maxlength="50" placeholder="新账号备注" />

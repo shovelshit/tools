@@ -3,6 +3,7 @@ import { accountStatus, getAccount } from "./accounts.js";
 import { exchangeSession, publicAccount, serviceNow } from "./auth.js";
 import { createManagedAccount, readCapacity, readServiceSettings, renewAccount, updateManagedAccount, updateServiceSettings } from "./enrollment-store.js";
 import { resumeAfterRenewal } from "./account-lifecycle.js";
+import { readResourceSummary } from "./resource-budget.js";
 
 export async function handlePublicAccountApi(request, env, url) {
   if (url.pathname === "/api/capabilities" && request.method === "GET") {
@@ -96,6 +97,9 @@ export async function listAdminAccounts(env, url, nowMs) {
 
 export async function handleAdminAccountApi(request, env, url) {
   const nowMs = serviceNow(env);
+  if (url.pathname === "/api/admin/resources" && request.method === "GET") {
+    return json({ ok: true, resources: await readResourceSummary(env, nowMs) }, 200, { "Cache-Control": "no-store" });
+  }
   if (url.pathname === "/api/admin/accounts" && request.method === "GET") {
     return json({ ok: true, ...await listAdminAccounts(env, url, nowMs) }, 200, { "Cache-Control": "no-store" });
   }

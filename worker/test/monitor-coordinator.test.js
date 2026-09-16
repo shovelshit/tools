@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createAccountEnv, seedAccount } from "./account-fixtures.js";
 import { syncSubscription } from "../src/maoyan/monitor-store.js";
-import { processCinemaBatch } from "../src/maoyan/monitor-coordinator.js";
-import { cinemaFixture } from "./scaling-fixtures.js";
+import { MonitorCoordinator, processCinemaBatch } from "../src/maoyan/monitor-coordinator.js";
+import { cinemaFixture, createStorageFixture } from "./scaling-fixtures.js";
 
 const NOW = Date.parse("2026-09-16T04:00:00.000Z");
 
@@ -46,4 +46,30 @@ test("replaying a committed cinema batch does not duplicate user events", async 
   assert.equal(fetches, 1);
   assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM notification_outbox").first()).n, 1);
   assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM change_log").first()).n, 1);
+});
+
+test("concurrent manual checks share one cinema fetch and retain per-user cooldowns", async () => {
+  let fetches = 0;
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const coordinator = new MonitorCoordinator({ storage: createStorageFixture() }, {}, {
+    fetchCinema: async () => {
+      fetches += 1;
+      await gate;
+      return cinemaFixture({ cinemaId: "1" });
+    }
+  });
+  const request = (userId, nowMs = NOW) => coordinator.fetch(new Request("https://internal/internal/manual-check", {
+    method: "POST",
+    body: JSON.stringify({ cinemaId: "1", userId, nowMs })
+  }));
+  const first = request("user-a");
+  const second = request("user-b");
+  release();
+  assert.equal((await first).status, 200);
+  assert.equal((await second).status, 200);
+  assert.equal(fetches, 1);
+  const limited = await request("user-a", NOW + 1000);
+  assert.equal(limited.status, 429);
+  assert.equal(limited.headers.get("Retry-After"), "29");
 });

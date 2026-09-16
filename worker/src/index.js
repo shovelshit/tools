@@ -16,6 +16,8 @@ export { MonitorCoordinator } from "./maoyan/monitor-coordinator.js";
 export { NotificationDispatcher } from "./maoyan/notification-outbox.js";
 import { dispatchMonitorBatch } from "./maoyan/monitor-dispatcher.js";
 import { handleStatusApi } from "./maoyan/status-api.js";
+import { checkManualOperationThroughCoordinator } from "./maoyan/lock-runner.js";
+import { fetchManualCinemaThroughCoordinator } from "./maoyan/monitor-coordinator.js";
 
 const DECIMAL = /^\d+$/;
 
@@ -195,7 +197,21 @@ export default {
         return json({ ok: true, config: await publicConfig(cfg), ...(notice ? { notice } : {}) });
       }
       if (url.pathname === "/api/check" && request.method === "POST") {
-        const result = await runCheck(env, true, token);
+        const cfg = await getUserConfig(env, token);
+        if (!cfg.cinemaId || cfg.enabled !== true) {
+          const result = await runCheck(env, true, token);
+          return result.ok ? json(result) : json(result, result.status || 400);
+        }
+        const coordinated = cfg.cinemaId ? await fetchManualCinemaThroughCoordinator(env, {
+          userId: token, cinemaId: cfg.cinemaId, nowMs: serviceNow(env)
+        }) : null;
+        const rate = coordinated || await checkManualOperationThroughCoordinator(env, token, {
+          kind: "check", cinemaId: cfg.cinemaId || "", nowMs: serviceNow(env)
+        });
+        if (!rate.allowed) return json({ ok: false, code: "RATE_LIMITED", error: "操作过于频繁，请稍后重试" }, 429, {
+          "Retry-After": String(rate.retryAfterSeconds)
+        });
+        const result = await runCheck(env, true, token, coordinated ? { fetchCinema: async () => coordinated.data } : {});
         return result.ok ? json(result) : json(result, result.status || 400);
       }
       if (url.pathname === "/api/test-bark" && request.method === "POST") {
@@ -213,6 +229,12 @@ export default {
       }
       // ---- 按当前选中渠道发送测试推送 ----
       if (url.pathname === "/api/test-push" && request.method === "POST") {
+        const rate = await checkManualOperationThroughCoordinator(env, token, {
+          kind: "test-push", nowMs: serviceNow(env)
+        });
+        if (!rate.allowed) return json({ ok: false, code: "RATE_LIMITED", error: "操作过于频繁，请稍后重试" }, 429, {
+          "Retry-After": String(rate.retryAfterSeconds)
+        });
         const cfg = await getUserConfig(env, token);
         const notification = testNotification();
         let label;

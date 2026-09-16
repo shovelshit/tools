@@ -7,7 +7,9 @@ const els = {
   btnSaveSettings: $("btn-save-settings"), remark: $("new-account-remark"), btnAdd: $("btn-add-account"),
   search: $("account-search"), statusFilter: $("account-status-filter"), btnRefresh: $("btn-refresh-accounts"),
   btnLoadMore: $("btn-load-more"), btnLogout: $("btn-admin-logout"),
-  btnEnterMonitor: $("btn-enter-monitor")
+  btnEnterMonitor: $("btn-enter-monitor"),
+  resourceCinemas: $("resource-cinemas"), resourcePending: $("resource-pending"),
+  resourceFailed: $("resource-failed"), resourceAdmission: $("resource-admission"), resourceNote: $("resource-note")
 };
 
 const SAME_ORIGIN_HOSTS = ["ltools.asia", "www.ltools.asia", "tools-a65.pages.dev"];
@@ -48,7 +50,7 @@ async function login() {
   els.btnLogin.textContent = "验证中...";
   els.loginError.classList.add("hidden");
   try {
-    await Promise.all([refreshAccounts({ reset: true }), loadSettings()]);
+    await Promise.all([refreshAccounts({ reset: true }), loadSettings(), loadResources()]);
     localStorage.setItem("adminWorkerUrl", baseUrl);
     await secureSet("adminToken", adminToken);
     els.adminToken.value = "";
@@ -85,6 +87,18 @@ async function loadSettings() {
   els.capacityMax.value = settings.maxUsers;
   els.validDays.value = settings.defaultValidDays;
   els.publicSignup.checked = settings.publicSignupEnabled === true;
+}
+
+async function loadResources() {
+  const { resources } = await adminApi("/api/admin/resources");
+  els.resourceCinemas.textContent = String(resources.activeCinemas ?? "--");
+  els.resourcePending.textContent = String(resources.notificationPending ?? "--");
+  els.resourceFailed.textContent = String(resources.notificationFailed ?? "--");
+  els.resourceAdmission.textContent = resources.admissionAllowed ? "可申请" : "保持关闭";
+  const measured = Object.values(resources.usage || {}).filter((item) => item.measured).length;
+  els.resourceNote.textContent = measured
+    ? `${measured} 项平台指标已测量，其余为估算或未知`
+    : "平台用量未知；公开申请应保持关闭，现有账号不受影响";
 }
 
 function fmtTime(value) {
@@ -249,7 +263,7 @@ els.search.addEventListener("input", () => {
   searchTimer = setTimeout(() => refreshAccounts({ reset: true }).catch((error) => showToast(error.message, "error")), 250);
 });
 els.statusFilter.addEventListener("change", () => refreshAccounts({ reset: true }).catch((error) => showToast(error.message, "error")));
-els.btnRefresh.addEventListener("click", () => Promise.all([refreshAccounts({ reset: true }), loadSettings()]));
+els.btnRefresh.addEventListener("click", () => Promise.all([refreshAccounts({ reset: true }), loadSettings(), loadResources()]));
 els.btnLoadMore.addEventListener("click", () => refreshAccounts({ reset: false }));
 els.btnEnterMonitor.addEventListener("click", (event) => {
   event.preventDefault();

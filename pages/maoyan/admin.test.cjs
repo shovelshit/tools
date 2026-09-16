@@ -35,3 +35,10 @@ test("one-time managed keys are shown only from the create response", () => {
   assert.match(source, /copyText\(created\.key\)/);
   assert.match(source, /仅显示一次/);
 });
+
+test("resource summary is compact and refreshes only with explicit admin loads", () => {
+  assert.match(html, /id="resource-cinemas"/);
+  assert.match(html, /id="resource-admission"/);
+  assert.match(source, /\/api\/admin\/resources/);
+  assert.doesNotMatch(source, /setInterval/);
+});

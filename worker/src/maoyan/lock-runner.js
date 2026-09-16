@@ -12,6 +12,7 @@ import { withSeatFeedback } from "./seat-feedback.js";
 import { lockNotification } from "./notification-copy.js";
 import { requireActiveAccount } from "./auth.js";
 import { persistTerminalNotification, wakeNotificationDispatcher } from "./notification-outbox.js";
+import { allowManualOperation } from "./resource-budget.js";
 
 const TOKEN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -213,6 +214,7 @@ export class LockCoordinator {
 
   async fetch(request) {
     if (request.method !== "POST") return Response.json({ error: "Method Not Allowed" }, { status: 405 });
+    if (request.headers.get("X-Lock-Action") === "manual-rate") return await this.handle(request);
     if (this.running) {
       if (["cancel", "remove-session", "save-session", "prepare-cleanup"].includes(request.headers.get("X-Lock-Action"))) {
         this.cancelRequested = true;
@@ -264,6 +266,14 @@ export class LockCoordinator {
       }
       if (action === "prepare-cleanup") {
         return Response.json({ ok: true, ready: true });
+      }
+      if (action === "manual-rate") {
+        return Response.json({ ok: true, ...await allowManualOperation(this.state.storage, {
+          userId: tokenId,
+          cinemaId: input?.cinemaId,
+          kind: input?.kind,
+          nowMs: input?.nowMs
+        }) });
       }
       if (action !== "run") return Response.json({ error: "Bad Request" }, { status: 400 });
       const getRule = this.deps.getRule || getLockRule;
@@ -353,6 +363,16 @@ export async function prepareAccountCleanupThroughCoordinator(env, tokenId) {
   const body = await response.json().catch(() => ({}));
   if (response.status === 200 && body?.ok === true && body.ready === true) return true;
   throw new Error("锁座协调器清理准备失败");
+}
+
+export async function checkManualOperationThroughCoordinator(env, tokenId, input) {
+  checkedTokenId(tokenId);
+  if (!env.LOCK_COORDINATOR) return { allowed: true, retryAfterSeconds: 0 };
+  const stub = env.LOCK_COORDINATOR.get(env.LOCK_COORDINATOR.idFromName(tokenId));
+  const response = await stub.fetch(lockRequest("manual-rate", tokenId, input));
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || typeof body.allowed !== "boolean") throw new Error("操作限流服务暂时不可用");
+  return { allowed: body.allowed, retryAfterSeconds: Number(body.retryAfterSeconds || 0) };
 }
 
 export async function runScheduledLockAfterMonitor(env, tokenId, cinemaData) {
