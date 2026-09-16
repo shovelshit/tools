@@ -223,6 +223,54 @@ async function main() {
     await assertDarkTheme(page, ".workflow-main");
     await assertCinemaBackground(page);
 
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    const webWorkspace = await page.evaluate(() => {
+      const workspace = document.querySelector(".app-workspace");
+      const main = document.querySelector(".workflow-main");
+      const footer = document.querySelector("[data-workflow-panel=\"2\"] .panel-actions");
+      const title = document.querySelector(".title-block h1");
+      const status = document.querySelector("#status-line");
+      const form = document.querySelector("[data-workflow-panel=\"2\"] .panel-content");
+      const fields = [...document.querySelectorAll("[data-workflow-panel=\"2\"] input, [data-workflow-panel=\"2\"] select")];
+      const box = (element) => element?.getBoundingClientRect();
+      const within = (child, parent) => {
+        const childBox = box(child);
+        const parentBox = box(parent);
+        return Boolean(childBox && parentBox && childBox.left >= parentBox.left - 1 && childBox.right <= parentBox.right + 1
+          && childBox.top >= parentBox.top - 1 && childBox.bottom <= parentBox.bottom + 1);
+      };
+      return {
+        runtime: document.documentElement.dataset.runtime,
+        workspace: box(workspace),
+        transform: getComputedStyle(workspace).transform,
+        titleSize: Number.parseFloat(getComputedStyle(title).fontSize),
+        statusSize: Number.parseFloat(getComputedStyle(status).fontSize),
+        fieldHeights: fields.map((field) => Number.parseFloat(getComputedStyle(field).height)),
+        footerInside: within(footer, main),
+        fieldsInside: fields.every((field) => within(field, form)),
+        overflow: document.documentElement.scrollWidth - innerWidth,
+      };
+    });
+    assert.equal(webWorkspace.runtime, "web");
+    assert.ok(webWorkspace.workspace.width > 1120 && webWorkspace.workspace.width <= 1400, JSON.stringify(webWorkspace));
+    assert.ok(webWorkspace.workspace.height > 620 && webWorkspace.workspace.height <= 775, JSON.stringify(webWorkspace));
+    assert.equal(webWorkspace.transform, "none");
+    assert.equal(webWorkspace.titleSize, 17);
+    assert.equal(webWorkspace.statusSize, 14);
+    assert.ok(webWorkspace.fieldHeights.every((height) => height === 40), JSON.stringify(webWorkspace));
+    assert.equal(webWorkspace.footerInside, true, JSON.stringify(webWorkspace));
+    assert.equal(webWorkspace.fieldsInside, true, JSON.stringify(webWorkspace));
+    assert.ok(webWorkspace.overflow <= 1, JSON.stringify(webWorkspace));
+
+    await page.setViewportSize({ width: 1200, height: 700 });
+    const compactWeb = await page.evaluate(() => ({
+      overflow: document.documentElement.scrollWidth - innerWidth,
+      bodyOverflow: document.body.scrollWidth - innerWidth,
+      workspaceHeight: document.querySelector(".app-workspace")?.getBoundingClientRect().height || 0,
+    }));
+    assert.ok(compactWeb.overflow <= 1 && compactWeb.bodyOverflow <= 1, JSON.stringify(compactWeb));
+    assert.ok(compactWeb.workspaceHeight > 0 && compactWeb.workspaceHeight <= 652, JSON.stringify(compactWeb));
+
     for (const width of [1440, 1200, 1024, 768, 390, 320]) {
       results.push(await snapshotLayout(page, "monitor", width, outputDirectory));
     }

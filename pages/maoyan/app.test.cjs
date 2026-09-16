@@ -264,6 +264,26 @@ test("cinema selection no longer depends on the removed manual input", () => {
   assert.match(source, /if \(config\.cinemaId\) selectedCinemaId = String\(config\.cinemaId\);/);
 });
 
+test("runtime marker is applied before and after asynchronous runtime detection", () => {
+  const source = readSource("app.js");
+  assert.match(source, /document\.documentElement\.dataset\.runtime/);
+  assert.match(source, /runtimeInfo = \{ kind: window\.maoyanRuntime\?\.kind \|\| "web"/);
+  assert.match(source, /runtimeInfo = await window\.maoyanRuntime\.getRuntimeInfo\(\);[\s\S]{0,260}?setRuntimeDataset\(runtimeInfo\.kind\)/);
+  assert.match(source, /catch \{[\s\S]{0,180}?setRuntimeDataset\(runtimeInfo\.kind\)/);
+});
+
+test("larger workspace metrics are scoped to Web Maoyan desktop only", () => {
+  const css = readSource("style.css");
+  assert.match(css, /@media\s*\(min-width:\s*1200px\)[\s\S]*html\[data-runtime="web"\] #main-page \.app-workspace/);
+  assert.match(css, /html\[data-runtime="web"\] #main-page \.app-workspace[\s\S]*max-width:\s*1400px/);
+  assert.match(css, /html\[data-runtime="web"\] #main-page \.app-workspace[\s\S]*max-height:\s*775px/);
+  assert.match(css, /html\[data-runtime="web"\] #main-page \.title-block h1[\s\S]*font-size:\s*17px/);
+  assert.match(css, /html\[data-runtime="web"\] #main-page \.status-line[\s\S]*font-size:\s*14px/);
+  assert.match(css, /html\[data-runtime="web"\] #main-page input\[type="text"\][\s\S]*height:\s*40px/);
+  assert.doesNotMatch(css, /html\[data-runtime="web"\][\s\S]*\bzoom\s*:/);
+  assert.doesNotMatch(css, /html\[data-runtime="web"\][\s\S]*transform:\s*scale/);
+});
+
 test("push key is masked after save and read from memory, not the masked input", () => {
   const source = readSource("app.js");
   assert.match(source, /function maskKey/);

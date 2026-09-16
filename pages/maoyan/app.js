@@ -61,11 +61,17 @@ const els = {
   logPanel: $("log-panel"),
 };
 
+function setRuntimeDataset(kind) {
+  if (typeof document === "undefined" || !document.documentElement) return;
+  document.documentElement.dataset.runtime = kind === "electron" ? "electron" : "web";
+}
+
 let cinemaMovies = []; // [{id, nm, showCount, checked}]
 let connected = false;
 const profileGeneration = window.createProfileGeneration();
 let activeProfileKey = "";
 let runtimeInfo = { kind: window.maoyanRuntime?.kind || "web", canLoginMaoyan: false, persistentTokenStorage: false };
+setRuntimeDataset(runtimeInfo.kind);
 let tokenProfileKey = "";
 let currentAccount = null;
 let lockServiceEnabled = false;
@@ -1385,8 +1391,10 @@ function syncCronInfo(data) {
   updateBatchTip();
   try {
     runtimeInfo = await window.maoyanRuntime.getRuntimeInfo();
+    if (typeof setRuntimeDataset === "function") setRuntimeDataset(runtimeInfo.kind);
   } catch {
     runtimeInfo = { kind: window.maoyanRuntime?.kind || "web", canLoginMaoyan: false, persistentTokenStorage: false };
+    if (typeof setRuntimeDataset === "function") setRuntimeDataset(runtimeInfo.kind);
   }
   bindSetupLinks();
   void checkForDesktopUpdate();
