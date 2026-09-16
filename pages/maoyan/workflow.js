@@ -75,11 +75,101 @@
       const active = Number(panel.dataset.workflowPanel) === state.activeStep;
       panel.classList.toggle("is-active", active);
       panel.setAttribute("aria-hidden", String(!active));
+      panel.inert = !active;
     }
 
     const count = root.querySelector("#workflow-count");
     if (count) count.textContent = `${state.activeStep} / ${state.steps.length}`;
   }
 
-  return { bindAmbientMotion, deriveWorkflowState, renderWorkflow };
+  function createWorkflowTransition({ root, matchMedia, animate } = {}) {
+    const stage = root.querySelector(".workflow-main");
+    const panels = () => Array.from(root.querySelectorAll("[data-workflow-panel]"));
+    const reducedMotion = () => {
+      try { return matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true; }
+      catch { return false; }
+    };
+    let currentStep = null;
+    let generation = 0;
+    let currentAnimations = [];
+
+    function clearTransientLayout() {
+      for (const panel of panels()) panel.classList.remove("is-leaving");
+      if (stage?.style) stage.style.minHeight = "";
+    }
+
+    function cancelAnimations() {
+      for (const animation of currentAnimations) {
+        try { animation?.cancel?.(); } catch {}
+      }
+      currentAnimations = [];
+      clearTransientLayout();
+    }
+
+    function focusCurrent(panel) {
+      const target = panel?.querySelector?.("h2, input:not([disabled]), button:not([disabled]), select:not([disabled])");
+      if (!target || root.activeElement === target) return;
+      if (target.matches?.("h2") && !target.hasAttribute?.("tabindex")) target.setAttribute?.("tabindex", "-1");
+      target.focus?.({ preventScroll: true });
+    }
+
+    function render(state, { userInitiated = false } = {}) {
+      const nextStep = Number(state?.activeStep);
+      const previousStep = currentStep;
+      const previousPanel = panels().find((panel) => Number(panel.dataset.workflowPanel) === previousStep);
+      const previousHeight = Number(previousPanel?.offsetHeight || 0);
+      generation += 1;
+      const renderGeneration = generation;
+      cancelAnimations();
+      renderWorkflow(root, state);
+      const currentPanel = panels().find((panel) => Number(panel.dataset.workflowPanel) === nextStep);
+      currentStep = nextStep;
+
+      if (previousStep === null || previousStep === nextStep || reducedMotion() || typeof animate !== "function") {
+        clearTransientLayout();
+        if (userInitiated && previousStep !== null && previousStep !== nextStep) focusCurrent(currentPanel);
+        return;
+      }
+
+      const currentHeight = Number(currentPanel?.offsetHeight || 0);
+      if (stage?.style && Math.max(previousHeight, currentHeight) > 0) {
+        stage.style.minHeight = `${Math.max(previousHeight, currentHeight)}px`;
+      }
+      previousPanel?.classList.add("is-leaving");
+      const forward = nextStep > previousStep;
+      const incomingFrames = forward
+        ? [{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "translateY(0)" }]
+        : [{ opacity: 0, transform: "translateY(-6px)" }, { opacity: 1, transform: "translateY(0)" }];
+      const outgoingFrames = forward
+        ? [{ opacity: 1, transform: "translateY(0)" }, { opacity: 0, transform: "translateY(-6px)" }]
+        : [{ opacity: 1, transform: "translateY(0)" }, { opacity: 0, transform: "translateY(6px)" }];
+      const options = { duration: 180, easing: "ease-out", fill: "both" };
+      currentAnimations = [
+        previousPanel && animate(previousPanel, outgoingFrames, options),
+        currentPanel && animate(currentPanel, incomingFrames, options)
+      ].filter(Boolean);
+      if (!currentAnimations.length) {
+        clearTransientLayout();
+        if (userInitiated) focusCurrent(currentPanel);
+        return;
+      }
+      Promise.allSettled(currentAnimations.map((animation) => Promise.resolve(animation.finished).catch(() => {})))
+        .then(() => {
+          if (generation !== renderGeneration) return;
+          currentAnimations = [];
+          clearTransientLayout();
+          if (userInitiated) focusCurrent(currentPanel);
+        });
+    }
+
+    function dispose() {
+      generation += 1;
+      cancelAnimations();
+      currentStep = null;
+    }
+
+    return { render, dispose };
+  }
+
+  return { bindAmbientMotion, createWorkflowTransition, deriveWorkflowState, renderWorkflow };
 });

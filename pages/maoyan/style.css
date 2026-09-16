@@ -312,6 +312,23 @@ summary {
   gap: 12px;
 }
 
+.account-notice {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-left: 2px solid var(--muted);
+  color: var(--text);
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.account-notice span { flex: 1 1 auto; }
+.account-notice.is-warning { border-left-color: var(--warning); }
+.account-notice.is-success { border-left-color: var(--success); }
+
 .workflow-progress,
 .workflow-main {
   min-width: 0;
@@ -436,6 +453,7 @@ summary {
 .progress-meta strong { margin-top: 2px; font-size: 12px; font-weight: 650; }
 
 .workflow-main {
+  position: relative;
   overflow: hidden;
 }
 
@@ -447,6 +465,19 @@ summary {
 
 .workflow-view.is-active {
   display: grid;
+}
+
+.workflow-view.is-leaving {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  width: 100%;
+  pointer-events: none;
+}
+
+[data-workflow-panel][aria-hidden="true"] {
+  pointer-events: none;
 }
 
 .panel-heading {
@@ -1425,7 +1456,9 @@ summary:focus-visible {
   }
 
   .toast,
-  .lock-seat-rows {
+  .lock-seat-rows,
+  .workflow-main,
+  .workflow-progress {
     transition: none !important;
   }
 }

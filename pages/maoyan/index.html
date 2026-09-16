@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>猫眼影院场次监控</title>
-  <link rel="stylesheet" href="style.css?v=20260915d" />
+  <link rel="stylesheet" href="style.css?v=20260916c" />
 </head>
 <body>
   <div id="ambient-background" class="ambient-background" aria-hidden="true">
@@ -53,6 +53,12 @@
           <a class="btn small ghost" href="../">工具箱</a>
         </div>
       </header>
+
+      <div id="account-notice" class="account-notice hidden" role="status">
+        <span id="account-notice-text"></span>
+        <button id="btn-account-session" class="btn small ghost hidden" type="button">重新登录猫眼</button>
+        <button id="btn-account-notification" class="btn small ghost hidden" type="button">检查通知</button>
+      </div>
 
       <main class="workflow-shell">
         <aside class="workflow-progress glass-panel" aria-label="设置进度">
@@ -315,15 +321,15 @@
     </section>
   </div>
 
-      <script src="account.js?v=20260916a"></script>
+      <script src="account.js?v=20260916b"></script>
       <script src="connection-profile.js?v=20260916a"></script>
       <script src="platform.js?v=20260916a"></script>
       <script src="runtime.js?v=20260916a"></script>
   <script src="secure-store.js?v=20260912b"></script>
   <script src="ui.js?v=20260915c"></script>
-  <script src="workflow.js?v=20260915d"></script>
+  <script src="workflow.js?v=20260916a"></script>
   <script src="polling.js?v=20260916a"></script>
   <script src="lock.js?v=20260914h"></script>
-  <script src="app.js?v=20260916a"></script>
+  <script src="app.js?v=20260916b"></script>
 </body>
 </html>

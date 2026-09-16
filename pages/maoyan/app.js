@@ -47,6 +47,10 @@ const els = {
   pushServerChanRow: $("push-serverchan-row"),
   pushChannelRow: $("push-channel-row"),
   pushPlatformAdvice: $("push-platform-advice"),
+  accountNotice: $("account-notice"),
+  accountNoticeText: $("account-notice-text"),
+  btnAccountSession: $("btn-account-session"),
+  btnAccountNotification: $("btn-account-notification"),
   pageSub: $("page-sub"),
   // 电影列表
   movieList: $("movie-list"),
@@ -87,13 +91,18 @@ let selectedCinemaId = ""; // 当前影院 ID(搜索选中/加载成功/云端�
 let cinemaSelected = false; // 影院已在影院设置中选择或加载(锁座入口门槛)
 let cinemaSearchTimer = null;
 let workflowStep = null;
+const workflowTransition = window.maoyanWorkflow.createWorkflowTransition({
+  root: document,
+  matchMedia: (query) => window.matchMedia?.(query),
+  animate: (element, keyframes, options) => element.animate?.(keyframes, options)
+});
 
 // 同域部署下 Worker 地址可留空(直接请求当前域名); 其他托管环境给出默认后端
 const SAME_ORIGIN_HOSTS = ["ltools.asia", "www.ltools.asia", "tools-a65.pages.dev"];
 const SAME_ORIGIN = SAME_ORIGIN_HOSTS.includes(location.hostname);
 const DEFAULT_WORKER = SAME_ORIGIN ? "" : "https://ltools.asia";
 
-function syncWorkflowUi(requestedStep = workflowStep) {
+function syncWorkflowUi(requestedStep = workflowStep, options = {}) {
   const state = window.maoyanWorkflow.deriveWorkflowState({
     connected,
     cinemaSelected,
@@ -103,7 +112,7 @@ function syncWorkflowUi(requestedStep = workflowStep) {
     requestedStep,
   });
   workflowStep = state.activeStep;
-  window.maoyanWorkflow.renderWorkflow(document, state);
+  workflowTransition.render(state, options);
   if (els.btnStepCinemaNext) els.btnStepCinemaNext.disabled = !state.steps[1].complete;
   if (els.btnStepMovieNext) els.btnStepMovieNext.disabled = !state.steps[2].complete;
   if (els.workflowReadyState) {
@@ -125,9 +134,20 @@ function syncPollingState() {
   });
 }
 
+function renderAccountNotice(resume = null) {
+  if (!els.accountNotice || !window.accountStatusPresentation) return;
+  const view = window.accountStatusPresentation({ account: currentAccount, resume });
+  els.accountNotice.classList.toggle("hidden", !view.visible);
+  els.accountNotice.classList.toggle("is-warning", view.tone === "warning");
+  els.accountNotice.classList.toggle("is-success", view.tone === "success");
+  els.accountNoticeText.textContent = view.text;
+  els.btnAccountSession?.classList.toggle("hidden", view.action !== "session");
+  els.btnAccountNotification?.classList.toggle("hidden", view.action !== "notification");
+}
+
 function navigateWorkflow(step) {
   workflowStep = step;
-  syncWorkflowUi();
+  syncWorkflowUi(workflowStep, { userInitiated: true });
 }
 
 document.querySelectorAll("[data-workflow-step]").forEach((button) => {
@@ -138,6 +158,8 @@ els.btnStepCinemaNext?.addEventListener("click", () => navigateWorkflow(3));
 els.btnStepMovieBack?.addEventListener("click", () => navigateWorkflow(2));
 els.btnStepMovieNext?.addEventListener("click", () => navigateWorkflow(4));
 els.btnStepNotifyBack?.addEventListener("click", () => navigateWorkflow(3));
+els.btnAccountSession?.addEventListener("click", () => els.btnLockSeats?.click());
+els.btnAccountNotification?.addEventListener("click", () => navigateWorkflow(4));
 window.maoyanWorkflow.bindAmbientMotion({ window, document });
 
 // ---------------- 基础 ----------------
@@ -299,6 +321,7 @@ function resetProfileUi(nextProfileKey) {
   }, nextProfileKey);
   connected = false;
   currentAccount = null;
+  renderAccountNotice();
   els.btnRenewAccount?.classList.add("hidden");
   lockServiceEnabled = false;
   monitorEnabled = false;
@@ -426,6 +449,7 @@ async function connect() {
         if (!profileGeneration.isCurrent(generation)) return;
         const accountConnection = window.normalizeAccountConnection({ account, capabilities });
         currentAccount = account || null;
+        renderAccountNotice();
         els.btnRenewAccount?.classList.toggle("hidden", !accountConnection.canRenew);
         connected = true;
         activeProfileKey = workerUrl;
@@ -495,6 +519,7 @@ els.btnRenewAccount?.addEventListener("click", async () => {
       });
       if (!profileGeneration.isCurrent(generation)) return;
       currentAccount = result.account;
+      renderAccountNotice(result.resume);
       els.btnRenewAccount.classList.add("hidden");
       setStatus("账号已续期，正在恢复配置", "running");
       showToast("账号已续期 15 天", "success");
