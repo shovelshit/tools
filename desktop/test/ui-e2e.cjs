@@ -84,6 +84,43 @@ async function snapshotLayout(page, name, width, outputDirectory) {
   return layout;
 }
 
+async function applyStatusSummary(page, status) {
+  const handler = async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        ok: true,
+        lockServiceEnabled: true,
+        cronMinutes: 5,
+        cronText: "Every 5 minutes",
+        cronMinuteStep: true,
+        status,
+      }),
+    });
+  };
+  await page.route("**/api/status?view=summary", handler);
+  try {
+    const response = page.waitForResponse((item) => item.url().includes("/api/status?view=summary") && item.status() === 200);
+    await page.locator("#btn-refresh").click();
+    await response;
+    const main = status.enabled === false ? "已停止" : (status.lastError ? "检查异常" : "监控中");
+    const detailCount = status.enabled === false ? 1 : 2;
+    await page.waitForFunction(({ main, detailCount }) => {
+      const line = document.querySelector("#status-line");
+      return line?.textContent.includes(main) && line.querySelectorAll(".status-detail").length >= detailCount;
+    }, { main, detailCount });
+  } finally {
+    await page.unroute("**/api/status?view=summary", handler);
+  }
+}
+
+async function assertStatusVisibleAndUnclipped(page) {
+  const status = page.locator("#status-line");
+  assert.equal(await status.locator("span").last().isVisible(), true);
+  const unclipped = await status.evaluate((el) => el.scrollWidth <= el.clientWidth + 1);
+  assert.equal(unclipped, true);
+}
+
 async function main() {
   const outputDirectory = path.resolve(argument("--output") || "");
   if (!argument("--output") || !path.isAbsolute(argument("--output"))) throw new Error("--output must be an absolute directory outside the repository");
@@ -134,11 +171,37 @@ async function main() {
     await page.locator("#movie-list input[type=checkbox]").first().check();
     await page.locator("#btn-step-movie-next").click();
     await page.locator("#push-channel-row label").filter({ hasText: "Server酱" }).click();
+    const channel = await page.locator(".channel-opts").boundingBox();
+    const key = await page.locator("#serverchan-input").boundingBox();
+    assert.ok(Math.abs(channel.x - key.x) <= 1, "channel and key left edges differ");
     await page.locator("#serverchan-input").fill("SCTmockkey");
     await page.locator("#btn-test-push").click();
     await page.waitForFunction(() => document.querySelector("#btn-toggle-monitor")?.disabled === false);
     await page.locator("#btn-toggle-monitor").click();
     await page.waitForFunction(() => document.querySelector("#btn-toggle-monitor")?.textContent === "停止监控");
+    await applyStatusSummary(page, { enabled: true, lastCheck: "2026-09-17T10:00:00.000Z", lastError: null });
+    assert.match(await page.locator("#status-line").textContent(), /预计下批次/);
+    assert.equal(await page.locator("#status-line .status-main").count(), 1);
+    assert.ok(await page.locator("#status-line .status-detail").count() >= 2);
+    await assertStatusVisibleAndUnclipped(page);
+    const longError = "通知服务返回了超长错误信息，必须完整换行显示，<strong>不能生成元素</strong>，不能被顶栏操作按钮挤掉或截断";
+    await applyStatusSummary(page, { enabled: true, lastCheck: "2026-09-17T10:00:00.000Z", lastError: longError });
+    assert.match(await page.locator("#status-line").textContent(), new RegExp(longError));
+    assert.equal(await page.locator("#status-line .status-error").count(), 1);
+    assert.equal(await page.locator("#status-line strong").count(), 0);
+    await assertStatusVisibleAndUnclipped(page);
+    await applyStatusSummary(page, { enabled: false, lastCheck: null, lastError: null });
+    const stoppedStatus = await page.locator("#status-line").textContent();
+    assert.match(stoppedStatus, /已停止.*上次检查 从未/);
+    assert.doesNotMatch(stoppedStatus, /预计下批次/);
+    await assertStatusVisibleAndUnclipped(page);
+    await page.setViewportSize({ width: 320, height: 844 });
+    await applyStatusSummary(page, { enabled: true, lastCheck: "2026-09-17T10:00:00.000Z", lastError: longError });
+    await assertStatusVisibleAndUnclipped(page);
+    const mobileOverflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+    assert.ok(mobileOverflow <= 1, `monitor status overflows at 320px: ${mobileOverflow}`);
+    await page.screenshot({ path: path.join(outputDirectory, "monitor-status-error-mobile.png"), fullPage: true });
+    await page.setViewportSize({ width: 1200, height: 900 });
     await page.locator("#btn-lock-seats").click();
     await page.waitForFunction(() => !document.querySelector("#lock-overlay")?.classList.contains("hidden"));
     await page.locator("#lock-target-date").fill("2026-09-19");

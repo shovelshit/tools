@@ -217,7 +217,8 @@ summary {
 
 .scene-bar {
   min-height: 42px;
-  display: flex;
+  display: grid;
+  grid-template-columns: 25px max-content minmax(220px, 1fr) max-content max-content;
   align-items: center;
   gap: 9px;
   padding: 0 2px 8px;
@@ -279,22 +280,22 @@ summary {
 
 .scene-status {
   min-width: 0;
-  margin-left: auto;
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
+  align-items: baseline;
   gap: 8px;
 }
 
 .status-line {
-  display: inline-flex;
-  align-items: center;
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  align-items: baseline;
   min-width: 0;
   color: var(--muted);
   font-size: 11px;
-  white-space: nowrap;
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .status-line .dot {
@@ -304,6 +305,14 @@ summary {
   margin-right: 5px;
   border-radius: 50%;
   background: var(--muted);
+}
+
+.status-main { font-weight: 650; }
+.status-detail::before { content: " · "; color: var(--muted); }
+.status-error {
+  flex: 1 0 100%;
+  color: var(--danger);
+  overflow-wrap: anywhere;
 }
 
 .st-running { color: var(--success); }
@@ -805,9 +814,10 @@ summary:focus-visible {
 }
 
 .channel-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
   align-items: center;
-  gap: 12px;
+  gap: 4px 12px;
 }
 
 .channel-opts {
@@ -1334,14 +1344,13 @@ summary:focus-visible {
   .brand-mark { grid-column: 1; grid-row: 1; }
   .title-block { grid-column: 2; grid-row: 1; }
   .subtitle,
-  .scene-status .status-line span:last-child,
   .header-actions > a { display: none; }
   .scene-status {
     width: 100%;
     grid-column: 1 / -1;
     grid-row: 2;
-    justify-content: flex-end;
-    margin-left: 0;
+    justify-content: flex-start;
+    align-items: flex-start;
   }
   #worker-security.http-risk {
     max-width: none;
@@ -1438,12 +1447,13 @@ summary:focus-visible {
 
   .form-grid,
   .row-span-all,
+  .channel-row,
   .lock-form-grid { grid-template-columns: 1fr; gap: 4px; }
   .form-grid > label,
   .row-span-all > label,
   .lock-form-grid > label { margin-top: 5px; }
   .row-span-all .push-hint { grid-column: 1; }
-  .channel-row { align-items: stretch; flex-direction: column; gap: 5px; }
+  .channel-row { align-items: stretch; }
   .channel-opts { display: grid; grid-template-columns: 1fr 1fr; }
   .channel-opts span { min-height: 40px; justify-content: center; font-size: 12px; }
   .control-strip { flex-wrap: wrap; }

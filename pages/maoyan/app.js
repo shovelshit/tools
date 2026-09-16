@@ -245,12 +245,29 @@ function log(type, text) {
   els.logPanel.prepend(div);
 }
 
-function setStatus(text, state = "off") {
+function setStatus(text, state = "off", details = [], error = "") {
   if (!els.statusLine) return;
   // state: running(监控中, 绿) / stopped(已停止或连接失败, 红) / off(未连接, 灰)
   els.statusLine.className = `status-line st-${state}`;
-  els.statusLine.innerHTML = '<span class="dot"></span><span></span>';
-  els.statusLine.lastChild.textContent = text;
+  const dot = document.createElement("span");
+  dot.className = "dot";
+  const main = document.createElement("span");
+  main.className = "status-main";
+  main.textContent = text;
+  const detailItems = details.filter(Boolean).map((detail) => {
+    const item = document.createElement("span");
+    item.className = "status-detail";
+    item.textContent = detail;
+    return item;
+  });
+  const nodes = [dot, main, ...detailItems];
+  if (error) {
+    const errorItem = document.createElement("span");
+    errorItem.className = "status-error";
+    errorItem.textContent = `失败原因：${error}`;
+    nodes.push(errorItem);
+  }
+  els.statusLine.replaceChildren(...nodes);
 }
 
 function setConnectionState({ profileKey = "", workerUrl = "" } = {}) {
@@ -395,13 +412,7 @@ function nextBatchText() {
   const t = new Date(now.getTime() + add * 60000);
   const hm = t.toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit" });
   const crossDay = t.getDate() !== now.getDate() ? "明天 " : "";
-  return `下批次检查时间 ${crossDay}${hm}`;
-}
-
-// 组合状态文案: 非空片段用 " · " 连接, 避免词语粘连
-function statusText(main, extra = []) {
-  const parts = extra.filter(Boolean);
-  return parts.length ? `${main} · ${parts.join(" · ")}` : main;
+  return `预计下批次 ${crossDay}${hm}`;
 }
 
 // ---------------- 登录 / 连接 ----------------
@@ -467,15 +478,20 @@ async function connect() {
         // 免令牌模式下没有令牌可存, 记一个标记供刷新后自动重连
         if (openMode) localStorage.setItem("authMode", "open");
         else localStorage.removeItem("authMode");
-        const lastTxt = st.status.lastCheck ? fmtClock(new Date(st.status.lastCheck).getTime()) : "从未";
+        const stopped = st.status.enabled === false;
+        const lastAt = st.status.lastCheck || st.status.lastCheckTs;
+        const lastTxt = lastAt ? fmtClock(new Date(lastAt).getTime()) : "从未";
+        const monitorMain = stopped ? "已停止" : st.status.lastError ? "检查异常" : "监控中";
         const restrictedText = account?.accountStatus === "expired" ? "账号已到期，可续期后恢复"
           : account?.accountStatus === "suspended" ? "账号已暂停"
             : "账号当前不可监控";
         setStatus(
           accountConnection.canMonitor
-            ? statusText("监控中", [`上次检查 ${lastTxt}`, nextBatchText(), openMode && "免令牌模式"])
+            ? monitorMain
             : restrictedText,
-          accountConnection.canMonitor ? "running" : "stopped"
+          accountConnection.canMonitor ? (monitorMain === "监控中" ? "running" : "stopped") : "stopped",
+          accountConnection.canMonitor ? [`上次检查 ${lastTxt}`, !stopped && nextBatchText(), openMode && "免令牌模式"] : [],
+          accountConnection.canMonitor && !stopped ? st.status.lastError : ""
         );
         enterMainPage();
         lockController.syncAvailability();
@@ -839,10 +855,11 @@ els.btnToggleMonitor.addEventListener("click", async () => {
           : "监控已停止，云端不再自动检查（配置已保留）"
       );
       setStatus(
-        statusText(monitorEnabled ? "监控中" : "已停止", [
+        monitorEnabled ? "监控中" : "已停止",
+        monitorEnabled ? "running" : "stopped",
+        [
           monitorEnabled && nextBatchText(),
-        ]),
-        monitorEnabled ? "running" : "stopped"
+        ]
       );
       // 锁座入口与监控联动: 即时刷新可用状态
       lockController.syncAvailability();
@@ -1278,23 +1295,22 @@ function applyStatusSummary(data) {
   const { status = {} } = data;
   currentAccount = data.account || currentAccount;
   lockServiceEnabled = data.lockServiceEnabled === true;
-  lockController.syncAvailability();
   syncCronInfo(data);
   const stopped = status.enabled === false;
   const lastAt = status.lastCheck || status.lastCheckTs;
   const lastTxt = lastAt ? fmtClock(new Date(lastAt).getTime()) : "从未";
   const main = stopped ? "已停止" : status.lastError ? "检查异常" : "监控中";
-  setStatus(statusText(main, [
+  setStatus(main, main === "监控中" ? "running" : "stopped", [
     `上次检查 ${lastTxt}`,
     !stopped && nextBatchText(),
-    !stopped && status.lastError && `失败原因: ${status.lastError}`,
-  ]), main === "监控中" ? "running" : "stopped");
+  ], !stopped ? status.lastError : "");
   if (stopped !== !monitorEnabled) {
     monitorEnabled = !stopped;
     updateMonitorBtn();
   } else {
     syncPollingState();
   }
+  lockController.syncAvailability();
 }
 
 function renderChangePage(page, { reset = false } = {}) {

@@ -211,6 +211,21 @@ test("monitor status no longer uses the retired independent deadline", () => {
   assert.match(source, /await refreshChanges\(\);/);
 });
 
+test("next monitoring batch is labelled as an estimate", () => {
+  const source = readSource("app.js");
+  const start = source.indexOf("function nextBatchText()");
+  const end = source.indexOf("\nfunction ", start + 1);
+  const RealDate = Date;
+  function FixedDate(...args) {
+    return new RealDate(...(args.length ? args : ["2026-09-17T10:03:00+08:00"]));
+  }
+  FixedDate.prototype = RealDate.prototype;
+  const context = { Date: FixedDate, cronMinuteStep: true, cronMinutes: 5 };
+  require("node:vm").runInNewContext(source.slice(start, end), context);
+
+  assert.match(context.nextBatchText(), /^预计下批次 /);
+});
+
 test("status polling uses incremental endpoints and has no fixed one-minute interval", () => {
   const source = readSource("app.js");
   const html = readSource("index.html");
