@@ -53,16 +53,21 @@ test("catalog starts only after Store login and logout invalidates in-flight wor
 
 test("a stale login reply cannot restore a session after logout", async () => {
   const login = deferred();
+  const calls = [];
   const fetchImpl = async (url) => {
+    calls.push(url);
     if (url === "/store/auth/session") return login.promise;
     return { ok: true, json: async () => ({ ok: true }) };
   };
   const auth = load(fetchImpl);
   const controller = auth.createController({ fetchImpl });
   const pending = controller.login("store-key");
-  await controller.logout();
+  const loggingOut = controller.logout();
+  await Promise.resolve();
+  assert.deepEqual(calls, ["/store/auth/session"]);
   login.resolve({ ok: true, json: async () => ({ ok: true, account: { accountStatus: "active" } }) });
-  await pending;
+  await Promise.all([pending, loggingOut]);
+  assert.deepEqual(calls, ["/store/auth/session", "/store/auth/logout"]);
   assert.equal(controller.isAuthenticated(), false);
   assert.equal(auth.events.at(-1).type, "store:unauthenticated");
 });

@@ -65,6 +65,21 @@ async function main() {
     await screenshot(page, output, "store-login-desktop", 1200, 900);
     await screenshot(page, output, "store-login-mobile", 390, 844);
 
+    const pendingLogin = worker.deferNextStoreLogin();
+    await page.evaluate(() => {
+      window.__storeRaceController = window.StoreAuth.createController();
+      window.__storeRaceLogin = window.__storeRaceController.login("store-token");
+    });
+    await pendingLogin.started;
+    await page.evaluate(() => {
+      window.__storeRaceLogout = window.__storeRaceController.logout();
+    });
+    await page.waitForTimeout(50);
+    pendingLogin.release();
+    await page.evaluate(() => Promise.all([window.__storeRaceLogin, window.__storeRaceLogout]));
+    assert.equal((await context.cookies(web.url)).some((cookie) => cookie.name === "store_session"), false);
+    assert.equal(await page.evaluate(() => fetch("/store/auth/session").then((response) => response.status)), 401);
+
     await login(page, "expired-store-token");
     await page.locator("#store-renew").waitFor({ state: "visible" });
     await screenshot(page, output, "store-expired", 390, 844);
@@ -75,6 +90,34 @@ async function main() {
     await screenshot(page, output, "store-catalog-desktop", 1200, 900);
     await screenshot(page, output, "store-catalog-mobile", 390, 844);
     await assertCatalogClearsHeader(page);
+
+    const staleDetail = worker.deferNextStoreDetail();
+    await page.evaluate(() => openDetail("/CarMax/stale.apk", false));
+    await staleDetail.started;
+    await page.locator("#store-header-logout").evaluate((button) => button.click());
+    await page.locator("#store-login-form").waitFor({ state: "visible" });
+    await login(page, "store-token");
+    await page.locator(".file-card").waitFor();
+    await page.evaluate(() => openDetail("/CarMax/fresh.apk", false));
+    await page.locator(".download-btn").waitFor();
+    assert.match(await page.locator(".download-btn").getAttribute("href"), /fresh\.apk/);
+    staleDetail.release();
+    await page.waitForTimeout(50);
+    assert.match(await page.locator(".download-btn").getAttribute("href"), /fresh\.apk/);
+
+    await page.evaluate(() => openDetail("/CarMax/first.txt", false));
+    await page.locator(".preview-btn").waitFor();
+    const stalePreview = worker.deferNextStoreFile();
+    await page.locator(".preview-btn").click();
+    await stalePreview.started;
+    await page.evaluate(() => loadPreview("txt", "http://appstore.cnmlynk.org/second.txt"));
+    await page.evaluate(() => loadPreview("txt", "http://appstore.cnmlynk.org/second.txt"));
+    await page.locator(".preview-txt").waitFor();
+    assert.match(await page.locator(".preview-txt").textContent(), /second\.txt preview/);
+    stalePreview.release();
+    await page.waitForTimeout(50);
+    assert.match(await page.locator(".preview-txt").textContent(), /second\.txt preview/);
+    await page.evaluate(() => closeModal());
 
     worker.setStoreMode("empty");
     await page.locator("#refreshBtn").click();

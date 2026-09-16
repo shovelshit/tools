@@ -73,9 +73,9 @@ async function defaultSend(env, row, payload) {
 export async function deliverOutbox(env, { nowMs = Date.now(), limit = 10, send } = {}) {
   const pageSize = Math.min(10, Math.max(1, Number(limit) || 10));
   const { results } = await env.DB.prepare(
-    "SELECT id,event_key,user_id,kind,payload,credential_version,state,attempts,next_attempt_at,lease_until " +
-    "FROM notification_outbox WHERE (state='pending' AND next_attempt_at<=?) " +
-    "OR (state='sending' AND lease_until<=?) ORDER BY id LIMIT ?"
+    "SELECT o.id,o.event_key,o.user_id,o.kind,o.payload,o.credential_version,o.state,o.attempts,o.next_attempt_at,o.lease_until " +
+    "FROM notification_outbox o JOIN users u ON u.id=o.user_id WHERE u.business_line='maoyan' AND " +
+    "((o.state='pending' AND o.next_attempt_at<=?) OR (o.state='sending' AND o.lease_until<=?)) ORDER BY o.id LIMIT ?"
   ).bind(Number(nowMs), Number(nowMs), pageSize).all();
   let sent = 0;
   let failed = 0;
@@ -104,8 +104,9 @@ export async function deliverOutbox(env, { nowMs = Date.now(), limit = 10, send 
     }
   }
   const pendingRow = await env.DB.prepare(
-    "SELECT COUNT(*) AS n,MIN(CASE WHEN state='sending' THEN lease_until ELSE next_attempt_at END) AS next_at " +
-    "FROM notification_outbox WHERE state IN ('pending','sending')"
+    "SELECT COUNT(*) AS n,MIN(CASE WHEN o.state='sending' THEN o.lease_until ELSE o.next_attempt_at END) AS next_at " +
+    "FROM notification_outbox o JOIN users u ON u.id=o.user_id " +
+    "WHERE u.business_line='maoyan' AND o.state IN ('pending','sending')"
   ).first();
   return {
     sent, failed, pending: Number(pendingRow?.n || 0),

@@ -52,6 +52,30 @@ test("successful delivery is not repeated", async () => {
   assert.equal((await env.DB.prepare("SELECT state FROM notification_outbox").first()).state, "sent");
 });
 
+test("notification delivery ignores Store outbox rows", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  const maoyan = await seedAccount(env, { expiresAt: NOW + 60_000, businessLine: "maoyan" });
+  const store = await seedAccount(env, { expiresAt: NOW + 60_000, businessLine: "store" });
+  await enqueueNotification(env.DB, {
+    eventKey: "maoyan:event", userId: maoyan.account.id, kind: "new-shows",
+    title: "maoyan", content: "allowed", credentialVersion: 1, nowMs: NOW
+  });
+  await enqueueNotification(env.DB, {
+    eventKey: "store:event", userId: store.account.id, kind: "new-shows",
+    title: "store", content: "excluded", credentialVersion: 1, nowMs: NOW
+  });
+  const delivered = [];
+  const result = await deliverOutbox(env, {
+    nowMs: NOW,
+    send: async (_config, title, _content, row) => delivered.push({ title, userId: row.user_id })
+  });
+  assert.deepEqual(delivered, [{ title: "maoyan", userId: maoyan.account.id }]);
+  assert.deepEqual(result, { sent: 1, failed: 0, pending: 0, nextAttemptAt: null });
+  const storeRow = await env.DB.prepare("SELECT state,attempts FROM notification_outbox WHERE user_id=?")
+    .bind(store.account.id).first();
+  assert.deepEqual([storeRow.state, Number(storeRow.attempts)], ["pending", 0]);
+});
+
 test("account expiry reminders are idempotent and keyed to the current expiry", async () => {
   const env = await createAccountEnv({ nowMs: NOW });
   const expiresAt = NOW + 86400000;

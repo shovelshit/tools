@@ -150,9 +150,11 @@ export async function handleStoreAuth(request, env, url) {
   }
   if (url.pathname === "/store/auth/logout" && request.method === "POST") {
     requireStoreSameOrigin(request, url);
-    await storePrincipal(request, env, nowMs);
-    await env.DB.prepare("DELETE FROM store_sessions WHERE token_hash=?")
-      .bind(await hashAccessKey(cookieValue(request))).run();
+    const raw = cookieValue(request);
+    if (raw) {
+      await env.DB.prepare("DELETE FROM store_sessions WHERE token_hash=?")
+        .bind(await hashAccessKey(raw)).run();
+    }
     return response({ ok: true }, 200, { "Set-Cookie": sessionCookie("", url, 0) });
   }
   if (url.pathname === "/store/auth/renew" && request.method === "POST") {

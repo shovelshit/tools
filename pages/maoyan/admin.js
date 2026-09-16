@@ -24,6 +24,15 @@ let accounts = [];
 let capacity = null;
 let settings = null;
 let nextAfter = null;
+let businessGeneration = 0;
+
+function captureBusinessScope() {
+  return { businessLine: els.businessLine.value, generation: businessGeneration };
+}
+
+function isCurrentBusinessScope(scope) {
+  return scope.generation === businessGeneration && scope.businessLine === els.businessLine.value;
+}
 
 async function adminApi(path, options = {}) {
   const headers = { "X-Admin-Token": adminToken };
@@ -66,31 +75,38 @@ async function login() {
   }
 }
 
-function queryPath(after = "") {
+function queryPath(after = "", businessLine = els.businessLine.value) {
   const params = new URLSearchParams({ limit: "20" });
-  params.set("businessLine", els.businessLine.value);
+  params.set("businessLine", businessLine);
   if (els.search.value.trim()) params.set("q", els.search.value.trim());
   if (els.statusFilter.value) params.set("status", els.statusFilter.value);
   if (after) params.set("after", after);
   return `/api/admin/accounts?${params}`;
 }
 
-async function refreshAccounts({ reset = true } = {}) {
+async function refreshAccounts({ reset = true, scope = captureBusinessScope() } = {}) {
+  if (!isCurrentBusinessScope(scope)) return false;
   if (reset) renderMessage("加载中...");
-  const data = await adminApi(queryPath(reset ? "" : nextAfter || ""));
+  const after = reset ? "" : nextAfter || "";
+  const data = await adminApi(queryPath(after, scope.businessLine));
+  if (!isCurrentBusinessScope(scope)) return false;
   accounts = reset ? data.accounts : accounts.concat(data.accounts || []);
   capacity = data.capacity;
   nextAfter = data.nextAfter || null;
   renderAccounts();
+  return true;
 }
 
-async function loadSettings() {
-  const businessLine = encodeURIComponent(els.businessLine.value);
+async function loadSettings(scope = captureBusinessScope()) {
+  if (!isCurrentBusinessScope(scope)) return false;
+  const businessLine = encodeURIComponent(scope.businessLine);
   const data = await adminApi(`/api/admin/settings?businessLine=${businessLine}`);
+  if (!isCurrentBusinessScope(scope)) return false;
   settings = data.settings;
   els.capacityMax.value = settings.maxUsers;
   els.validDays.value = settings.defaultValidDays;
   els.publicSignup.checked = settings.publicSignupEnabled === true;
+  return true;
 }
 
 async function loadResources() {
@@ -189,24 +205,27 @@ function renderMessage(text) {
   els.tbody.appendChild(row);
 }
 
-async function updateAccount(account, patch) {
+async function updateAccount(account, patch, scope = captureBusinessScope()) {
+  if (!isCurrentBusinessScope(scope) || (account.businessLine && account.businessLine !== scope.businessLine)) return;
   try {
     await adminApi("/api/admin/accounts/update", {
       method: "POST",
       body: JSON.stringify({ id: account.userId, expectedVersion: account.accountVersion, patch })
     });
-    await refreshAccounts({ reset: true });
+    if (isCurrentBusinessScope(scope)) await refreshAccounts({ reset: true, scope });
   } catch (error) {
+    if (!isCurrentBusinessScope(scope)) return;
     showToast(`操作失败：${error.message}`, "error");
-    if (error.code === "VERSION_CONFLICT") await refreshAccounts({ reset: true });
+    if (error.code === "VERSION_CONFLICT") await refreshAccounts({ reset: true, scope });
   }
 }
 
 async function revokeAccount(account) {
+  const scope = captureBusinessScope();
   const ok = await showConfirm(`确定撤销「${account.remark || account.userId}」？撤销后不能恢复。`, {
     title: "撤销账号", danger: true, okText: "撤销"
   });
-  if (ok) await updateAccount(account, { state: "revoked" });
+  if (ok && isCurrentBusinessScope(scope)) await updateAccount(account, { state: "revoked" }, scope);
 }
 
 async function openMonitor() {
@@ -229,6 +248,7 @@ async function openMonitor() {
 }
 
 els.btnAdd.addEventListener("click", async () => {
+  const scope = captureBusinessScope();
   els.btnAdd.disabled = true;
   try {
     const created = await adminApi("/api/admin/accounts/create", {
@@ -236,14 +256,14 @@ els.btnAdd.addEventListener("click", async () => {
       body: JSON.stringify({
         remark: els.remark.value.trim(),
         requestId: crypto.randomUUID(),
-        businessLine: els.businessLine.value
+        businessLine: scope.businessLine
       })
     });
     if (!created.key) throw new Error("账号已创建，但访问密钥仅在首次响应显示");
     try { await copyText(created.key); } catch {}
     await showDialog(`访问密钥已复制，仅显示一次：\n\n${created.key}`, { title: "账号已创建", type: "success" });
     els.remark.value = "";
-    await refreshAccounts({ reset: true });
+    if (isCurrentBusinessScope(scope)) await refreshAccounts({ reset: true, scope });
   } catch (error) {
     showToast(`新增失败：${error.message}`, "error");
   } finally {
@@ -253,23 +273,27 @@ els.btnAdd.addEventListener("click", async () => {
 
 els.btnSaveSettings.addEventListener("click", async () => {
   if (!settings) return;
+  const scope = captureBusinessScope();
+  const currentSettings = settings;
   try {
-    const data = await adminApi(`/api/admin/settings?businessLine=${encodeURIComponent(els.businessLine.value)}`, {
+    const data = await adminApi(`/api/admin/settings?businessLine=${encodeURIComponent(scope.businessLine)}`, {
       method: "POST",
       body: JSON.stringify({
-        expectedVersion: settings.version,
-        businessLine: els.businessLine.value,
+        expectedVersion: currentSettings.version,
+        businessLine: scope.businessLine,
         maxUsers: Number(els.capacityMax.value),
         defaultValidDays: Number(els.validDays.value),
         publicSignupEnabled: els.publicSignup.checked
       })
     });
+    if (!isCurrentBusinessScope(scope)) return;
     settings = data.settings;
     showToast("账号设置已保存", "success");
-    await refreshAccounts({ reset: true });
+    await refreshAccounts({ reset: true, scope });
   } catch (error) {
+    if (!isCurrentBusinessScope(scope)) return;
     showToast(`保存失败：${error.message}`, "error");
-    await loadSettings().catch(() => {});
+    await loadSettings(scope).catch(() => {});
   }
 });
 
@@ -280,9 +304,13 @@ els.search.addEventListener("input", () => {
 });
 els.statusFilter.addEventListener("change", () => refreshAccounts({ reset: true }).catch((error) => showToast(error.message, "error")));
 els.businessLine.addEventListener("change", () => {
+  businessGeneration += 1;
+  const scope = captureBusinessScope();
   accounts = [];
+  capacity = null;
+  settings = null;
   nextAfter = null;
-  Promise.all([refreshAccounts({ reset: true }), loadSettings()])
+  Promise.all([refreshAccounts({ reset: true, scope }), loadSettings(scope)])
     .catch((error) => showToast(error.message, "error"));
 });
 els.btnRefresh.addEventListener("click", () => Promise.all([refreshAccounts({ reset: true }), loadSettings(), loadResources()]));

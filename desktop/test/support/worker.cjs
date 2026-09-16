@@ -20,6 +20,9 @@ async function startMockWorker({ rejectUpload = false } = {}) {
     catalogRequests: 0,
     mode: "normal",
     deferred: null,
+    loginDeferred: null,
+    detailDeferred: null,
+    fileDeferred: null,
     account: null,
   };
   const server = http.createServer(async (request, response) => {
@@ -35,6 +38,10 @@ async function startMockWorker({ rejectUpload = false } = {}) {
       try { body = JSON.parse(text || "{}"); } catch {}
       const authenticated = /(?:^|;\s*)store_session=valid(?:;|$)/.test(request.headers.cookie || "");
       if (url.pathname === "/store/auth/session" && request.method === "POST") {
+        if (store.loginDeferred) {
+          store.loginDeferred.startedResolve();
+          await store.loginDeferred.promise;
+        }
         const expired = body.key === "expired-store-token";
         if (body.key !== "store-token" && !expired) return reply({ ok: false, code: "UNAUTHORIZED", error: "访问密钥无效" }, 401);
         store.account = {
@@ -70,14 +77,34 @@ async function startMockWorker({ rejectUpload = false } = {}) {
         return reply({ code: 200, data: { content, total: content.length } });
       }
       if (url.pathname === "/store/api/fs/get") {
+        if (store.detailDeferred) {
+          const pending = store.detailDeferred;
+          store.detailDeferred = null;
+          pending.startedResolve();
+          await pending.promise;
+        }
+        const requestedPath = String(body.path || "/Navigation.apk");
+        const name = requestedPath.split("/").pop() || "Navigation.apk";
         return reply({ code: 200, data: {
-          name: "Navigation.apk", size: 1048576, modified: "2026-09-16T04:00:00Z",
-          created: "2026-09-16T04:00:00Z", provider: "Mock", raw_url: "http://appstore.cnmlynk.org/Navigation.apk"
+          name, size: 1048576, modified: "2026-09-16T04:00:00Z",
+          created: "2026-09-16T04:00:00Z", provider: "Mock", raw_url: `http://appstore.cnmlynk.org/${encodeURIComponent(name)}`
         } });
       }
       if (url.pathname === "/store/file") {
-        response.writeHead(200, { "Content-Type": "application/octet-stream", "Content-Disposition": "attachment; filename=Navigation.apk" });
-        response.end("mock-apk");
+        if (store.fileDeferred) {
+          const pending = store.fileDeferred;
+          store.fileDeferred = null;
+          pending.startedResolve();
+          await pending.promise;
+        }
+        const target = new URL(url.searchParams.get("url"));
+        const name = decodeURIComponent(target.pathname.split("/").pop() || "Navigation.apk");
+        const text = name.endsWith(".txt");
+        response.writeHead(200, {
+          "Content-Type": text ? "text/plain; charset=utf-8" : "application/octet-stream",
+          "Content-Disposition": `attachment; filename=${name}`
+        });
+        response.end(text ? `${name} preview` : "mock-apk");
         return;
       }
       return reply({ error: "Unknown Store API" }, 404);
@@ -175,6 +202,45 @@ async function startMockWorker({ rejectUpload = false } = {}) {
       const promise = new Promise((resolve) => { release = resolve; });
       store.deferred = { promise, release: () => { store.deferred = null; release(); } };
       return store.deferred;
+    },
+    deferNextStoreLogin() {
+      let release;
+      let startedResolve;
+      const promise = new Promise((resolve) => { release = resolve; });
+      const started = new Promise((resolve) => { startedResolve = resolve; });
+      store.loginDeferred = {
+        promise,
+        started,
+        startedResolve,
+        release: () => { store.loginDeferred = null; release(); }
+      };
+      return store.loginDeferred;
+    },
+    deferNextStoreDetail() {
+      let release;
+      let startedResolve;
+      const promise = new Promise((resolve) => { release = resolve; });
+      const started = new Promise((resolve) => { startedResolve = resolve; });
+      store.detailDeferred = {
+        promise,
+        started,
+        startedResolve,
+        release: () => { store.detailDeferred = null; release(); }
+      };
+      return store.detailDeferred;
+    },
+    deferNextStoreFile() {
+      let release;
+      let startedResolve;
+      const promise = new Promise((resolve) => { release = resolve; });
+      const started = new Promise((resolve) => { startedResolve = resolve; });
+      store.fileDeferred = {
+        promise,
+        started,
+        startedResolve,
+        release: () => { store.fileDeferred = null; release(); }
+      };
+      return store.fileDeferred;
     },
     close: () => new Promise((resolve, reject) => { server.close((error) => error ? reject(error) : resolve()); server.closeAllConnections(); })
   };

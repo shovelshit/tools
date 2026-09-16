@@ -1051,6 +1051,7 @@
     history: [],   // 路径历史栈，用于返回上级
     viewMode: localStorage.getItem('store:viewMode') || 'list', // 'grid' | 'list'
   };
+  let modalRequestId = 0;
 
   // ===== 切换视图 =====
   function setView(mode) {
@@ -1408,6 +1409,11 @@
 
     const overlay = document.getElementById('modalOverlay');
     const content = document.getElementById('modalContent');
+    const authGeneration = storeSession.generation();
+    const requestId = ++modalRequestId;
+    const isCurrentModal = () => requestId === modalRequestId &&
+      storeSession.isCurrent(authGeneration) &&
+      content === document.getElementById('modalContent');
     const name = filePath.split('/').pop();
     const extUpper = (name.split('.').pop() || '').toUpperCase();
     const extLower = extUpper.toLowerCase();
@@ -1420,6 +1426,7 @@
     if (IMAGE_EXTS.has(extLower)) {
       try {
         const data = await fetchFileDetail(filePath);
+        if (!isCurrentModal()) return;
         const rawUrl = data.raw_url || '';
         document.getElementById('modalDetailArea').innerHTML = rawUrl ? `
           <div style="text-align:center;padding:12px">
@@ -1434,6 +1441,7 @@
           </div>` :
           `<div style="text-align:center;padding:20px;color:var(--text-muted);font-size:14px">⚠️ 暂时无法获取图片链接</div>`;
       } catch (e) {
+        if (!isCurrentModal()) return;
         document.getElementById('modalDetailArea').innerHTML =
           `<div style="text-align:center;padding:20px;color:var(--text-muted);font-size:14px">⚠️ 加载失败：${escapeHtml(e.message)}</div>`;
       }
@@ -1442,6 +1450,7 @@
 
     try {
       const data = await fetchFileDetail(filePath);
+      if (!isCurrentModal()) return;
       const ext = (data.name.split('.').pop() || '').toUpperCase();
 
       // 更新标题栏（补充 provider）
@@ -1501,6 +1510,7 @@
         `}
       `;
     } catch (err) {
+      if (!isCurrentModal()) return;
       const area = document.getElementById('modalDetailArea');
       if (area) area.innerHTML = `
         <div style="text-align:center;padding:32px;color:var(--text-muted)">
@@ -1536,6 +1546,14 @@
   async function loadPreview(type, url) {
     const container = document.getElementById('previewContainer');
     if (!container) return;
+    const authGeneration = storeSession.generation();
+    const requestId = Number(container._previewRequestId || 0) + 1;
+    const ownerModalId = modalRequestId;
+    container._previewRequestId = requestId;
+    const isCurrentPreview = () => ownerModalId === modalRequestId &&
+      requestId === container._previewRequestId &&
+      storeSession.isCurrent(authGeneration) &&
+      container === document.getElementById('previewContainer');
 
     // 如果已展开则收起
     if (container._open) {
@@ -1545,7 +1563,7 @@
     }
     container._open = true;
 
-    const CLOSE_BTN = `<button class="preview-close-btn" onclick="document.getElementById('previewContainer').innerHTML='';document.getElementById('previewContainer')._open=false;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>`;
+    const CLOSE_BTN = `<button class="preview-close-btn" onclick="closePreview()"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>`;
 
     if (type === 'image') {
       container.innerHTML = `
@@ -1585,6 +1603,7 @@
         throw new Error(`HTTP ${resp.status}`);
       }
       const text = await resp.text();
+      if (!isCurrentPreview()) return;
 
       let bodyHtml = '';
       let toolbarLabel = '';
@@ -1603,6 +1622,7 @@
           <div class="preview-body">${bodyHtml}</div>
         </div>`;
     } catch (err) {
+      if (!isCurrentPreview()) return;
       container.innerHTML = `
         <div class="preview-wrap">
           <div class="preview-body" style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">⚠️ 预览失败：${escapeHtml(err.message)}</div>
@@ -1610,8 +1630,17 @@
     }
   }
 
+  function closePreview() {
+    const container = document.getElementById('previewContainer');
+    if (!container) return;
+    container._previewRequestId = Number(container._previewRequestId || 0) + 1;
+    container.innerHTML = '';
+    container._open = false;
+  }
+
   function closeModal(event) {
     if (event && event.target !== document.getElementById('modalOverlay')) return;
+    modalRequestId += 1;
     document.getElementById('modalOverlay').classList.remove('open');
   }
 
@@ -1654,7 +1683,7 @@
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
       document.getElementById('lightbox').classList.remove('open');
-      document.getElementById('modalOverlay').classList.remove('open');
+      closeModal();
     }
   });
 
@@ -1680,12 +1709,14 @@
     loadList(CATEGORIES[0].path, 1).then(() => preloadBadges());
   });
   window.addEventListener('store:unauthenticated', () => {
+    modalRequestId += 1;
     state.loading = false;
     state._lastItems = [];
     document.getElementById('store-account').classList.add('auth-hidden');
     document.getElementById('fileGrid').innerHTML = '';
     document.getElementById('pagination').innerHTML = '';
     document.getElementById('modalOverlay').classList.remove('open');
+    document.getElementById('modalContent').innerHTML = '';
   });
   storeSession = window.StoreAuth.init(document);
   document.getElementById('store-header-logout').addEventListener('click', () => storeSession.logout());

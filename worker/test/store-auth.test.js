@@ -59,6 +59,19 @@ test("Store session grants only its owner account inspection and logout", async 
   assert.equal((await worker.fetch(storeRequest("/store/auth/session", { cookie }), env)).status, 401);
 });
 
+test("Store logout clears an invalid browser cookie idempotently", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  env.NOW_MS = String(NOW);
+  const response = await worker.fetch(storeRequest("/store/auth/logout", {
+    method: "POST",
+    cookie: "store_session=stale-session",
+    headers: { Origin: "https://worker.example" }
+  }), env);
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("Set-Cookie"), /^store_session=; HttpOnly; SameSite=Lax; Path=\/store\/; Max-Age=0; Secure$/);
+  assert.deepEqual(await response.json(), { ok: true });
+});
+
 test("Store session mutation rejects a foreign origin and non-JSON login", async () => {
   const env = await createAccountEnv({ nowMs: NOW });
   env.NOW_MS = String(NOW);

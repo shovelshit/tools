@@ -5,6 +5,7 @@
     let revision = 0;
     let active = false;
     let account = null;
+    const pendingLogins = new Set();
 
     function emit(type, detail) {
       dispatch(new root.CustomEvent(type, { detail }));
@@ -47,15 +48,23 @@
 
     async function login(key) {
       const requestRevision = ++revision;
-      const response = await fetchImpl("/store/auth/session", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ key: String(key || "").trim() })
-      });
-      const data = await responseJson(response);
-      transition(data.account, requestRevision);
-      return data.account;
+      const operation = (async () => {
+        const response = await fetchImpl("/store/auth/session", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ key: String(key || "").trim() })
+        });
+        const data = await responseJson(response);
+        transition(data.account, requestRevision);
+        return data.account;
+      })();
+      pendingLogins.add(operation);
+      try {
+        return await operation;
+      } finally {
+        pendingLogins.delete(operation);
+      }
     }
 
     async function renew() {
@@ -75,6 +84,7 @@
     async function logout() {
       const requestRevision = ++revision;
       transition(null, requestRevision);
+      await Promise.allSettled([...pendingLogins]);
       try {
         await fetchImpl("/store/auth/logout", {
           method: "POST",
