@@ -1,66 +1,72 @@
-# D1 全链路迁移部署手册（feature/d1-migration 分支）
+# Cloudflare 独立部署
 
-用户状态（tokens / config / status / snapshot / changes / seatfb / lock-rule）已从 KV 迁移到 D1。
-KV 仅保留两类数据：`maoyan-session` 加密会话信封、`cache:cinemas:*` 影院搜索缓存（带 TTL）。
+本项目使用 Worker Static Assets、D1、KV、四个 Durable Object 和 Cron。默认模板关闭公开申请；仅管理员自用时不需要 Turnstile。请在自己的 Cloudflare 账号中创建资源，不要复用仓库维护者的生产资源。
 
-## 为什么迁 D1
+## 1. Fork 与安装
 
-| | KV（免费档） | D1（免费档） |
-|---|---|---|
-| 写入 | **1,000/天**（硬顶） | **100,000 行/天** |
-| 读取 | 100,000/天 | 5,000,000 行/天 |
-| 附带收益 | changes 上限 100 条 | 变化记录全量历史（读取仍返回最新 100 条，API 形状不变） |
+```bash
+git clone https://github.com/<your-account>/tools.git
+cd tools
+npm --prefix worker ci
+cp worker/wrangler.example.toml worker/wrangler.local.toml
+```
 
-main 分支的 KV 条件写优化后约 40 写/天/令牌，10+ 令牌内安全；本分支是规模化铺路，**建议活跃令牌接近 5-10 个或需要完整场次历史时再上线**。
+`wrangler.local.toml` 已被忽略，不会提交。后续命令都显式使用该文件。
 
-## 上线步骤
+## 2. 创建自己的 D1 和 KV
 
 ```bash
 cd worker
-
-# 1. 建库（输出 database_id）
-npx wrangler d1 create tools-db
-
-# 2. 把 database_id 填入 wrangler.toml 的 [[d1_databases]]（替换 REPLACE_WITH_REAL_D1_ID）
-
-# 3. 建表（远程）
-npx wrangler d1 execute tools-db --remote --file schema.sql
-
-# 4. 部署本分支
-npx wrangler deploy
-
-# 5. 迁移存量 KV 数据（幂等，可重复执行；不删任何 KV 数据）
-curl -X POST https://ltools.asia/api/admin/migrate-kv-to-d1 -H "X-Admin-Token: <ADMIN_TOKEN>"
-# 返回: {"ok":true,"tokens":N,"configs":N,"statuses":N,"snapshots":N,"changes":N,"lockRules":N,"seatFeedback":N}
-
-# 6. 验证: 页面登录 / 立即检查 / 状态读取 / 锁座链路；观察一天后再执行第 7 步
-# 7. （可选）确认稳定后清理 KV 旧键：仅 u: 与 seatfb: 前缀与 meta:tokens（勿删 maoyan-session 与 cache:cinemas:*）
+npx wrangler d1 create my-maoyan-db
+npx wrangler kv namespace create MAOYAN_KV
 ```
 
-## 回滚
+把命令返回的 D1 `database_id` 和 KV `id` 写入 `wrangler.local.toml`，不要保留 `REPLACE_WITH_*`。四个 Durable Object 及迁移声明已在模板中列出，无需单独创建。
 
-重新部署 main（KV 版）即可：迁移端点全程只读 KV、不删任何 KV 键，KV 数据始终是完整快照。
-D1 侧数据残留无害（KV 版代码不读 D1）。
+## 3. 配置 secret
 
-## 本地验证
+依次运行并输入随机强值，值不会写入配置文件：
 
 ```bash
-cd worker
-npx wrangler d1 execute tools-db --local --file schema.sql   # 本地建表
-npx wrangler dev                                              # 本地服务(http://127.0.0.1:8787)
-# .dev.vars 提供 ADMIN_TOKEN / SESSION_ENCRYPTION_KEY / LOCK_SERVICE_ENABLED（已被 .gitignore 排除）
+npx wrangler secret put ADMIN_TOKEN --config wrangler.local.toml
+npx wrangler secret put SESSION_ENCRYPTION_KEY --config wrangler.local.toml
+npx wrangler secret put ENROLLMENT_HMAC_KEY --config wrangler.local.toml
 ```
 
-## 代码结构
+`ADMIN_TOKEN` 用于管理员登录；`SESSION_ENCRYPTION_KEY` 加密猫眼登录态和通知密钥；`ENROLLMENT_HMAC_KEY` 只用于申请标识摘要。三者不要复用。
 
-- `src/maoyan/db.js`：唯一 D1 访问层（函数首参一律是数据库实例，全部 UPSERT，迁移幂等）
-- `src/maoyan/migrate.js`：KV→D1 迁移逻辑（maoyan-session / cache:cinemas 不迁移）
-- `schema.sql`：建表 SQL（wrangler d1 execute 用）
-- 测试：`test/helpers.js` 的 `MemoryD1`（node:sqlite 实装真 SQL）+ `createDB` 种子工厂；
-  `npm test`（node --experimental-sqlite --test）173 用例全绿
+## 4. 建表、构建和部署
 
-## 已知行为差异（有意为之）
+```bash
+npx wrangler d1 execute my-maoyan-db --remote --file schema.sql --config wrangler.local.toml
+npm run build:assets
+node scripts/deploy-preflight.mjs --config wrangler.local.toml --secrets ADMIN_TOKEN,SESSION_ENCRYPTION_KEY,ENROLLMENT_HMAC_KEY
+npx wrangler deploy --config wrangler.local.toml
+```
 
-1. `changes` 在 D1 中保留全量历史，`/api/status` 仍只返回最新 100 条（与 KV 版响应一致）。
-2. 上游消失影片的 snapshot 旧行保留（与 KV 版一致，避免影片回归时被误判"首次出现"）。
-3. `tokens` 表按 `token` UNIQUE 索引点查鉴权，替代 KV 版每次请求全量读数组。
+预检只核对绑定和 secret 名称，不读取或打印 secret 值。部署后访问 `https://<你的 Worker 域名>/maoyan/`，使用管理员令牌登录，先上传猫眼登录态并测试通知，再开启监控。
+
+## 5. 可选：开启公开申请
+
+在 Cloudflare Turnstile 创建站点后，把以下变量写入本地配置：
+
+```toml
+[vars]
+TURNSTILE_SITE_KEY = "your-site-key"
+ENROLLMENT_ORIGIN = "https://your-worker.example.workers.dev"
+ENROLLMENT_HOSTNAME = "your-worker.example.workers.dev"
+```
+
+再配置 Turnstile secret：
+
+```bash
+npx wrangler secret put TURNSTILE_SECRET_KEY --config wrangler.local.toml
+node scripts/deploy-preflight.mjs --config wrangler.local.toml --public-enrollment --secrets ADMIN_TOKEN,SESSION_ENCRYPTION_KEY,ENROLLMENT_HMAC_KEY,TURNSTILE_SECRET_KEY
+npx wrangler deploy --config wrangler.local.toml
+```
+
+部署完成后在管理页把“允许公开申请”打开。公开普通账号默认最多 20 个、每次 15 天；管理员账号不占公开名额且永久有效。开放前应先查看管理员资源摘要并完成真实实例容量验证。仓库中的合成容量报告不能代替 Cloudflare 的 CPU、D1 rows、KV 和 Durable Object 实测。
+
+## 更新与回滚
+
+更新时重新执行 `npm ci`、D1 schema（迁移是幂等的）、`npm run build:assets`、测试和部署。回滚使用上一提交重新构建并部署；不要删除 D1、KV 或 Durable Object 数据。访问密钥无法找回，遗失后只能等待账号自然到期并重新申请。

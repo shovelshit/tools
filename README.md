@@ -1,6 +1,6 @@
 # ltools.asia · 自托管工具箱
 
-跑在 Cloudflare Pages + Workers 全家桶上的实用工具集合，几乎零成本、无服务器运维。
+跑在 Cloudflare Workers、Static Assets、D1、KV 与 Durable Objects 上的自托管工具集合。
 
 **在线地址**：<https://ltools.asia/>
 
@@ -8,7 +8,7 @@
 
 | 工具 | 说明 | 形态 |
 |---|---|---|
-| 🎬 [猫眼场次监控 + 自动锁座](https://ltools.asia/maoyan/) | 监控影院排片变化，新场次推送到手机；开售后自动锁座 | Pages 前端 + Worker（KV / Durable Object / Cron） |
+| 🎬 [猫眼场次监控 + 自动锁座](https://ltools.asia/maoyan/) | 监控影院排片变化，新场次推送到手机；开售后自动锁座 | Worker Static Assets + D1 / KV / Durable Objects / Cron |
 | 📦 [应用商店](https://ltools.asia/store/) | 浏览和下载 AList 网盘中的应用，云端加速直连、在线预览 | Pages 前端 + Worker 文件代理（无需登录） |
 | 🚗 领克签到助手 | 领克 App 自动签到、分享任务、积分查询与 Bark 推送 | Python 脚本 · [独立仓库](https://github.com/shovelshit/LynkCoHelper) |
 | 📶 蓝牙调试助手 | 低功耗蓝牙调试工具，扫描/读写特征值/订阅通知，可替代 nRF Connect | 微信小程序 + iOS · [独立仓库](https://github.com/shovelshit/BLE-debug) |
@@ -23,9 +23,10 @@
 
 - 城市 → 影院模糊搜索 → 勾选关注影片，配置即自动保存
 - 推送渠道支持 **Bark / Server酱**，须先发送测试推送验证通过才能开启监控
-- 云端 Cron **每 3 分钟**检查一次排期（北京时间 07:00~22:59 窗口内），新增场次即时推送到手机
-- 存储写入按批条件落盘：无变化批次不写库（控制 KV 写额度消耗），页面「上次检查」最多滞后 30 分钟（心跳兜底，有新场次/异常时即时更新）
-- 监控有效期 30 天，每次开启自动续期；推送渠道失效时自动停止监控并告警，避免"静默失效"
+- 云端 Cron 默认 **每 3 分钟**按影院共享抓取排期（北京时间 07:00~22:59 窗口内），多个用户关注同一影院时复用结果
+- 页面只在可见且需要时增量查询；普通监控状态约 3 分钟刷新，活动锁座约 15 秒刷新，后台页停止轮询
+- 普通账号默认 15 天有效，到期后有空余名额可自助续期并恢复仍有效的任务；管理员账号永久有效且不占公开名额
+- 推送渠道失效时自动停止监控并告警；通知通过 D1 outbox 有限重试，不重新执行锁座订单
 
 ### 自动锁座
 
@@ -39,9 +40,10 @@
 
 ### 安全设计
 
-- **访问令牌制**：非公开注册。管理端（`X-Admin-Token` 鉴权）签发/吊销访问令牌，各令牌数据完全隔离
+- **访问密钥制**：支持管理员签发和可选的 Turnstile 公开申请；申请时只保存 HMAC 后的浏览器标识与初始 IP 摘要，使用时不绑定 IP
 - 浏览器侧令牌 AES-GCM 加密后存 localStorage（`secure-store.js`），防设备本地明文泄露
-- 猫眼会话仅存于本人 KV 空间；全链路错误信息不含会话凭据
+- 猫眼会话仅以加密信封存于本人 KV 空间，通知凭据同样加密；全链路错误信息不含会话凭据
+- 访问密钥无法找回；遗失后不提供管理员明文回显，账号自然到期后可重新申请
 - 官方座位图片段在 `sandbox=""` iframe 内**零脚本**渲染，埋点属性剥离
 
 ## 📦 应用商店
@@ -53,23 +55,20 @@
 ## 架构
 
 ```
-浏览器
-  ├── Cloudflare Pages（静态前端 pages/）
-  │       ├── /           工具箱首页
-  │       ├── /maoyan/    猫眼监控+锁座（app.js 监控 / lock.js 锁座 / admin.html 管理端）
-  │       └── /store/     应用商店
-  │
-  └── Worker tools-api（worker/，路由 ltools.asia/api/* 与 /store/*）
-          ├── KV（MAOYAN_KV）      用户配置 / 场次快照 / 变更日志 / 锁座规则 / 会话
-          ├── Durable Object       LockCoordinator：锁座协调（SQLite-backed）
-          ├── Cron Triggers        */3 * * * *：监控批次（窗口过滤在代码内）
-          └── 出网                  猫眼接口 / Bark / Server酱
+浏览器 / Electron
+  └── Worker tools-api
+      ├── Static Assets       /maoyan/ 申请、监控、锁座和管理页
+      ├── D1                  账号、配置、订阅、历史、规则和通知 outbox
+      ├── KV                  加密猫眼会话与影院搜索缓存
+      ├── Durable Objects     锁座、批次分发、影院协调和通知投递
+      ├── Cron Triggers       */3 * * * *，窗口过滤在代码内
+      └── 出网                猫眼接口 / Bark / Server酱 / GitHub Release 元数据
 ```
 
 ### 目录结构
 
 ```
-pages/                    # Cloudflare Pages 静态资源
+pages/                    # 前端源码（构建时按白名单复制）
 ├── index.html            # 工具箱首页
 ├── maoyan/               # 猫眼监控+锁座
 │   ├── index.html        #   工具页（监控配置 + 锁座面板）
@@ -79,7 +78,9 @@ pages/                    # Cloudflare Pages 静态资源
 └── store/                # 应用商店
 
 worker/                   # Cloudflare Worker（tools-api）
-├── wrangler.toml         # 路由 / cron / KV / DO 绑定（keep_vars=true）
+├── wrangler.toml         # Static Assets / cron / D1 / KV / DO 绑定
+├── wrangler.example.toml # 不含生产 ID 的自部署模板
+├── scripts/              # 静态白名单构建、容量测试和部署预检
 ├── src/
 │   ├── index.js          # 路由分发 + scheduled 入口
 │   ├── common/           # HTTP 工具 / 推送渠道（Bark、Server酱）
@@ -88,7 +89,7 @@ worker/                   # Cloudflare Worker（tools-api）
 │   │                     #   lock-api/rule/client/runner/session(锁座链路)
 │   │                     #   seat-feedback
 │   └── store/proxy.js    # 应用商店文件代理
-└── test/                 # node:test 单测（16 个文件）
+└── test/                 # node:test 单测
 
 local/                    # 本地脚本（部分入库）
 └── maoyan_lock.py        # CLI 版锁座工具：Chromium 登录一次 → HTTP 锁座
@@ -102,17 +103,19 @@ docs/                     # 本地文档，不入库（.gitignore）
 ## 开发与测试
 
 ```bash
-# Worker 单测（16 个文件：锁座链路 / 监控与写入去重 / 令牌 / 配置 / cron 窗口）
-cd worker && npm test
+# Worker 单测与静态资源构建
+npm --prefix worker ci
+npm --prefix worker test
+npm --prefix worker run build:assets
 
-# 前端单测（app / lock 纯函数）
-node --test pages/maoyan/app.test.cjs pages/maoyan/lock.test.cjs
+# Web 与 Electron 单测
+node --test pages/maoyan/*.test.cjs
+npm --prefix desktop ci && npm --prefix desktop test
 ```
 
 - **E2E**：本地 mock harness + 无头 Chrome 全链路断言（8 个分部），测试方案与执行报告见 `docs/maoyan-e2e-test-plan.md` / `docs/maoyan-e2e-report.md`
-- **部署**：
-  - Pages：push 到本仓库自动部署
-  - Worker：`wrangler deploy`（`keep_vars=true`，环境变量在 Dashboard 管理；`ADMIN_TOKEN` 为 secret，`wrangler secret put` 注入）
+- **独立部署**：按 [worker/DEPLOY-D1.md](worker/DEPLOY-D1.md) 创建自己的 D1/KV、配置 secret、运行迁移和构建，再部署 Worker；模板默认关闭公开申请
+- **发布**：合入 `master` 后 GitHub Actions 先执行 Worker/Web/Electron 验证，再创建 GitHub Release 并由各平台任务直接上传安装包；不上传 Actions artifact
 - **前端发布惯例**：修改 `pages/maoyan/*.js`、`style.css` 等静态资源后，必须同步 bump `index.html` 中对应的 `?v=` 版本参数（格式 `v=YYYYMMDDx`），否则老用户会命中边缘缓存旧版
 - **注意**：Worker 的监控批次在北京时间 23:00~06:59 整体跳过（代码内窗口过滤，cron 表达式保持分钟步进型），相关测试需 mock 时钟
 

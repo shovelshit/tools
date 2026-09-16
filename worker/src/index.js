@@ -21,6 +21,37 @@ import { fetchManualCinemaThroughCoordinator } from "./maoyan/monitor-coordinato
 import { handleEnrollmentApi } from "./maoyan/enrollment-api.js";
 
 const DECIMAL = /^\d+$/;
+const MAOYAN_CSP = [
+  "default-src 'self'",
+  "script-src 'self' https://challenges.cloudflare.com",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: https:",
+  "connect-src 'self' https://challenges.cloudflare.com",
+  "frame-src 'self' https://challenges.cloudflare.com",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'"
+].join("; ");
+
+export async function serveMaoyanAsset(request, env, url = new URL(request.url)) {
+  if (url.pathname === "/maoyan") {
+    return Response.redirect(`${url.origin}/maoyan/`, 308);
+  }
+  if (!url.pathname.startsWith("/maoyan/") || !env.ASSETS) return null;
+  const response = await env.ASSETS.fetch(request);
+  const headers = new Headers(response.headers);
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  headers.set("Content-Security-Policy", MAOYAN_CSP);
+  if ((headers.get("Content-Type") || "").includes("text/html")) {
+    headers.set("Cache-Control", "no-store");
+  } else if (url.searchParams.has("v")) {
+    headers.set("Cache-Control", "public, max-age=31536000, immutable");
+  } else {
+    headers.set("Cache-Control", "public, max-age=300");
+  }
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
 
 // 推送/上游失败的状态码: 凭据未配置属于客户端配置问题(400), 其余(渠道侧或猫眼侧异常)归为上游错误(502)
 function upstreamStatus(message) {
@@ -50,6 +81,8 @@ export default {
     if (url.pathname === "/store/file") return handleStoreFile(url);
 
     if (!url.pathname.startsWith("/api/")) {
+      const assetResponse = await serveMaoyanAsset(request, env, url);
+      if (assetResponse) return assetResponse;
       return json({ error: "Not Found" }, 404);
     }
 

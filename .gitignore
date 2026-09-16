@@ -2,6 +2,9 @@ local/.maoyan-lock-session.json
 local/.maoyan-lock-profile/
 local/session.json
 .wrangler/
+worker/public/
+worker/node_modules/
+worker/wrangler.local.toml
 seat_debug.html
 createorder_debug.txt
 repro-order.cjs

@@ -2,7 +2,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --experimental-sqlite --test test/*.test.js"
+    "test": "node --experimental-sqlite --test test/*.test.js",
+    "build:assets": "node scripts/build-assets.mjs",
+    "deploy:preflight": "node scripts/deploy-preflight.mjs"
   },
   "devDependencies": {
     "@thumbmarkjs/thumbmarkjs": "1.11.0"

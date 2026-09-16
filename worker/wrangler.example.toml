@@ -1,0 +1,53 @@
+name = "my-maoyan-monitor"
+main = "src/index.js"
+compatibility_date = "2026-09-08"
+workers_dev = true
+keep_vars = true
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = ["/api/*", "/store/api/*", "/store/file*", "/maoyan", "/maoyan/", "/maoyan/*.html"]
+
+[triggers]
+crons = ["*/3 * * * *"]
+
+[vars]
+LOCK_SERVICE_ENABLED = "true"
+# 公开申请在 D1 管理设置中默认关闭。仅在准备开启时取消以下注释：
+# TURNSTILE_SITE_KEY = "replace-me"
+# ENROLLMENT_ORIGIN = "https://your-worker.example.workers.dev"
+# ENROLLMENT_HOSTNAME = "your-worker.example.workers.dev"
+
+[[kv_namespaces]]
+binding = "MAOYAN_KV"
+id = "REPLACE_WITH_YOUR_KV_ID"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "my-maoyan-db"
+database_id = "REPLACE_WITH_YOUR_D1_ID"
+
+[[durable_objects.bindings]]
+name = "LOCK_COORDINATOR"
+class_name = "LockCoordinator"
+
+[[durable_objects.bindings]]
+name = "MONITOR_DISPATCHER"
+class_name = "MonitorDispatcher"
+
+[[durable_objects.bindings]]
+name = "MONITOR_COORDINATOR"
+class_name = "MonitorCoordinator"
+
+[[durable_objects.bindings]]
+name = "NOTIFICATION_DISPATCHER"
+class_name = "NotificationDispatcher"
+
+[[migrations]]
+tag = "v1-maoyan-lock"
+new_sqlite_classes = ["LockCoordinator"]
+
+[[migrations]]
+tag = "v2-maoyan-monitor-scaling"
+new_sqlite_classes = ["MonitorDispatcher", "MonitorCoordinator", "NotificationDispatcher"]
