@@ -18,7 +18,8 @@ function movieMap(data) {
           tm: String(show.tm || ""),
           th: String(show.th || ""),
           lang: String(show.lang || ""),
-          tp: String(show.tp || "")
+          tp: String(show.tp || ""),
+          ticketStatus: Number.isFinite(Number(show.ticketStatus)) ? Number(show.ticketStatus) : null
         });
       }
     }
@@ -31,6 +32,24 @@ function movieMap(data) {
     });
   }
   return map;
+}
+
+function safeCinemaData(data) {
+  const movies = [];
+  for (const movie of movieMap(data).values()) {
+    const days = new Map();
+    for (const show of movie.shows) {
+      const day = show.showDate || "";
+      if (!days.has(day)) days.set(day, []);
+      days.get(day).push({ ...show });
+    }
+    movies.push({
+      id: movie.movieId,
+      nm: movie.movieName,
+      shows: [...days].map(([showDate, plist]) => ({ showDate, plist }))
+    });
+  }
+  return { showData: { cinemaName: String(data?.showData?.cinemaName || ""), movies } };
 }
 
 function snapshotMap(rows) {
@@ -160,12 +179,13 @@ export async function listDueCinemas(DB, { nowMs = Date.now(), afterCinemaId = "
 export async function listSubscribers(DB, { cinemaId, afterUserId = "", limit = 10, nowMs = Date.now() } = {}) {
   const pageSize = clampLimit(limit, 10, 10);
   const { results } = await DB.prepare(
-    "SELECT s.user_id,s.cinema_id,s.enabled,s.config_version,s.baseline_version,s.next_due_at,c.data " +
+    "SELECT s.user_id,s.cinema_id,s.enabled,s.config_version,s.baseline_version,s.next_due_at,c.data,l.data AS lock_data " +
     "FROM monitor_subscriptions s JOIN users u ON u.id=s.user_id " +
     "JOIN user_config c ON c.token_id=s.user_id AND c.version=s.config_version " +
-    "WHERE s.cinema_id=? AND s.enabled=1 AND s.user_id>? AND u.state='active' " +
+    "LEFT JOIN lock_rule l ON l.token_id=s.user_id " +
+    "WHERE s.cinema_id=? AND s.enabled=1 AND s.next_due_at<=? AND s.user_id>? AND u.state='active' " +
     "AND (u.role='admin' OR u.expires_at>?) ORDER BY s.user_id LIMIT ?"
-  ).bind(String(cinemaId), String(afterUserId || ""), Number(nowMs), pageSize + 1).all();
+  ).bind(String(cinemaId), Number(nowMs), String(afterUserId || ""), Number(nowMs), pageSize + 1).all();
   const items = results.slice(0, pageSize).map((row) => {
     let config = {};
     try { config = JSON.parse(row.data || "{}"); } catch {}
@@ -173,15 +193,16 @@ export async function listSubscribers(DB, { cinemaId, afterUserId = "", limit = 
       userId: row.user_id, cinemaId: row.cinema_id, enabled: Number(row.enabled) === 1,
       configVersion: Number(row.config_version),
       baselineVersion: row.baseline_version == null ? null : Number(row.baseline_version),
-      nextDueAt: Number(row.next_due_at), config
+      nextDueAt: Number(row.next_due_at), config,
+      lockRule: (() => { try { return row.lock_data ? JSON.parse(row.lock_data) : null; } catch { return null; } })()
     };
   });
   return { items, nextCursor: results.length > pageSize ? items.at(-1)?.userId || null : null };
 }
 
-async function readCommitted(DB, cinemaId, batchId) {
+export async function getCommittedCinemaBatch(DB, cinemaId, batchId) {
   const batch = await DB.prepare(
-    "SELECT version,captured_at FROM cinema_batches WHERE cinema_id=? AND batch_id=? AND status='committed'"
+    "SELECT version,public_data,captured_at FROM cinema_batches WHERE cinema_id=? AND batch_id=? AND status='committed'"
   ).bind(cinemaId, batchId).first();
   if (!batch) return null;
   const { results: rows } = await DB.prepare(
@@ -195,14 +216,15 @@ async function readCommitted(DB, cinemaId, batchId) {
       cinemaId, version: Number(batch.version), capturedAt: Number(batch.captured_at),
       data: Object.fromEntries(rows.map((row) => [String(row.movie_id), JSON.parse(row.seq_nos || "[]")]))
     },
-    events: eventRows.map((row) => JSON.parse(row.payload))
+    events: eventRows.map((row) => JSON.parse(row.payload)),
+    data: JSON.parse(batch.public_data || "{}")
   };
 }
 
 export async function persistCinemaSnapshot(DB, { cinemaId, batchId, data, capturedAt = Date.now() }) {
   const id = String(cinemaId);
   const batch = String(batchId);
-  const committed = await readCommitted(DB, id, batch);
+  const committed = await getCommittedCinemaBatch(DB, id, batch);
   if (committed) return { ...committed, replayed: true };
   const { results: rows } = await DB.prepare(
     "SELECT movie_id,movie_name,seq_nos,version,updated_at FROM cinema_snapshots WHERE cinema_id=? ORDER BY movie_id"
@@ -227,21 +249,21 @@ export async function persistCinemaSnapshot(DB, { cinemaId, batchId, data, captu
     ).bind(id, batch, event.movieId, JSON.stringify(event), Number(capturedAt)));
   }
   statements.push(DB.prepare(
-    "INSERT INTO cinema_batches(cinema_id,batch_id,status,version,captured_at) VALUES (?,?,'committed',?,?)"
-  ).bind(id, batch, version, Number(capturedAt)));
+    "INSERT INTO cinema_batches(cinema_id,batch_id,status,version,public_data,captured_at) VALUES (?,?,'committed',?,?,?)"
+  ).bind(id, batch, version, JSON.stringify(safeCinemaData(data)), Number(capturedAt)));
   try {
     await DB.batch(statements);
   } catch (error) {
-    const concurrent = await readCommitted(DB, id, batch);
+    const concurrent = await getCommittedCinemaBatch(DB, id, batch);
     if (concurrent) return { ...concurrent, replayed: true };
     throw error;
   }
-  const committedResult = await readCommitted(DB, id, batch);
+  const committedResult = await getCommittedCinemaBatch(DB, id, batch);
   return { ...committedResult, replayed: false };
 }
 
 export async function advanceSubscriber(DB, {
-  userId, cinemaId, configVersion, snapshotVersion, events = [], nowMs = Date.now(), batchMs = DEFAULT_BATCH_MS
+  userId, cinemaId, configVersion, snapshotVersion, events = [], notifications = [], nowMs = Date.now(), batchMs = DEFAULT_BATCH_MS
 }) {
   const version = Number(snapshotVersion);
   const current = await DB.prepare(
@@ -260,6 +282,19 @@ export async function advanceSubscriber(DB, {
       "INSERT INTO change_log(token_id,time,type,text) VALUES (?,?,?,?)"
     ).bind(userId, new Date(nowMs).toISOString(), event.type || "new", event.text || "发现新增场次"));
   }
+  const notificationIndexes = [];
+  for (const notification of notifications) {
+    notificationIndexes.push(statements.length);
+    statements.push(DB.prepare(
+      "INSERT OR IGNORE INTO notification_outbox(" +
+      "event_key,user_id,kind,payload,credential_version,state,attempts,next_attempt_at,lease_until,created_at,updated_at" +
+      ") VALUES (?,?,?,?,?,'pending',0,?,NULL,?,?)"
+    ).bind(
+      String(notification.eventKey), userId, String(notification.kind),
+      JSON.stringify({ title: String(notification.title), content: String(notification.content) }),
+      Number(notification.credentialVersion || configVersion), Number(nowMs), Number(nowMs), Number(nowMs)
+    ));
+  }
   statements.push(DB.prepare(
     "UPDATE monitor_subscriptions SET baseline_version=?,next_due_at=?,updated_at=? " +
     "WHERE user_id=? AND cinema_id=? AND config_version=? AND enabled=1 " +
@@ -269,7 +304,11 @@ export async function advanceSubscriber(DB, {
   try {
     const results = await DB.batch(statements);
     const update = results.at(-2);
-    return { applied: Number(update?.meta?.changes || 0) === 1 };
+    return {
+      applied: Number(update?.meta?.changes || 0) === 1,
+      notificationsCreated: notificationIndexes.reduce((count, index) =>
+        count + (Number(results[index]?.meta?.changes || 0) === 1 ? 1 : 0), 0)
+    };
   } catch (error) {
     if (/mutation_guards\.ok|CHECK constraint failed: ok = 1/.test(String(error?.message || error))) return { applied: false };
     throw error;

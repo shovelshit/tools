@@ -110,6 +110,7 @@ export async function cleanupExpiredAccount(env, {
     env.DB.prepare("DELETE FROM monitor_status WHERE token_id=?").bind(userId),
     env.DB.prepare("DELETE FROM monitor_snapshot WHERE token_id=?").bind(userId),
     env.DB.prepare("DELETE FROM monitor_subscriptions WHERE user_id=?").bind(userId),
+    env.DB.prepare("DELETE FROM notification_outbox WHERE user_id=?").bind(userId),
     env.DB.prepare("DELETE FROM change_log WHERE token_id=?").bind(userId),
     env.DB.prepare("DELETE FROM lock_rule WHERE token_id=?").bind(userId)
   ];

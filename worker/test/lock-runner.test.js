@@ -264,6 +264,30 @@ test("automation marks a past China target date expired before provider calls", 
   assert.equal(cinemaCalls, 0);
 });
 
+test("production terminal transition persists the rule and outbox event atomically", async () => {
+  const DB = await createDB({
+    tokens: [{ id: tokenId, token: "access-token" }],
+    configs: { [tokenId]: { enabled: true, cinemaId: "25428" } },
+    lockRules: { [tokenId]: rule({ targetDate: "2026-09-10" }) }
+  });
+  let wakes = 0;
+  const env = await runtime({
+    DB,
+    NOTIFICATION_DISPATCHER: {
+      idFromName: (id) => id,
+      get: () => ({ fetch: async () => { wakes += 1; return Response.json({ ok: true }); } })
+    }
+  });
+  const result = await runOneLockRule(env, tokenId, {
+    now: () => now,
+    getConfig: async () => ({ version: 1 })
+  });
+  assert.deepEqual(result, { ok: true, state: "expired" });
+  assert.equal((await db.getLockRuleRow(DB, tokenId)).state, "expired");
+  assert.equal((await DB.prepare("SELECT COUNT(*) AS n FROM notification_outbox").first()).n, 1);
+  assert.equal(wakes, 1);
+});
+
 test("automation keeps no exact HH:mm match waiting without seat request", async () => {
   const stored = rule();
   let seatsCalls = 0;

@@ -14,6 +14,7 @@ import { authenticate } from "./auth.js";
 import { cleanupExpiredAccount } from "./account-lifecycle.js";
 import { accountErrorResponse, handleAdminAccountApi, listAdminAccounts } from "./account-api.js";
 import { createManagedAccount, updateManagedAccount } from "./enrollment-store.js";
+import { enqueueNotification, wakeNotificationDispatcher } from "./notification-outbox.js";
 
 export function randomToken() {
   const bytes = new Uint8Array(16);
@@ -95,6 +96,51 @@ export async function runScheduledChecks(env, afterMonitor, opts = {}) {
       monitorError("scheduled_check", { state: "failed", reason: "internal_error" });
     }
   }
+}
+
+export async function runScheduledMaintenance(env, nowMs = Date.now()) {
+  const { results } = await env.DB.prepare(
+    "SELECT u.id,u.role,u.state,u.expires_at,u.archived_at,u.version,c.version AS config_version " +
+    "FROM users u LEFT JOIN user_config c ON c.token_id=u.id WHERE u.role='user'"
+  ).all();
+  let queued = 0;
+  for (const row of results) {
+    const expiresAt = Number(row.expires_at);
+    if (row.state === "active" && row.archived_at == null && expiresAt + 30 * 86400000 <= nowMs) {
+      try {
+        await cleanupExpiredAccount(env, {
+          userId: row.id,
+          expectedExpiresAt: expiresAt,
+          expectedVersion: Number(row.version),
+          nowMs
+        });
+      } catch {
+        monitorError("account_cleanup", { state: "failed", reason: "internal_error" });
+      }
+      continue;
+    }
+    if (row.state !== "active" || !Number.isFinite(expiresAt)) continue;
+    const remaining = expiresAt - nowMs;
+    const stage = remaining <= 0 ? "expired" : remaining <= 86400000 ? "one-day" : remaining <= 3 * 86400000 ? "three-day" : null;
+    if (!stage) continue;
+    const title = stage === "expired" ? "⏰ 猫眼监控｜账号已到期" : `⏳ 猫眼监控｜账号将在${stage === "one-day" ? " 1 天" : " 3 天"}内到期`;
+    const content = stage === "expired"
+      ? "🔒 监控与等待锁座已暂停\n🔄 有空余名额时，可在账号页自助续期"
+      : `📅 到期时间：${new Date(expiresAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false })}\n🔑 请妥善保管当前访问密钥`;
+    const result = await enqueueNotification(env.DB, {
+      eventKey: `account-expiry:${row.id}:${expiresAt}:${stage}`,
+      userId: row.id,
+      kind: "account-expiry",
+      title,
+      content,
+      credentialVersion: Number(row.config_version || 0),
+      meta: { expiresAt, stage },
+      nowMs
+    });
+    if (result.created) queued += 1;
+  }
+  if (queued) await wakeNotificationDispatcher(env);
+  return { queued };
 }
 
 export async function handleAdminTokens(request, env, url) {

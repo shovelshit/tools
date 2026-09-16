@@ -63,7 +63,7 @@ test("subscriber advancement is idempotent for one snapshot version", async () =
     userId: account.id, cinemaId: "1", configVersion: 1, snapshotVersion: 5,
     events: [{ type: "new", text: "one event" }], nowMs: NOW
   };
-  assert.deepEqual(await advanceSubscriber(env.DB, input), { applied: true });
+  assert.deepEqual(await advanceSubscriber(env.DB, input), { applied: true, notificationsCreated: 0 });
   assert.deepEqual(await advanceSubscriber(env.DB, input), { applied: false });
   assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM change_log").first()).n, 1);
 });
@@ -107,7 +107,7 @@ test("shared cinema snapshot writes changed movies once and replays a committed 
   });
   assert.equal(changed.snapshot.version, 2);
   assert.equal(changed.events.length, 1);
-  assert.deepEqual(Object.keys(changed.events[0].shows[0]).sort(), ["lang", "seqNo", "showDate", "th", "tm", "tp"]);
+  assert.deepEqual(Object.keys(changed.events[0].shows[0]).sort(), ["lang", "seqNo", "showDate", "th", "ticketStatus", "tm", "tp"]);
   assert.equal(env.DB.writeCount("cinema_snapshots"), 1);
   assert.equal(env.DB.writeCount("cinema_events"), 1);
   env.DB.resetWrites();
@@ -132,4 +132,19 @@ test("unchanged snapshot commits a batch without rewriting movie rows or events"
   assert.equal(result.snapshot.version, 1);
   assert.equal(env.DB.writeCount("cinema_snapshots"), 0);
   assert.equal(env.DB.writeCount("cinema_events"), 0);
+});
+
+test("committed shared data excludes prices and unknown provider fields", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  const data = cinemaFixture({ seqNos: ["s1"] });
+  Object.assign(data.showData.movies[0].shows[0].plist[0], {
+    vipPrice: "99.9", vipPriceSuffix: "起", providerSecret: "do-not-share"
+  });
+  const result = await persistCinemaSnapshot(env.DB, {
+    cinemaId: "1", batchId: "private-fields", data, capturedAt: NOW
+  });
+  const serialized = JSON.stringify(result.data);
+  assert.equal(serialized.includes("99.9"), false);
+  assert.equal(serialized.includes("providerSecret"), false);
+  assert.equal(serialized.includes("s1"), true);
 });

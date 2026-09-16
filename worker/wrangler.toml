@@ -56,8 +56,24 @@ database_id = "ee66c7c1-58b6-4d95-8f68-d0ff4b092bd2"
 name = "LOCK_COORDINATOR"
 class_name = "LockCoordinator"
 
+[[durable_objects.bindings]]
+name = "MONITOR_DISPATCHER"
+class_name = "MonitorDispatcher"
+
+[[durable_objects.bindings]]
+name = "MONITOR_COORDINATOR"
+class_name = "MonitorCoordinator"
+
+[[durable_objects.bindings]]
+name = "NOTIFICATION_DISPATCHER"
+class_name = "NotificationDispatcher"
+
 [[migrations]]
 tag = "v1-maoyan-lock"
 new_sqlite_classes = ["LockCoordinator"]
+
+[[migrations]]
+tag = "v2-maoyan-monitor-scaling"
+new_sqlite_classes = ["MonitorDispatcher", "MonitorCoordinator", "NotificationDispatcher"]
 
 # ADMIN_TOKEN 为 secret(保护 admin 页), 控制台设置或 wrangler secret put 注入

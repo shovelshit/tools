@@ -239,6 +239,7 @@ CREATE TABLE IF NOT EXISTS cinema_batches (
   batch_id TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('committed')),
   version INTEGER NOT NULL CHECK (version > 0),
+  public_data TEXT NOT NULL,
   captured_at INTEGER NOT NULL,
   PRIMARY KEY (cinema_id, batch_id)
 );
@@ -258,6 +259,24 @@ CREATE TABLE IF NOT EXISTS cinema_events (
 
 CREATE INDEX IF NOT EXISTS idx_cinema_events_batch
   ON cinema_events(cinema_id, batch_id, id);
+
+CREATE TABLE IF NOT EXISTS notification_outbox (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_key TEXT NOT NULL UNIQUE,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  kind TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  credential_version INTEGER NOT NULL,
+  state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'sending', 'sent', 'failed')),
+  attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+  next_attempt_at INTEGER,
+  lease_until INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_notification_outbox_due
+  ON notification_outbox(state, next_attempt_at, lease_until, id);
 
 CREATE TABLE IF NOT EXISTS seat_feedback (
   fb_key TEXT PRIMARY KEY,          -- 原 KV key: seatfb:{cinemaId}:{seqNo||"na"}

@@ -11,6 +11,7 @@ import { lockError, lockLog } from "./log.js";
 import { withSeatFeedback } from "./seat-feedback.js";
 import { lockNotification } from "./notification-copy.js";
 import { requireActiveAccount } from "./auth.js";
+import { persistTerminalNotification, wakeNotificationDispatcher } from "./notification-outbox.js";
 
 const TOKEN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -42,18 +43,34 @@ async function saveRule(env, tokenId, rule, changes, deps) {
 }
 
 async function notifyTerminal(env, tokenId, rule, deps) {
-  const notify = deps.notify || pushNotify;
   const config = await (deps.getConfig || getUserConfig)(env, tokenId);
   // 与立即锁座共用同一份正文(座位渲染成「几排几座」), 避免两处副本各自漂移
   const notification = lockNotification(rule);
   try {
-    await notify(config, notification.title, notification.content);
+    await (deps.notify || pushNotify)(config, notification.title, notification.content);
   } catch {
     await saveRule(env, tokenId, rule, { notifyError: "通知发送失败" }, deps);
   }
 }
 
 async function terminal(env, tokenId, rule, state, changes, deps) {
+  if (!deps.putRule && !deps.notify && env.NOTIFICATION_DISPATCHER) {
+    const now = (deps.now || (() => new Date()))();
+    const next = { ...rule, ...changes, state, updatedAt: new Date(now).toISOString() };
+    const config = await (deps.getConfig || getUserConfig)(env, tokenId);
+    const notification = lockNotification(next);
+    await persistTerminalNotification(env, {
+      userId: tokenId,
+      rule: next,
+      title: notification.title,
+      content: notification.content,
+      credentialVersion: config.version,
+      nowMs: new Date(now).getTime()
+    });
+    try { await wakeNotificationDispatcher(env); } catch {}
+    lockLog("scheduled_rule", { phase: "complete", state });
+    return { ok: true, state };
+  }
   const next = await saveRule(env, tokenId, rule, { ...changes, state }, deps);
   lockLog("scheduled_rule", { phase: "complete", state });
   await notifyTerminal(env, tokenId, next, deps);
