@@ -70,7 +70,7 @@ function upstreamMock(cinema, counters) {
         title: decodeURIComponent(title),
         content: decodeURIComponent(content)
       };
-      return new Response("ok", { status: 200 });
+      return Response.json({ code: 200 });
     }
     return new Response("ok", { status: 200 });
   };

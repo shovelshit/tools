@@ -43,7 +43,7 @@ async function verifiedEnv(snapshot = null) {
   // 与 config.test.js 同路径: 先保存推送密钥 → 测试推送验证 → 才能开启监控
   const keySaved = await worker.fetch(request("/api/config", { barkKey: "test-key" }), env);
   assert.equal(keySaved.status, 200);
-  await withMockFetch(async () => new Response("ok", { status: 200 }), async () => {
+  await withMockFetch(async () => Response.json({ code: 200 }), async () => {
     const r = await worker.fetch(request("/api/test-push", {}), env);
     assert.equal(r.status, 200);
   });

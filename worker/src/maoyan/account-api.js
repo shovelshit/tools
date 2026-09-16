@@ -4,8 +4,12 @@ import { exchangeSession, publicAccount, serviceNow } from "./auth.js";
 import { createManagedAccount, readCapacity, readServiceSettings, renewAccount, updateManagedAccount, updateServiceSettings } from "./enrollment-store.js";
 import { resumeAfterRenewal } from "./account-lifecycle.js";
 import { readResourceSummary } from "./resource-budget.js";
+import { getReleaseDownloads } from "./releases.js";
 
 export async function handlePublicAccountApi(request, env, url) {
+  if (url.pathname === "/api/releases" && request.method === "GET") {
+    return json({ ok: true, ...await getReleaseDownloads(env) }, 200, { "Cache-Control": "public, max-age=300" });
+  }
   if (url.pathname === "/api/capabilities" && request.method === "GET") {
     return json({ ok: true, accountLifecycle: true, adminMonitorSession: true }, 200, { "Cache-Control": "no-store" });
   }

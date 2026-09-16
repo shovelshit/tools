@@ -95,7 +95,7 @@ test("BUG-2: 手动检查用真实状态码回报, 不再假装成功", async ()
 
 test("BUG-4: 运行中切到未配置渠道时自动停止监控并留痕", async () => {
   const env = await runtime({ cinemaId: "38569", notifyChannel: "bark", barkKey: "bark-key" });
-  await withMockFetch(async () => new Response("ok", { status: 200 }), async () => {
+  await withMockFetch(async () => Response.json({ code: 200 }), async () => {
     const tested = await worker.fetch(request("/api/test-push", {}), env);
     assert.equal(tested.status, 200);
 

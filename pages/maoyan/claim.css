@@ -22,6 +22,9 @@ body.claim-page { overflow: auto; min-height: 100vh; }
 .claim-warning { padding: 8px; border-left: 3px solid var(--warning); background: rgba(255,245,214,.45); color: #76501b !important; text-align: left; }
 .claim-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .claim-actions a { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+.claim-downloads { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.claim-downloads a { color: var(--success-dark); font-size: 11px; text-decoration: none; }
+.claim-downloads a:hover { text-decoration: underline; }
 .claim-existing { padding-top: 14px; border-top: 1px solid var(--border-subtle); }
 .claim-existing label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 11px; }
 .claim-existing > div { display: grid; grid-template-columns: 1fr auto; gap: 8px; }

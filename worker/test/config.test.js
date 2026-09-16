@@ -56,7 +56,7 @@ test("a successful test verifies only the current channel and credential", async
   await withMockFetch(async (input) => {
     const [, , title, content] = new URL(String(input)).pathname.split("/");
     notification = { title: decodeURIComponent(title), content: decodeURIComponent(content) };
-    return new Response("ok", { status: 200 });
+    return Response.json({ code: 200 });
   }, async () => {
     const testResponse = await worker.fetch(request("/api/test-push", {}), env);
     assert.equal(testResponse.status, 200);

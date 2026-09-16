@@ -2,31 +2,38 @@
 // 与具体业务无关: 只负责把 (标题, 内容) 发到某个渠道
 // 用哪个渠道、凭据从哪读取, 由业务模块(如 maoyan)自己决定
 
-export async function pushBark(key, title, content) {
+export async function pushBark(key, title, content, { fetchImpl = fetch } = {}) {
   let base = String(key || "").trim();
   if (!base) throw new Error("Bark 未配置");
   if (!/^https?:\/\//i.test(base)) base = "https://api.day.app/" + base;
   base = base.replace(/\/+$/, "");
   const url = `${base}/${encodeURIComponent(title)}/${encodeURIComponent(content)}?group=maoyan`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(15e3) });
+  const res = await fetchImpl(url, { signal: AbortSignal.timeout(15e3) });
   if (!res.ok) throw new Error("Bark 推送失败: HTTP " + res.status);
+  const data = await res.json().catch(() => null);
+  if (!data || Number(data.code) !== 200) throw new Error("Bark 推送失败: 服务未接受消息");
 }
 
-// Server酱(Server酱³): POST https://sctapi.ftqq.com/<SENDKEY>.send
-export async function pushServerChan(key, title, content) {
+export function serverChanEndpoint(key) {
   const sendKey = String(key || "").trim();
   if (!sendKey) throw new Error("Server酱 未配置");
-  const res = await fetch(`https://sctapi.ftqq.com/${encodeURIComponent(sendKey)}.send`, {
+  if (!/^[A-Za-z0-9_-]+$/.test(sendKey)) throw new Error("Server酱密钥格式无效");
+  const match = /^sctp(\d+)t/.exec(sendKey);
+  return match ? `https://${match[1]}.push.ft07.com/send/${sendKey}.send`
+    : `https://sctapi.ftqq.com/${sendKey}.send`;
+}
+
+export async function pushServerChan(key, title, content, { fetchImpl = fetch } = {}) {
+  const url = serverChanEndpoint(key);
+  const res = await fetchImpl(url, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ title, desp: content }),
     signal: AbortSignal.timeout(15e3),
   });
   if (!res.ok) throw new Error("Server酱 推送失败: HTTP " + res.status);
-  const data = await res.json().catch(() => ({}));
-  if (data && data.code !== void 0 && Number(data.code) !== 0) {
-    throw new Error("Server酱 推送失败: " + (data.message || data.error || data.code));
-  }
+  const data = await res.json().catch(() => null);
+  if (!data || !(Number(data.code) === 0 || data.success === true)) throw new Error("Server酱 推送失败: 服务未接受消息");
 }
 
 export const NOTIFY_CHANNELS = {

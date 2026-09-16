@@ -46,6 +46,7 @@ const els = {
   pushBarkRow: $("push-bark-row"),
   pushServerChanRow: $("push-serverchan-row"),
   pushChannelRow: $("push-channel-row"),
+  pushPlatformAdvice: $("push-platform-advice"),
   pageSub: $("page-sub"),
   // 电影列表
   movieList: $("movie-list"),
@@ -68,6 +69,12 @@ let monitorEnabled = false; // 默认停止, 需显式「开始监控」
 let pushSaved = false; // 云端已存有当前渠道的推送配置(接口不回显时, 保存时避免误覆盖)
 let pushVerified = false; // 当前渠道 + 当前密钥已成功发送过测试推送
 let configVersion = 0;
+const clientPlatform = window.detectPlatform ? window.detectPlatform({
+  userAgent: navigator.userAgent,
+  platform: navigator.platform,
+  maxTouchPoints: navigator.maxTouchPoints,
+  userAgentData: navigator.userAgentData
+}) : { os: "unknown", arch: "unknown" };
 let pollingController = null;
 let lockPollingState = { open: false, active: false };
 let renderedChanges = [];
@@ -581,6 +588,14 @@ function renderChannel() {
   if (els.pushBarkRow) els.pushBarkRow.classList.toggle("hidden", ch !== "bark");
   if (els.pushServerChanRow) els.pushServerChanRow.classList.toggle("hidden", ch !== "serverchan");
   renderKeyInput(); // 切换渠道后另一输入框同样按掩码/占位渲染
+  renderChannelAdvice();
+}
+
+function renderChannelAdvice() {
+  if (!els.pushPlatformAdvice || !window.notificationAdvice) return;
+  const advice = window.notificationAdvice({ platform: clientPlatform, channel: getChannel() });
+  els.pushPlatformAdvice.textContent = advice.message || "";
+  els.pushPlatformAdvice.classList.toggle("hidden", !advice.message);
 }
 
 // 当前渠道对应的输入框与配置字段名
@@ -630,7 +645,7 @@ function renderKeyInput() {
 }
 
 function applyPushConfig(config) {
-  setChannel(config.notifyChannel || "bark");
+  setChannel(config.notifyChannel || (clientPlatform.os === "android" ? "serverchan" : "bark"));
   keyStored.bark = config.hasBark === true;
   keyStored.serverchan = config.hasServerChan === true;
   pushSaved = keyStored.bark || keyStored.serverchan;
