@@ -121,6 +121,33 @@ async function assertStatusVisibleAndUnclipped(page) {
   assert.equal(unclipped, true);
 }
 
+async function assertSeatViewportFit(page, name) {
+  const layout = await page.evaluate(() => {
+    const stage = document.querySelector(".lock-seat-scroll");
+    const grid = document.querySelector("#lock-seat-grid");
+    const seats = [...document.querySelectorAll("#lock-seat-grid [data-availability]")];
+    const box = stage?.getBoundingClientRect();
+    const gridBox = grid?.getBoundingClientRect();
+    return {
+      stage: box && { left: box.left, top: box.top, right: box.right, bottom: box.bottom, width: box.width, height: box.height },
+      grid: gridBox && { width: gridBox.width, height: gridBox.height },
+      seats: seats.map((seat) => {
+        const rect = seat.getBoundingClientRect();
+        return { seatNo: seat.dataset.seatNo, left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
+      })
+    };
+  });
+  assert.ok(layout.stage?.width > 0 && layout.stage?.height >= 200, `${name}: collapsed seat stage ${JSON.stringify(layout)}`);
+  assert.ok(layout.grid?.width > 0 && layout.grid?.height > 0, `${name}: collapsed seat map ${JSON.stringify(layout)}`);
+  assert.ok(layout.seats.length > 0, `${name}: no seats rendered`);
+  for (const seat of layout.seats) {
+    assert.ok(seat.left >= layout.stage.left - 1 && seat.top >= layout.stage.top - 1
+      && seat.right <= layout.stage.right + 1 && seat.bottom <= layout.stage.bottom + 1,
+    `${name}: seat outside fitted viewport ${JSON.stringify({ seat, stage: layout.stage })}`);
+  }
+  return layout;
+}
+
 async function main() {
   const outputDirectory = path.resolve(argument("--output") || "");
   if (!argument("--output") || !path.isAbsolute(argument("--output"))) throw new Error("--output must be an absolute directory outside the repository");
@@ -219,6 +246,38 @@ async function main() {
       }));
       throw new Error(`Seat map did not load: ${JSON.stringify({ lockDiagnostics, requests: worker.requests })}`);
     }
+    const initialSeatStage = await assertSeatViewportFit(page, "wide hall initial fit");
+    const initialZoom = await page.locator("#lock-zoom-label").textContent();
+    assert.ok(Number.parseInt(initialZoom, 10) < 40, `wide hall retained the old 40% floor: ${initialZoom}`);
+    await page.locator("#lock-template").selectOption("901");
+    await page.waitForFunction(() => document.querySelectorAll("#lock-seat-grid [data-availability]").length === 150);
+    await assertSeatViewportFit(page, "tall hall show change");
+    await page.locator("#lock-template").selectOption("902");
+    await page.waitForFunction(() => document.querySelectorAll("#lock-seat-grid [data-availability]").length === 7);
+    const sparseStage = await assertSeatViewportFit(page, "sparse hall show change");
+    const sparseOffsets = await page.evaluate(() => {
+      const first = document.querySelector('[data-seat-no="1-7-16"]')?.getBoundingClientRect();
+      const last = document.querySelector('[data-seat-no="1-30-16"]')?.getBoundingClientRect();
+      return { first: first && { left: first.left, top: first.top }, last: last && { left: last.left, top: last.top } };
+    });
+    assert.ok(sparseOffsets.last.left > sparseOffsets.first.left, `sparse physical offsets collapsed: ${JSON.stringify(sparseOffsets)}`);
+    assert.equal(sparseStage.stage.height, initialSeatStage.stage.height, "seat stage height changed across maps");
+    await page.locator("#btn-lock-zoom-in").click();
+    const manualZoom = await page.locator("#lock-zoom-label").textContent();
+    assert.notEqual(manualZoom, initialZoom);
+    await page.evaluate(() => document.querySelector('[data-seat-no="1-1-1"]')?.click());
+    await page.evaluate(() => document.querySelector("#btn-refresh")?.click());
+    await page.waitForTimeout(100);
+    assert.equal(await page.locator("#lock-zoom-label").textContent(), manualZoom, "manual zoom reset after seat selection or status refresh");
+    await page.setViewportSize({ width: 1024, height: 760 });
+    assert.equal(await page.locator("#lock-zoom-label").textContent(), manualZoom, "manual zoom reset on resize");
+    await page.locator("#btn-lock-zoom-reset").click();
+    await page.waitForTimeout(50);
+    await assertSeatViewportFit(page, "explicit fit command");
+    await page.setViewportSize({ width: 1200, height: 900 });
+    await page.locator("#lock-template").selectOption("900");
+    await page.waitForFunction(() => document.querySelectorAll("#lock-seat-grid [data-availability]").length === 360);
+    await assertSeatViewportFit(page, "wide hall fit after resize");
     await page.locator("#lock-official-toggle").check();
     await page.waitForFunction(() => document.querySelector("#lock-official-frame")?.hasAttribute("srcdoc"));
     assert.match(await page.locator("#lock-official-frame").getAttribute("srcdoc"), /seats-block/);

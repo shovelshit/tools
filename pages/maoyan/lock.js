@@ -32,6 +32,25 @@
     return { min, max, valid: min <= max };
   }
 
+  function fitSeatViewport({ contentWidth, contentHeight, viewportWidth, viewportHeight, padding = 12 } = {}) {
+    const contentW = Number(contentWidth);
+    const contentH = Number(contentHeight);
+    const viewportW = Number(viewportWidth);
+    const viewportH = Number(viewportHeight);
+    const inset = Number(padding);
+    if (![contentW, contentH, viewportW, viewportH, inset].every(Number.isFinite)
+      || contentW <= 0 || contentH <= 0 || viewportW <= 0 || viewportH <= 0 || inset < 0) return null;
+    const availableW = viewportW - inset * 2;
+    const availableH = viewportH - inset * 2;
+    if (availableW <= 0 || availableH <= 0) return null;
+    const zoom = Math.min(1, availableW / contentW, availableH / contentH);
+    return {
+      zoom,
+      panX: (viewportW - contentW * zoom) / 2,
+      panY: (viewportH - contentH * zoom) / 2
+    };
+  }
+
   function templatesFromMovies(movies) {
     return (movies || []).filter((movie) => movie.checked).flatMap((movie) =>
       (movie.shows || []).flatMap((day) => (day.plist || []).filter(Boolean).flatMap((show) => {
@@ -193,6 +212,7 @@
   function createMaoyanLockController({
     api, runtime, getContext, onLog, onPollingState, getProfileGeneration, isProfileGenerationCurrent
   }) {
+    const seatViewportPadding = 12;
     const $ = (id) => document.getElementById(id);
     const els = {
       button: $("btn-lock-seats"), overlay: $("lock-overlay"), close: $("btn-lock-close"),
@@ -224,9 +244,11 @@
     const state = {
       context: null, session: { uploaded: false }, movieId: "", templateSeqNo: "", seatMap: null,
       selectedSeatNos: new Set(), rule: null, automationEnabled: false, templates: [], dateBounds: lockDateBounds(),
-      seatSeg: 2, zoom: 1, panX: 0, panY: 0, seatFeedback: { seqNo: "", at: 0 },
+      seatSeg: 2, zoom: 1, panX: 0, panY: 0, viewMode: "fit", seatFeedback: { seqNo: "", at: 0 },
       runtimeInfo: { kind: "web", canLoginMaoyan: false }, sessionActionBusy: false
     };
+    let seatFitFrame = null;
+    let seatResizeObserver = null;
 
     function show(message, type = "info") {
       if (typeof root.showToast === "function") root.showToast(message, type);
@@ -682,7 +704,7 @@
         els.seatGrid.append(row);
       }
       renderSelection();
-      centerSeatMap();
+      scheduleSeatFit();
     }
 
     function applyTransform() {
@@ -690,16 +712,54 @@
       if (els.zoomLabel) els.zoomLabel.textContent = `${Math.round(state.zoom * 100)}%`;
     }
 
-    // 平移边界: 内容不大于容器时固定居中; 超出容器时限制拖动范围, 不允许把内容整个拖出视野
-    function clampPan() {
+    function seatViewportSize() {
       const box = els.seatGrid?.closest(".lock-seat-scroll");
-      if (!box || !els.seatGrid) return;
-      const w = els.seatGrid.offsetWidth * state.zoom;
-      const h = els.seatGrid.offsetHeight * state.zoom;
-      const bw = box.clientWidth;
-      const bh = box.clientHeight;
-      state.panX = w <= bw ? (bw - w) / 2 : Math.min(0, Math.max(bw - w, state.panX));
-      state.panY = h <= bh ? (bh - h) / 2 : Math.min(0, Math.max(bh - h, state.panY));
+      if (!box || !els.seatGrid) return null;
+      return {
+        contentWidth: els.seatGrid.offsetWidth,
+        contentHeight: els.seatGrid.offsetHeight,
+        viewportWidth: box.clientWidth,
+        viewportHeight: box.clientHeight
+      };
+    }
+
+    function fitSeatMap() {
+      if (state.viewMode !== "fit") return false;
+      const fitted = fitSeatViewport({ ...seatViewportSize(), padding: seatViewportPadding });
+      if (!fitted) return false;
+      state.zoom = fitted.zoom;
+      state.panX = fitted.panX;
+      state.panY = fitted.panY;
+      applyTransform();
+      return true;
+    }
+
+    // 座位、行标与列标统一按实际内容边界测量。零尺寸由 ResizeObserver 的下一次布局回调重试。
+    function scheduleSeatFit() {
+      if (state.viewMode !== "fit" || seatFitFrame !== null) return;
+      const run = () => {
+        seatFitFrame = null;
+        fitSeatMap();
+      };
+      if (typeof root.requestAnimationFrame === "function") {
+        seatFitFrame = root.requestAnimationFrame(run);
+      } else {
+        run();
+      }
+    }
+
+    // 平移边界与自动适应使用相同内边距: 小图居中，大图至少保留一侧可见边缘。
+    function clampPan() {
+      const size = seatViewportSize();
+      if (!size) return;
+      const w = size.contentWidth * state.zoom;
+      const h = size.contentHeight * state.zoom;
+      const availableW = size.viewportWidth - seatViewportPadding * 2;
+      const availableH = size.viewportHeight - seatViewportPadding * 2;
+      state.panX = w <= availableW ? (size.viewportWidth - w) / 2
+        : Math.min(seatViewportPadding, Math.max(size.viewportWidth - seatViewportPadding - w, state.panX));
+      state.panY = h <= availableH ? (size.viewportHeight - h) / 2
+        : Math.min(seatViewportPadding, Math.max(size.viewportHeight - seatViewportPadding - h, state.panY));
     }
 
     function applyZoom() {
@@ -707,16 +767,12 @@
       applyTransform();
     }
 
-    // 渲染后把座位图放到容器正中
-    function centerSeatMap() {
-      applyZoom();
-    }
-
     // 以容器可视区坐标 (px,py) 为锚点缩放, 保持锚点下的内容位置不动
     function zoomAt(newZoom, px, py) {
       const previous = state.zoom;
-      state.zoom = Math.min(2, Math.max(0.4, Math.round(newZoom * 10) / 10));
+      state.zoom = Math.min(2, Math.max(0.1, Math.round(newZoom * 100) / 100));
       if (state.zoom === previous) return;
+      state.viewMode = "manual";
       const ratio = state.zoom / previous;
       state.panX = px - (px - state.panX) * ratio;
       state.panY = py - (py - state.panY) * ratio;
@@ -729,10 +785,8 @@
     }
 
     function resetZoom() {
-      state.zoom = 1;
-      state.panX = 0;
-      state.panY = 0;
-      applyZoom();
+      state.viewMode = "fit";
+      scheduleSeatFit();
     }
 
     // 官方座位图对比(1:1 复刻): seatMap.officialHtml 是 worker 从猫眼原页提取的 seats-block
@@ -942,6 +996,7 @@
     async function loadSeats() {
       const loadSeq = ++seatLoadSeq;
       const generation = capturedProfileGeneration();
+      state.viewMode = "fit";
       resetSeats();
       clearOfficialCompare();
       if (!state.templateSeqNo || !state.context?.cinemaId) return;
@@ -1231,6 +1286,14 @@
       emitPollingState();
     }
 
+    function dispose() {
+      if (seatFitFrame !== null && typeof root.cancelAnimationFrame === "function") root.cancelAnimationFrame(seatFitFrame);
+      seatFitFrame = null;
+      seatResizeObserver?.disconnect();
+      seatResizeObserver = null;
+      close();
+    }
+
     function reset() {
       close();
       state.context = null;
@@ -1327,6 +1390,11 @@
     // 滚轮缩放(以光标为锚), 双指捏合缩放(以中点为锚), 按住拖动平移
     const scrollEl = els.seatGrid.closest(".lock-seat-scroll");
     if (scrollEl) {
+      if (typeof root.ResizeObserver === "function") {
+        seatResizeObserver = new root.ResizeObserver(() => scheduleSeatFit());
+        seatResizeObserver.observe(scrollEl);
+        seatResizeObserver.observe(els.seatGrid);
+      }
       scrollEl.addEventListener("wheel", (event) => {
         event.preventDefault();
         const rect = scrollEl.getBoundingClientRect();
@@ -1367,6 +1435,7 @@
         const dy = event.clientY - drag.y;
         if (!drag.moved && Math.hypot(dx, dy) < 4) return;
         drag.moved = true;
+        state.viewMode = "manual";
         scrollEl.classList.add("dragging");
         state.panX = drag.panX + dx;
         state.panY = drag.panY + dy;
@@ -1393,14 +1462,14 @@
 
     return {
       syncAvailability, open, refreshTemplates: renderTemplates, close, reset,
-      refreshRemoteState, loginMaoyan, uploadSession, getSession: () => publicSession(state.session)
+      refreshRemoteState, loginMaoyan, uploadSession, dispose, getSession: () => publicSession(state.session)
     };
   }
 
   const exported = {
     createMaoyanLockController,
     lockUtils: {
-      templatesFromMovies, chinaDateBounds, lockDateBounds, seatPosition, seatDisplayLabel, seatSegmentOf, couplePartnerOf,
+      templatesFromMovies, chinaDateBounds, lockDateBounds, fitSeatViewport, seatPosition, seatDisplayLabel, seatSegmentOf, couplePartnerOf,
       seatVisualState, isReadyToSubmit, isLockAvailable, lockAction, changeMovieSelection, preferredTargetShow, clearSeatSelection, publicSession
     }
   };

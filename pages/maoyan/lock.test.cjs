@@ -132,6 +132,33 @@ test("seat visual state prioritizes selection and never treats unknown as sold",
   assert.equal(lockUtils.seatVisualState({ availability: "sold", available: false }, { isTemplate: true }), "available");
 });
 
+test("fit contains a wide hall without the old 40 percent floor", () => {
+  const { lockUtils } = loadLockModule();
+  const result = lockUtils.fitSeatViewport({
+    contentWidth: 1600, contentHeight: 700,
+    viewportWidth: 320, viewportHeight: 360, padding: 12
+  });
+  assert.ok(result.zoom > 0 && result.zoom < 0.4);
+  assert.ok(result.panX >= 12 && result.panY >= 12);
+  assert.ok(result.panX + 1600 * result.zoom <= 308);
+  assert.ok(result.panY + 700 * result.zoom <= 348);
+});
+
+test("fit centers smaller halls without upscaling and keeps the requested padding", () => {
+  const { lockUtils } = loadLockModule();
+  const result = lockUtils.fitSeatViewport({
+    contentWidth: 120, contentHeight: 80,
+    viewportWidth: 320, viewportHeight: 360, padding: 12
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), { zoom: 1, panX: 100, panY: 140 });
+});
+
+test("fit defers when the seat content or viewport is hidden", () => {
+  const { lockUtils } = loadLockModule();
+  assert.equal(lockUtils.fitSeatViewport({ contentWidth: 0, contentHeight: 700, viewportWidth: 320, viewportHeight: 360 }), null);
+  assert.equal(lockUtils.fitSeatViewport({ contentWidth: 1600, contentHeight: 700, viewportWidth: 0, viewportHeight: 360 }), null);
+});
+
 test("web mode disables one-click login and keeps manual upload", async () => {
   const dom = mountLock({ runtimeInfo: { kind: "web", canLoginMaoyan: false } });
   await Promise.resolve();

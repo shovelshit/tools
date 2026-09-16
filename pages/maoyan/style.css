@@ -1173,9 +1173,10 @@ summary:focus-visible {
 }
 
 .lock-seat-scroll {
-  max-height: 46vh;
+  position: relative;
+  height: clamp(240px, 46vh, 420px);
   overflow: hidden;
-  padding: 12px 4px;
+  padding: 0;
   border: 1px solid var(--border-subtle);
   border-radius: 4px;
   background: rgba(7, 11, 14, 0.46);
@@ -1187,7 +1188,7 @@ summary:focus-visible {
 .lock-seat-scroll.dragging,
 .lock-official-gesture.dragging { cursor: grabbing; }
 .lock-seat-scroll.dragging .lock-seat-rows { transition: none; }
-.lock-seat-rows { min-width: max-content; transform-origin: top left; transition: transform 0.08s ease; }
+.lock-seat-rows { position: absolute; top: 0; left: 0; width: max-content; min-width: max-content; transform-origin: top left; transition: transform 0.08s ease; }
 .lock-seat-row { min-height: 32px; display: grid; grid-template-columns: 30px max-content; align-items: center; }
 .lock-row-label { color: var(--muted); font-size: 10px; text-align: center; white-space: nowrap; }
 .lock-seat-grid { min-width: max-content; display: grid; grid-auto-columns: 28px; gap: 4px; }

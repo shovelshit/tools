@@ -169,7 +169,11 @@ async function startMockWorker({ rejectUpload = false } = {}) {
       ok: true,
       cinemaId: "25428",
       cinemaName: "寰映影城（大融城激光IMAX店）",
-      movies: [{ id: "100", nm: "奥德赛", showCount: 1, shows: [{ showDate: "2026-09-19", plist: [{ seqNo: "900", tm: "18:40", lang: "英语", tp: "IMAX2D", th: "1号激光IMAX厅", ticketStatus: 0 }] }] }],
+      movies: [{ id: "100", nm: "奥德赛", showCount: 3, shows: [{ showDate: "2026-09-19", plist: [
+        { seqNo: "900", tm: "18:40", lang: "英语", tp: "IMAX2D", th: "宽幅测试厅", ticketStatus: 0 },
+        { seqNo: "901", tm: "19:10", lang: "英语", tp: "IMAX2D", th: "高排测试厅", ticketStatus: 0 },
+        { seqNo: "902", tm: "19:40", lang: "英语", tp: "IMAX2D", th: "稀疏测试厅", ticketStatus: 0 }
+      ] }] }],
     });
     if (route === "/api/test-push" && request.method === "POST") {
       const next = { ...configs.get(profile), notifyVerified: true };
@@ -179,19 +183,29 @@ async function startMockWorker({ rejectUpload = false } = {}) {
     if (route === "/api/check" && request.method === "POST") return reply({ ok: true, cinemaName: "寰映影城（大融城激光IMAX店）", newTotal: 0 });
     if (route === "/api/lock/rule" && request.method === "GET") return reply({ ok: true, rule: null });
     if (route === "/api/lock/session/status") return reply({ session: sessions.get(profile) });
-    if (route === "/api/lock/template-seats" && request.method === "GET") return reply({
-      seatMap: {
-        seqNo: url.searchParams.get("seqNo") || "900",
-        sectionId: "1",
-        sectionName: "1号激光IMAX厅",
-        cols: 4,
-        seats: [
-          { seatNo: "1-1-1", rowId: "1", columnId: "1", type: "N", available: true, availability: "available", disabledReason: null, orderIndex: 1 },
-          { seatNo: "1-1-2", rowId: "1", columnId: "2", type: "N", available: false, availability: "sold", disabledReason: "已售", orderIndex: 2 },
-          { seatNo: "1-1-3", rowId: "1", columnId: "3", type: "N", available: false, availability: "unknown", disabledReason: "状态未知", orderIndex: 3 },
-        ],
-      },
-    });
+    if (route === "/api/lock/template-seats" && request.method === "GET") {
+      const seqNo = url.searchParams.get("seqNo") || "900";
+      const seat = (row, column, availability = "available") => ({
+        seatNo: `1-${column}-${row}`, rowId: String(row), columnId: String(column), type: "N",
+        available: availability === "available", availability,
+        disabledReason: availability === "sold" ? "已售" : availability === "unknown" ? "状态未知" : null,
+        orderIndex: column
+      });
+      const wideSeats = Array.from({ length: 4 }, (_, rowIndex) =>
+        Array.from({ length: 90 }, (_, columnIndex) => seat(rowIndex + 1, columnIndex + 1,
+          rowIndex === 0 && columnIndex === 1 ? "sold" : rowIndex === 0 && columnIndex === 2 ? "unknown" : "available"))).flat();
+      const tallSeats = Array.from({ length: 30 }, (_, rowIndex) =>
+        Array.from({ length: 5 }, (_, columnIndex) => seat(rowIndex + 1, columnIndex + 1))).flat();
+      const sparseSeats = [
+        seat(1, 1), seat(1, 12), seat(1, 24), seat(8, 3), seat(8, 19), seat(16, 7), seat(16, 30)
+      ];
+      const maps = {
+        "900": { sectionName: "宽幅测试厅", cols: 90, seats: wideSeats },
+        "901": { sectionName: "高排测试厅", cols: 5, seats: tallSeats },
+        "902": { sectionName: "稀疏测试厅", cols: 30, seats: sparseSeats }
+      };
+      return reply({ seatMap: { seqNo, sectionId: "1", ...maps[seqNo] || maps["900"] } });
+    }
     if (route === "/api/lock/official-seats" && request.method === "GET") return reply({
       seqNo: url.searchParams.get("seqNo") || "900",
       officialHtml: '<div class="seats-block" data-section-id="1" data-section-name="1号激光IMAX厅" data-seq-no="900"><span class="seat selectable" data-row-id="1" data-column-id="1" data-no="1-1-1" data-st="N"></span></div>',

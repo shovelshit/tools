@@ -312,14 +312,16 @@ test("seat feedback: button exists in DOM, handler defined, wired and highlighte
   assert.match(source, /els\.seatFeedback\?\.classList\.add\("attention"\);/);
 });
 
-test("seat map centers, pans by drag, zooms at cursor; risk box only for inferred seats", () => {
+test("seat map fits, pans by drag, zooms at cursor; risk box only for inferred seats", () => {
   const source = readSource("lock.js");
   const html = readSource("index.html");
-  // 平移/缩放/居中: translate+scale 变换, 内容小于容器时固定居中, 拖动吞 click 防误选
+  // 平移/缩放/适应: translate+scale 变换，按实测边界适应，拖动吞 click 防误选
   assert.match(source, /translate\(\$\{state\.panX\}px, \$\{state\.panY\}px\) scale\(\$\{state\.zoom\}\)/);
   assert.match(source, /function clampPan/);
-  assert.match(source, /function centerSeatMap/);
-  assert.match(source, /centerSeatMap\(\);/);
+  assert.match(source, /function fitSeatMap/);
+  assert.match(source, /function scheduleSeatFit/);
+  assert.match(source, /scheduleSeatFit\(\);/);
+  assert.match(source, /viewMode: "fit"/);
   assert.match(source, /suppressClick/);
   // 推断标记必须在模板分支被置真(此前从未置真, warn 与推断座位全可选逻辑均不生效)
   assert.match(source, /state\.showMode = "template";\n          state\.seatMapIsTemplate = true;/);
@@ -335,6 +337,7 @@ test("seat map centers, pans by drag, zooms at cursor; risk box only for inferre
   assert.match(html, /滚轮缩放 · 按住拖动 · 双指捏合/);
   const seatScrollRule = readSource("style.css").match(/\.lock-seat-scroll\s*\{([^}]*)\}/)?.[1] || "";
   assert.match(seatScrollRule, /overflow:\s*hidden/);
+  assert.match(seatScrollRule, /height:/);
   assert.match(seatScrollRule, /cursor:\s*grab/);
 });
 
