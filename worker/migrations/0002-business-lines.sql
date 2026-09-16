@@ -10,6 +10,16 @@ ALTER TABLE users ADD COLUMN business_line TEXT NOT NULL DEFAULT 'maoyan'
 CREATE INDEX IF NOT EXISTS idx_users_business_state_expiry
   ON users(business_line, state, expires_at);
 
+CREATE TABLE store_sessions (
+  token_hash TEXT PRIMARY KEY CHECK (length(token_hash) = 64),
+  business_line TEXT NOT NULL CHECK (business_line IN ('store')),
+  user_id TEXT NOT NULL REFERENCES users(id),
+  expires_at INTEGER NOT NULL,
+  admin_token_hash TEXT CHECK (admin_token_hash IS NULL OR length(admin_token_hash) = 64),
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX idx_store_sessions_expiry ON store_sessions(expires_at);
+
 ALTER TABLE service_settings RENAME TO service_settings_legacy;
 CREATE TABLE service_settings (
   id INTEGER PRIMARY KEY CHECK (id IN (1, 2)),

@@ -53,6 +53,17 @@ CREATE TABLE IF NOT EXISTS admin_monitor_sessions (
 CREATE INDEX IF NOT EXISTS idx_admin_monitor_sessions_expiry
   ON admin_monitor_sessions(expires_at);
 
+CREATE TABLE IF NOT EXISTS store_sessions (
+  token_hash TEXT PRIMARY KEY CHECK (length(token_hash) = 64),
+  business_line TEXT NOT NULL CHECK (business_line IN ('store')),
+  user_id TEXT NOT NULL REFERENCES users(id),
+  expires_at INTEGER NOT NULL,
+  admin_token_hash TEXT CHECK (admin_token_hash IS NULL OR length(admin_token_hash) = 64),
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_store_sessions_expiry ON store_sessions(expires_at);
+
 CREATE TABLE IF NOT EXISTS session_versions (
   user_id TEXT PRIMARY KEY REFERENCES users(id),
   active_version INTEGER NOT NULL CHECK (active_version > 0),

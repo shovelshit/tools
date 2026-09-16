@@ -7,7 +7,9 @@ import * as db from "./maoyan/db.js";
 import { CITY_LIST, fetchCinemaDetail, publicCinemaShows, searchCinemasByKw, runCheck, appendChange, pushNotify, currentChannel, currentCredential, isNotificationVerified, notificationVerification, minBatchMinutes, describeCrons, isMinuteStepCrons, resolveCronExprs, handleAdminTokens, handleLockApi, runScheduledChecks, runScheduledLockAfterMonitor, runScheduledMaintenance, MONITOR_WINDOW_LABEL, inMonitorWindow } from "./maoyan/index.js";
 import { authenticate, requireActiveAccount, serviceNow } from "./maoyan/auth.js";
 import { accountErrorResponse, handleAccountApi, handlePublicAccountApi } from "./maoyan/account-api.js";
+import { requireBusinessAccess } from "./common/business.js";
 import { handleStoreApi, handleStoreFile } from "./store/proxy.js";
+import { handleStoreAuth, requireActiveStoreAccount } from "./store/auth.js";
 import { testNotification } from "./maoyan/notification-copy.js";
 
 export { LockCoordinator } from "./maoyan/lock-runner.js";
@@ -74,11 +76,18 @@ export default {
     const url = new URL(request.url);
     const enrollmentResponse = await handleEnrollmentApi(request, env, url);
     if (enrollmentResponse) return enrollmentResponse;
+    try {
+      const storeAuthResponse = await handleStoreAuth(request, env, url);
+      if (storeAuthResponse) return storeAuthResponse;
+      if (url.pathname.startsWith("/store/api/") || url.pathname === "/store/file") {
+        await requireActiveStoreAccount(request, env, serviceNow(env));
+        if (url.pathname.startsWith("/store/api/")) return handleStoreApi(request, url);
+        return handleStoreFile(url);
+      }
+    } catch (error) {
+      return accountErrorResponse(error);
+    }
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
-
-    // ---- store 工具页(无需登录) ----
-    if (url.pathname.startsWith("/store/api/")) return handleStoreApi(request, url);
-    if (url.pathname === "/store/file") return handleStoreFile(url);
 
     if (!url.pathname.startsWith("/api/")) {
       const assetResponse = await serveMaoyanAsset(request, env, url);
@@ -103,6 +112,7 @@ export default {
     if (!principal) return json({ ok: false, code: "UNAUTHORIZED", error: "访问密钥无效" }, 401);
     const token = principal.userId;
     try {
+      requireBusinessAccess(principal, "maoyan");
       const accountResponse = await handleAccountApi(request, env, url, principal);
       if (accountResponse) return accountResponse;
 

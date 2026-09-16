@@ -37,6 +37,7 @@ test("access key authenticates a principal without binding the current IP", asyn
   assert.equal(principal.userId, account.id);
   assert.equal(principal.credentialType, "access_key");
   assert.equal(principal.accountStatus, "active");
+  assert.equal(principal.businessLine, "maoyan");
   assert.equal((await requireActiveAccount(env, account.id, NOW)).id, account.id);
 });
 

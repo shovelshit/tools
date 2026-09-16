@@ -161,5 +161,5 @@ export function accountErrorResponse(error) {
       : code === "ACCOUNT_EXPIRED" || code === "ACCOUNT_SUSPENDED" || code === "ACCOUNT_REVOKED" || code === "FORBIDDEN" ? 403
         : ["CONFLICT", "REQUEST_CONFLICT", "VERSION_CONFLICT", "CONFIG_CONFLICT", "ACCOUNT_NOT_EXPIRED", "ACCOUNT_NOT_RENEWABLE", "CAPACITY_FULL", "FINGERPRINT_IN_USE"].includes(code) ? 409
           : code === "INVALID_REQUEST" ? 400 : 500;
-  return json({ ok: false, code, error: error?.message || "服务暂时不可用" }, status);
+  return json({ ok: false, code, error: error?.message || "服务暂时不可用" }, status, { "Cache-Control": "no-store" });
 }
