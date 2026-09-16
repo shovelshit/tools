@@ -243,15 +243,17 @@
 
       <div class="lock-dialog-body">
         <section class="lock-section" id="lock-section-session">
-          <h3>猫眼会话</h3>
-          <p id="lock-gate-hint" class="lock-status hidden">锁座功能需要先上传猫眼登录态：在猫眼网页版登录后导出会话文件（session.json），上传成功后即可选座与自动锁座。会话仅加密保存在云端。</p>
-          <p id="lock-session-status" class="lock-status">尚未上传猫眼会话</p>
-          <div class="lock-upload-row">
-            <input id="lock-session-file" type="file" accept=".json,application/json" />
-            <button id="btn-lock-login" class="btn small ghost" type="button">Web端不支持一键登录</button>
-            <button id="btn-lock-upload" class="btn small ghost" type="button">手动上传登录态</button>
-            <button id="btn-lock-remove-session" class="btn small ghost danger hidden" type="button">删除会话</button>
-          </div>
+          <details id="lock-session-details" class="lock-details" open>
+            <summary><span>猫眼会话</span><span id="lock-session-summary" class="lock-summary-value">尚未上传</span></summary>
+            <p id="lock-gate-hint" class="lock-status hidden">锁座功能需要先上传猫眼登录态：在猫眼网页版登录后导出会话文件（session.json），上传成功后即可选座与自动锁座。会话仅加密保存在云端。</p>
+            <p id="lock-session-status" class="lock-status">尚未上传猫眼会话</p>
+            <div class="lock-upload-row">
+              <input id="lock-session-file" type="file" accept=".json,application/json" />
+              <button id="btn-lock-login" class="btn small ghost" type="button">Web端不支持一键登录</button>
+              <button id="btn-lock-upload" class="btn small ghost" type="button">手动上传登录态</button>
+              <button id="btn-lock-remove-session" class="btn small ghost danger hidden" type="button">删除会话</button>
+            </div>
+          </details>
         </section>
 
         <section class="lock-section" id="lock-section-schedule">
@@ -272,32 +274,30 @@
           <div class="lock-seat-heading">
             <h3>座位选择</h3>
             <div class="lock-heading-tools">
-              <div class="lock-legend" aria-label="座位图图例"><span class="legend-seat available"></span>可选 <span class="legend-seat sold"></span>已售 <span class="legend-seat selected"></span>已选 <span class="legend-seat unavailable"></span>不可用</div>
+              <div class="lock-legend" aria-label="座位图图例"><span class="legend-seat available"></span>可选 <span class="legend-seat sold"></span>已售 <span class="legend-seat selected"></span>已选 <span class="legend-seat unavailable"></span>不可用 <span class="legend-seat unknown"></span>未知</div>
               <label class="lock-official-toggle"><input id="lock-official-toggle" type="checkbox" /> 官方对照</label>
               <button id="btn-lock-seat-feedback" class="btn small ghost lock-feedback" type="button">反馈座位问题</button>
             </div>
           </div>
-          <div class="lock-zoom-bar">
+          <div class="lock-zoom-bar" aria-label="座位图缩放和拖动操作">
             <span class="muted">缩放</span>
             <button id="btn-lock-zoom-out" class="btn small ghost" type="button" aria-label="缩小">－</button>
             <span id="lock-zoom-label">100%</span>
             <button id="btn-lock-zoom-in" class="btn small ghost" type="button" aria-label="放大">＋</button>
             <button id="btn-lock-zoom-reset" class="btn small ghost" type="button" title="适应座位图">适应</button>
-            <span class="muted">滚轮缩放 · 按住拖动 · 双指捏合</span>
           </div>
           <p id="lock-seat-source" class="lock-seat-source hidden"></p>
           <div class="lock-screen">银幕方向</div>
-          <div class="lock-seat-scroll"><div id="lock-seat-grid" class="lock-seat-rows"><div class="lock-empty">选择可售场次后加载座位表</div></div></div>
+          <div class="lock-seat-scroll" title="滚轮缩放，按住拖动，双指捏合"><div id="lock-seat-grid" class="lock-seat-rows"><div class="lock-empty">选择可售场次后加载座位表</div></div></div>
           <details id="lock-official-wrap" class="lock-official hidden">
             <summary>官方座位图（对比 · 只读）</summary>
             <p class="lock-official-hint">猫眼主站原版渲染（沙箱内嵌，无任何脚本运行），仅供与上方工具座位图对照；可缩放查看细节，工具图可点选，此图只读。</p>
-            <div class="lock-zoom-bar">
+            <div class="lock-zoom-bar" aria-label="官方座位图缩放和拖动操作">
               <span class="muted">缩放</span>
               <button id="btn-official-zoom-out" class="btn small ghost" type="button" aria-label="缩小">－</button>
               <span id="official-zoom-label">适应</span>
               <button id="btn-official-zoom-in" class="btn small ghost" type="button" aria-label="放大">＋</button>
               <button id="btn-official-zoom-reset" class="btn small ghost" type="button">重置</button>
-              <span class="muted">滚轮缩放 · 按住拖动 · 双指捏合 · 只读</span>
             </div>
             <div class="lock-official-frame-wrap"><iframe id="lock-official-frame" sandbox="allow-same-origin" scrolling="no" title="官方座位图（只读对比）"></iframe><div id="lock-official-gesture" class="lock-official-gesture" title="滚轮缩放，按住拖动"></div></div>
           </details>
@@ -310,9 +310,11 @@
         </section>
 
         <section class="lock-section" id="lock-section-rules">
-          <h3>已保存规则</h3>
-          <p id="lock-rule-status" class="lock-status">暂无已保存的锁座规则</p>
-          <button id="btn-lock-cancel-rule" class="btn small ghost danger hidden" type="button">取消锁座规则</button>
+          <details id="lock-rule-details" class="lock-details">
+            <summary><span>已保存规则</span><span id="lock-rule-summary" class="lock-summary-value">暂无</span></summary>
+            <p id="lock-rule-status" class="lock-status">暂无已保存的锁座规则</p>
+            <button id="btn-lock-cancel-rule" class="btn small ghost danger hidden" type="button">取消锁座规则</button>
+          </details>
         </section>
       </div>
 

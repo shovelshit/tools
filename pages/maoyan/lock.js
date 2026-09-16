@@ -209,6 +209,12 @@
     return result;
   }
 
+  function detailOpenState(session, rule) {
+    const uploaded = session?.uploaded === true;
+    const ruleNeedsAttention = ["failed", "unknown", "expired"].includes(String(rule?.state || ""));
+    return { session: !uploaded, rule: ruleNeedsAttention };
+  }
+
   function createMaoyanLockController({
     api, runtime, getContext, onLog, onPollingState, getProfileGeneration, isProfileGenerationCurrent
   }) {
@@ -229,6 +235,8 @@
       officialZoomReset: $("btn-official-zoom-reset"), officialZoomLabel: $("official-zoom-label"),
       officialGesture: $("lock-official-gesture"),
       gateHint: $("lock-gate-hint"),
+      sessionDetails: $("lock-session-details"), sessionSummary: $("lock-session-summary"),
+      ruleDetails: $("lock-rule-details"), ruleSummary: $("lock-rule-summary"),
       sectionSchedule: $("lock-section-schedule"),
       sectionSeats: $("lock-section-seats"),
       sectionRisk: $("lock-section-risk"),
@@ -287,6 +295,13 @@
     }
 
     function setHidden(el, hidden) { el?.classList.toggle("hidden", hidden); }
+
+    function setDetailsOpen(details, open) {
+      if (!details) return;
+      const active = root.document?.activeElement;
+      const focusInside = active && typeof details.contains === "function" && details.contains(active);
+      if (open || !focusInside) details.open = Boolean(open);
+    }
 
     function renderSessionActions() {
       const info = state.runtimeInfo || { kind: "web", canLoginMaoyan: false };
@@ -413,13 +428,17 @@
       renderSessionActions();
       const gated = !session.uploaded;
       renderGate(gated);
+      const detailState = detailOpenState(session, state.rule);
+      setDetailsOpen(els.sessionDetails, detailState.session);
       if (gated) {
         els.sessionStatus.textContent = "尚未上传猫眼会话";
+        if (els.sessionSummary) els.sessionSummary.textContent = "尚未上传";
         setHidden(els.removeSession, true);
         return;
       }
       const parts = [session.uidMasked, session.sourceSavedAt && `来源 ${session.sourceSavedAt}`, session.uploadedAt && `上传 ${session.uploadedAt}`].filter(Boolean);
       els.sessionStatus.textContent = parts.join(" · ");
+      if (els.sessionSummary) els.sessionSummary.textContent = session.uidMasked || "已上传";
       setHidden(els.removeSession, false);
     }
 
@@ -428,6 +447,8 @@
       const rule = state.rule;
       if (!rule) {
         els.ruleStatus.textContent = "暂无已保存的锁座规则";
+        if (els.ruleSummary) els.ruleSummary.textContent = "暂无";
+        setDetailsOpen(els.ruleDetails, false);
         setHidden(els.cancelRule, true);
         renderSelection();
         emitPollingState();
@@ -447,6 +468,8 @@
           : "";
       const hall = rule.hall ? ` · ${rule.hall}` : "";
       els.ruleStatus.textContent = `${rule.cinemaName || "影院"} · ${rule.movieName || "影片"}${hall} · ${rule.targetDate || ""} ${rule.templateTime || ""} · ${seats} · ${status}${suffix}`;
+      if (els.ruleSummary) els.ruleSummary.textContent = status;
+      setDetailsOpen(els.ruleDetails, detailOpenState(state.session, rule).rule);
       setHidden(els.cancelRule, false);
       renderSelection();
       emitPollingState();
@@ -1470,7 +1493,7 @@
     createMaoyanLockController,
     lockUtils: {
       templatesFromMovies, chinaDateBounds, lockDateBounds, fitSeatViewport, seatPosition, seatDisplayLabel, seatSegmentOf, couplePartnerOf,
-      seatVisualState, isReadyToSubmit, isLockAvailable, lockAction, changeMovieSelection, preferredTargetShow, clearSeatSelection, publicSession
+      seatVisualState, isReadyToSubmit, isLockAvailable, lockAction, changeMovieSelection, preferredTargetShow, clearSeatSelection, publicSession, detailOpenState
     }
   };
   if (typeof module !== "undefined" && module.exports) module.exports = exported;

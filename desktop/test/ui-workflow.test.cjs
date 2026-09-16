@@ -1,5 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
+const fs = require("node:fs");
+const path = require("node:path");
 
 const { bindAmbientMotion, deriveWorkflowState, renderWorkflow } = require("../../pages/maoyan/workflow.js");
 
@@ -182,4 +184,14 @@ test("workflow renderer exposes only the active panel and synchronizes accessibl
   assert.deepEqual(buttons.map((button) => button.small.textContent), ["已完成", "已完成", "当前步骤", "可继续"]);
   assert.deepEqual(panels.map((panel) => panel.classList.contains("is-active")), [false, true, false]);
   assert.deepEqual(panels.map((panel) => panel.getAttribute("aria-hidden")), ["true", "false", "true"]);
+});
+
+test("Maoyan lock shell exposes separate scroll body and accessible detail summaries", () => {
+  const root = path.resolve(__dirname, "../../pages/maoyan");
+  const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
+  const css = fs.readFileSync(path.join(root, "style.css"), "utf8");
+  assert.match(html, /lock-dialog-header[\s\S]*lock-dialog-body[\s\S]*lock-dialog-footer/);
+  assert.match(html, /id="lock-session-details"[\s\S]*<summary/);
+  assert.match(html, /id="lock-rule-details"[\s\S]*<summary/);
+  assert.match(css, /\.lock-seat-scroll\s*\{[\s\S]*height:\s*clamp\(/);
 });

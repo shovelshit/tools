@@ -148,6 +148,22 @@ async function assertSeatViewportFit(page, name) {
   return layout;
 }
 
+async function assertLockShell(page, name) {
+  if (await page.evaluate(() => innerHeight <= 600)) {
+    await page.locator(".lock-seat-scroll").scrollIntoViewIfNeeded();
+  }
+  const layout = await page.evaluate(() => {
+    const box = (selector) => {
+      const rect = document.querySelector(selector)?.getBoundingClientRect();
+      return rect && { y: rect.y, height: rect.height, bottom: rect.bottom };
+    };
+    return { header: box(".lock-dialog-header"), stage: box(".lock-seat-scroll"), footer: box(".lock-dialog-footer") };
+  });
+  assert.ok(layout.header && layout.stage && layout.footer, `${name}: missing lock shell region`);
+  assert.ok(layout.header.y + layout.header.height <= layout.stage.y + 1, `${name}: dialog header overlaps seat viewport ${JSON.stringify(layout)}`);
+  assert.ok(layout.stage.y + layout.stage.height <= layout.footer.y + 1, `${name}: seat viewport overlaps dialog footer ${JSON.stringify(layout)}`);
+}
+
 async function main() {
   const outputDirectory = path.resolve(argument("--output") || "");
   if (!argument("--output") || !path.isAbsolute(argument("--output"))) throw new Error("--output must be an absolute directory outside the repository");
@@ -231,6 +247,7 @@ async function main() {
     await page.setViewportSize({ width: 1200, height: 900 });
     await page.locator("#btn-lock-seats").click();
     await page.waitForFunction(() => !document.querySelector("#lock-overlay")?.classList.contains("hidden"));
+    await assertLockShell(page, "lock shell before loading");
     await page.locator("#lock-target-date").fill("2026-09-19");
     await page.waitForFunction(() => document.querySelector("#lock-template")?.value === "900");
     try {
@@ -289,6 +306,9 @@ async function main() {
     const lockOverflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
     assert.ok(lockOverflow <= 1, `lock dialog overflow: ${lockOverflow}`);
     await page.screenshot({ path: path.join(outputDirectory, "lock-mobile.png"), fullPage: true });
+    await page.setViewportSize({ width: 1024, height: 600 });
+    await assertLockShell(page, "lock shell short viewport");
+    await page.screenshot({ path: path.join(outputDirectory, "lock-short-1024x600.png"), fullPage: true });
     assert.deepEqual(errors, []);
     await context.close();
 

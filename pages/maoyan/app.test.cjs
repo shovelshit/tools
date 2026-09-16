@@ -333,8 +333,9 @@ test("seat map fits, pans by drag, zooms at cursor; risk box only for inferred s
   assert.match(riskRule, /border:/);
   assert.match(riskRule, /background:/);
   assert.match(riskRule, /color:/);
-  // 画布式容器: 滚轮缩放/拖动平移
-  assert.match(html, /滚轮缩放 · 按住拖动 · 双指捏合/);
+  // 画布式容器: 滚轮缩放/拖动平移通过无障碍名称和原生 tooltip 提示
+  assert.match(html, /class="lock-seat-scroll" title="滚轮缩放，按住拖动，双指捏合"/);
+  assert.match(html, /class="lock-zoom-bar" aria-label="座位图缩放和拖动操作"/);
   const seatScrollRule = readSource("style.css").match(/\.lock-seat-scroll\s*\{([^}]*)\}/)?.[1] || "";
   assert.match(seatScrollRule, /overflow:\s*hidden/);
   assert.match(seatScrollRule, /height:/);

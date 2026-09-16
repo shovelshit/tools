@@ -11,6 +11,27 @@ function loadLockModule() {
   return context.module.exports;
 }
 
+test("lock shell keeps healthy details collapsed and opens actionable states", () => {
+  const { lockUtils } = loadLockModule();
+  const state = (session, rule) => JSON.parse(JSON.stringify(lockUtils.detailOpenState(session, rule)));
+  assert.deepEqual(state({ uploaded: false }, null), { session: true, rule: false });
+  assert.deepEqual(state({ uploaded: true }, { state: "waiting_schedule" }), { session: false, rule: false });
+  assert.deepEqual(state({ uploaded: true }, { state: "unknown" }), { session: false, rule: true });
+  assert.deepEqual(state({ uploaded: true }, { state: "failed" }), { session: false, rule: true });
+});
+
+test("lock layout source keeps the separate shell and scoped glass surfaces", () => {
+  const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
+  const css = fs.readFileSync(path.join(__dirname, "style.css"), "utf8");
+  assert.match(html, /<details id="lock-session-details"/);
+  assert.match(html, /<details id="lock-rule-details"/);
+  assert.match(html, /legend-seat unknown/);
+  assert.match(css, /\.lock-dialog\s*\{[^}]*display:\s*grid/);
+  assert.match(css, /\.lock-dialog-body\s*\{[^}]*overflow-y:\s*auto/);
+  assert.match(css, /\.workflow-main\s*\{[^}]*background:\s*rgba\(27,\s*35,\s*40,\s*0\.68\)/);
+  assert.match(css, /\.workflow-progress\s*\{[^}]*background:\s*rgba\(27,\s*35,\s*40,\s*0\.62\)/);
+});
+
 function fakeElement() {
   const listeners = new Map();
   const classes = new Set();
