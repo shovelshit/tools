@@ -41,6 +41,10 @@ export async function seedAccount(env, {
   ).bind(id, JSON.stringify({ selectedMovieIds: [], enabled: false, ...config }), new Date(nowMs).toISOString()).run();
   if (fingerprint) {
     await env.DB.prepare(
+      "INSERT INTO enrollment_claims(user_id,fingerprint_digest,fingerprint_version,initial_ip_digest,request_id,created_at) " +
+      "VALUES (?,?,?,?,?,?)"
+    ).bind(id, fingerprint, "test-v1", "test-ip", crypto.randomUUID(), nowMs).run();
+    await env.DB.prepare(
       "INSERT INTO fingerprint_bindings(fingerprint_digest,fingerprint_version,user_id,bound_until,version) VALUES (?,?,?,?,1)"
     ).bind(fingerprint, "test-v1", id, actualExpiry).run();
   }

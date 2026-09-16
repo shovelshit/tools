@@ -81,3 +81,65 @@ CREATE TABLE IF NOT EXISTS account_migrations (
   name TEXT PRIMARY KEY,
   activated_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS mutation_guards (
+  request_id TEXT PRIMARY KEY,
+  ok INTEGER NOT NULL CHECK (ok = 1)
+);
+
+CREATE TABLE IF NOT EXISTS account_operations (
+  user_id TEXT NOT NULL REFERENCES users(id),
+  request_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  original_version INTEGER NOT NULL,
+  result_expires_at INTEGER,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, request_id, kind)
+);
+
+CREATE VIEW IF NOT EXISTS capacity_usage AS
+SELECT 'user' AS kind, id AS resource_id
+FROM users
+WHERE role = 'user' AND state != 'revoked'
+  AND expires_at > CAST(unixepoch('subsec') * 1000 AS INTEGER)
+UNION ALL
+SELECT 'reservation' AS kind, reservation_id AS resource_id
+FROM enrollment_reservations
+WHERE expires_at > CAST(unixepoch('subsec') * 1000 AS INTEGER);
+
+CREATE TRIGGER IF NOT EXISTS users_capacity_insert AFTER INSERT ON users
+WHEN NEW.role = 'user' AND NEW.state != 'revoked'
+  AND NEW.expires_at > CAST(unixepoch('subsec') * 1000 AS INTEGER)
+BEGIN
+  SELECT CASE WHEN (SELECT COUNT(*) FROM capacity_usage) >
+    COALESCE((SELECT max_users FROM service_settings WHERE id = 1), -1)
+    THEN RAISE(ABORT, 'CAPACITY_FULL') END;
+END;
+
+CREATE TRIGGER IF NOT EXISTS users_capacity_update AFTER UPDATE OF role, state, expires_at ON users
+BEGIN
+  SELECT CASE WHEN (SELECT COUNT(*) FROM capacity_usage) >
+    COALESCE((SELECT max_users FROM service_settings WHERE id = 1), -1)
+    THEN RAISE(ABORT, 'CAPACITY_FULL') END;
+END;
+
+CREATE TRIGGER IF NOT EXISTS reservations_capacity_insert AFTER INSERT ON enrollment_reservations
+WHEN NEW.expires_at > CAST(unixepoch('subsec') * 1000 AS INTEGER)
+BEGIN
+  SELECT CASE WHEN (SELECT COUNT(*) FROM capacity_usage) >
+    COALESCE((SELECT max_users FROM service_settings WHERE id = 1), -1)
+    THEN RAISE(ABORT, 'CAPACITY_FULL') END;
+END;
+
+CREATE TRIGGER IF NOT EXISTS reservations_capacity_update AFTER UPDATE OF expires_at ON enrollment_reservations
+BEGIN
+  SELECT CASE WHEN (SELECT COUNT(*) FROM capacity_usage) >
+    COALESCE((SELECT max_users FROM service_settings WHERE id = 1), -1)
+    THEN RAISE(ABORT, 'CAPACITY_FULL') END;
+END;
+
+CREATE TRIGGER IF NOT EXISTS settings_capacity_update BEFORE UPDATE OF max_users ON service_settings
+BEGIN
+  SELECT CASE WHEN NEW.max_users < (SELECT COUNT(*) FROM capacity_usage)
+    THEN RAISE(ABORT, 'CAPACITY_BELOW_USAGE') END;
+END;
