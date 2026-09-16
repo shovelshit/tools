@@ -2,8 +2,9 @@
 // 用户状态(config/snapshot/changes/status/lock-rule/seatfb)已迁移 D1(见 db.js),
 // KV 仅保留加密会话(maoyan-session)。userKey 现在只服务会话键名。
 
-import { deleteUserData, getConfigRecord, getSessionVersion, putConfig, putConfigVersioned, replaceConfigIfUnchanged } from "./db.js";
+import { deleteUserData, getConfigRecord, getSessionVersion, putConfig, replaceConfigIfUnchanged } from "./db.js";
 import { decryptNotifyCredential, encryptNotifyCredential } from "./notify-secrets.js";
+import { saveConfigWithSubscription, syncSubscription } from "./monitor-store.js";
 
 const CREDENTIALS = {
   bark: "barkKey",
@@ -31,7 +32,10 @@ export async function getUserConfig(env, tokenId) {
   if (hasLegacyPlaintext && (env.NOTIFY_ENCRYPTION_KEY || env.SESSION_ENCRYPTION_KEY)) {
     const migrated = await storedConfig(env, tokenId, config);
     const result = await replaceConfigIfUnchanged(env.DB, tokenId, record.raw, migrated);
-    if (Number(result?.meta?.changes || 0) === 1) config.version += 1;
+    if (Number(result?.meta?.changes || 0) === 1) {
+      config.version += 1;
+      await syncSubscription(env.DB, tokenId, config, config.version, Date.now());
+    }
   }
   return config;
 }
@@ -51,11 +55,27 @@ async function storedConfig(env, tokenId, config) {
 }
 
 export async function putUserConfig(env, tokenId, config) {
-  await putConfig(env.DB, tokenId, await storedConfig(env, tokenId, config));
+  const account = await env.DB.prepare("SELECT 1 AS ok FROM users WHERE id=?").bind(tokenId).first();
+  if (!account) {
+    await putConfig(env.DB, tokenId, await storedConfig(env, tokenId, config));
+    return config;
+  }
+  return await saveConfigWithSubscription(env.DB, {
+    userId: tokenId,
+    storedConfig: await storedConfig(env, tokenId, config),
+    config,
+    nowMs: Date.now()
+  });
 }
 
 export async function putUserConfigVersioned(env, tokenId, config, expectedVersion) {
-  return await putConfigVersioned(env.DB, tokenId, await storedConfig(env, tokenId, config), expectedVersion);
+  return await saveConfigWithSubscription(env.DB, {
+    userId: tokenId,
+    storedConfig: await storedConfig(env, tokenId, config),
+    config,
+    expectedVersion,
+    nowMs: Date.now()
+  });
 }
 
 export async function saveUserConfig(env, tokenId, config, expectedVersion = config?.version) {

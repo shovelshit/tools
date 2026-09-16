@@ -258,6 +258,7 @@ export async function deleteLockRuleRow(db, tokenId) {
 // KV 侧的 maoyan-session 清理由调用方(user.js cleanupUserData)负责
 
 export async function deleteUserData(db, tokenId) {
+  await db.prepare("DELETE FROM monitor_subscriptions WHERE user_id = ?").bind(tokenId).run();
   await db.prepare("DELETE FROM user_config WHERE token_id = ?").bind(tokenId).run();
   await db.prepare("DELETE FROM monitor_status WHERE token_id = ?").bind(tokenId).run();
   await db.prepare("DELETE FROM monitor_snapshot WHERE token_id = ?").bind(tokenId).run();

@@ -80,7 +80,16 @@ test("a successful test verifies only the current channel and credential", async
 
   const startResponse = await worker.fetch(request("/api/config", { enabled: true }), env);
   assert.equal(startResponse.status, 200);
-  assert.equal((await startResponse.json()).config.enabled, true);
+  const started = (await startResponse.json()).config;
+  assert.equal(started.enabled, true);
+  const subscription = await env.DB.prepare(
+    "SELECT cinema_id,enabled,config_version FROM monitor_subscriptions WHERE user_id=?"
+  ).bind(tokenId).first();
+  assert.deepEqual({
+    cinemaId: subscription.cinema_id,
+    enabled: Number(subscription.enabled),
+    configVersion: Number(subscription.config_version)
+  }, { cinemaId: "", enabled: 0, configVersion: started.version });
 
   const changedResponse = await worker.fetch(request("/api/config", {
     enabled: false,

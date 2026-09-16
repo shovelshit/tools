@@ -63,6 +63,13 @@ export async function migrateAccounts(env, { nowMs = Date.now() } = {}) {
       "INSERT INTO audit_events(event_type,subject_user_id,data,created_at) " +
       "SELECT 'account_migrated',json_extract(value,'$.id'),'{}',? FROM json_each(?) WHERE true"
     ).bind(nowMs, payload),
+    env.DB.prepare(
+      "INSERT INTO monitor_subscriptions(user_id,cinema_id,enabled,config_version,baseline_version,next_due_at,updated_at) " +
+      "SELECT u.id,COALESCE(json_extract(c.data,'$.cinemaId'),'')," +
+      "CASE WHEN json_extract(c.data,'$.enabled')=1 AND COALESCE(json_extract(c.data,'$.cinemaId'),'')!='' THEN 1 ELSE 0 END," +
+      "c.version,NULL,?,? FROM users u JOIN user_config c ON c.token_id=u.id " +
+      "ON CONFLICT(user_id) DO NOTHING"
+    ).bind(nowMs, nowMs),
     env.DB.prepare("DELETE FROM tokens")
   ]);
 
@@ -106,7 +113,14 @@ export async function importLegacyAccount(env, token) {
     ).bind(token.id, tokenHash, String(token.token).slice(0, 4), String(token.token).slice(-4), activatedAt),
     env.DB.prepare(
       "INSERT INTO audit_events(event_type,subject_user_id,data,created_at) VALUES ('account_migrated',?,'{}',?)"
-    ).bind(token.id, activatedAt)
+    ).bind(token.id, activatedAt),
+    env.DB.prepare(
+      "INSERT INTO monitor_subscriptions(user_id,cinema_id,enabled,config_version,baseline_version,next_due_at,updated_at) " +
+      "SELECT u.id,COALESCE(json_extract(c.data,'$.cinemaId'),'')," +
+      "CASE WHEN json_extract(c.data,'$.enabled')=1 AND COALESCE(json_extract(c.data,'$.cinemaId'),'')!='' THEN 1 ELSE 0 END," +
+      "c.version,NULL,?,? FROM users u JOIN user_config c ON c.token_id=u.id WHERE u.id=? " +
+      "ON CONFLICT(user_id) DO NOTHING"
+    ).bind(activatedAt, activatedAt, token.id)
   );
   await env.DB.batch(statements);
   return { imported: true, accountMigrationApplied: true };
