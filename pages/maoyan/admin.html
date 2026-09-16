@@ -41,8 +41,14 @@
     </header>
 
     <section class="admin-toolbar" aria-label="账号容量设置">
+      <label>业务
+        <select id="account-business-line" aria-label="业务线">
+          <option value="maoyan">猫眼监控</option>
+          <option value="store">应用商店</option>
+        </select>
+      </label>
       <div class="capacity-meter">
-        <span class="muted">普通账号</span>
+        <span class="muted" id="capacity-label">猫眼账号</span>
         <strong id="capacity-summary">-- / --</strong>
       </div>
       <label>名额上限 <input id="capacity-max" type="number" min="0" step="1" /></label>
@@ -51,7 +57,7 @@
       <button id="btn-save-settings" class="btn small primary">保存设置</button>
     </section>
 
-    <section class="admin-toolbar resource-summary" aria-label="资源状态">
+    <section class="admin-toolbar resource-summary" id="maoyan-resource-summary" aria-label="资源状态">
       <div><span class="muted">活跃影院</span><strong id="resource-cinemas">--</strong></div>
       <div><span class="muted">通知积压</span><strong id="resource-pending">--</strong></div>
       <div><span class="muted">通知失败</span><strong id="resource-failed">--</strong></div>

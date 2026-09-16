@@ -90,3 +90,42 @@ test("capacity settings use CAS and cannot drop below current occupancy", async 
   assert.equal(saved.status, 200);
   assert.equal((await saved.json()).settings.maxUsers, 3);
 });
+
+test("admin accounts, creation, and settings are independently scoped by business line", async () => {
+  const env = await createAccountEnv({ nowMs: NOW, maxUsers: 2 });
+  env.NOW_MS = String(NOW);
+  await seedAccount(env, { remark: "Cinema", businessLine: "maoyan", expiresAt: NOW + 60_000 });
+  await seedAccount(env, { remark: "Apps", businessLine: "store", expiresAt: NOW + 60_000 });
+
+  const storeList = await worker.fetch(request("/api/admin/accounts?businessLine=store"), env);
+  const listed = await storeList.json();
+  assert.deepEqual(listed.accounts.map((account) => account.remark), ["Apps"]);
+  assert.equal(listed.accounts[0].businessLine, "store");
+  assert.equal(listed.accounts[0].monitorState, null);
+  assert.equal(listed.accounts[0].lastActivityAt, null);
+  assert.equal(listed.capacity.used, 1);
+
+  const settingsResponse = await worker.fetch(request("/api/admin/settings?businessLine=store"), env);
+  const storeSettings = (await settingsResponse.json()).settings;
+  assert.equal(storeSettings.maxUsers, 20);
+  const created = await worker.fetch(request("/api/admin/accounts/create", {
+    method: "POST",
+    body: { remark: "Second app", businessLine: "store", requestId: crypto.randomUUID() }
+  }), env);
+  assert.equal(created.status, 201);
+  assert.equal((await created.json()).account.businessLine, "store");
+
+  const maoyanList = await worker.fetch(request("/api/admin/accounts"), env);
+  assert.deepEqual((await maoyanList.json()).accounts.map((account) => account.remark), ["Cinema"]);
+});
+
+test("business assignment cannot be edited on an existing account", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  env.NOW_MS = String(NOW);
+  const { account } = await seedAccount(env, { businessLine: "store", expiresAt: NOW + 60_000 });
+  const response = await worker.fetch(request("/api/admin/accounts/update", {
+    method: "POST",
+    body: { id: account.id, expectedVersion: account.version, patch: { businessLine: "maoyan" } }
+  }), env);
+  assert.equal(response.status, 400);
+});

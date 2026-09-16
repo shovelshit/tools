@@ -112,3 +112,18 @@ test("expiry cleanup loses the race to renewal without deleting anything", async
   }), { cleaned: false });
   assert.deepEqual(await db.getStatus(env.DB, account.id), { enabled: true });
 });
+
+test("Maoyan expiry cleanup does not mutate Store account state", async () => {
+  const nowMs = Date.parse("2026-09-16T04:00:00.000Z");
+  const expiresAt = nowMs - 31 * 24 * 60 * 60 * 1000;
+  const env = await createAccountEnv({ nowMs });
+  const { account } = await seedAccount(env, {
+    businessLine: "store", expiresAt, config: { cinemaId: "store-data" }
+  });
+  await db.putStatus(env.DB, account.id, { enabled: true });
+  assert.deepEqual(await cleanupExpiredAccount(env, {
+    userId: account.id, expectedExpiresAt: expiresAt, expectedVersion: account.version, nowMs
+  }), { cleaned: false });
+  assert.deepEqual(await db.getStatus(env.DB, account.id), { enabled: true });
+  assert.equal((await env.DB.prepare("SELECT archived_at FROM users WHERE id=?").bind(account.id).first()).archived_at, null);
+});

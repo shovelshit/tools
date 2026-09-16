@@ -16,12 +16,75 @@ async function startMockWorker({ rejectUpload = false } = {}) {
     notifyVerified: false,
     ...cron,
   }]));
+  const store = {
+    catalogRequests: 0,
+    mode: "normal",
+    deferred: null,
+    account: null,
+  };
   const server = http.createServer(async (request, response) => {
     const url = new URL(request.url, "http://localhost");
+    const reply = (data, code = 200, headers = {}) => {
+      response.writeHead(code, { "Content-Type": "application/json", ...headers });
+      response.end(JSON.stringify(data));
+    };
+    if (url.pathname.startsWith("/store/")) {
+      let text = "";
+      for await (const chunk of request) text += chunk;
+      let body = {};
+      try { body = JSON.parse(text || "{}"); } catch {}
+      const authenticated = /(?:^|;\s*)store_session=valid(?:;|$)/.test(request.headers.cookie || "");
+      if (url.pathname === "/store/auth/session" && request.method === "POST") {
+        const expired = body.key === "expired-store-token";
+        if (body.key !== "store-token" && !expired) return reply({ ok: false, code: "UNAUTHORIZED", error: "访问密钥无效" }, 401);
+        store.account = {
+          userId: "store-user", role: "user", businessLine: "store", remark: "车载应用",
+          accountStatus: expired ? "expired" : "active", expiresAt: expired ? Date.now() - 1000 : Date.now() + 86400000,
+          version: 1, accountVersion: 1
+        };
+        return reply({ ok: true, account: store.account }, 200, { "Set-Cookie": "store_session=valid; HttpOnly; SameSite=Lax; Path=/store/" });
+      }
+      if (url.pathname === "/store/auth/session" && request.method === "GET") {
+        if (!authenticated || !store.account) return reply({ ok: false, code: "UNAUTHORIZED", error: "登录状态无效" }, 401);
+        return reply({ ok: true, account: store.account });
+      }
+      if (url.pathname === "/store/auth/logout" && request.method === "POST") {
+        store.account = null;
+        return reply({ ok: true }, 200, { "Set-Cookie": "store_session=; HttpOnly; SameSite=Lax; Path=/store/; Max-Age=0" });
+      }
+      if (url.pathname === "/store/auth/renew" && request.method === "POST") {
+        if (!authenticated || !store.account) return reply({ ok: false, code: "UNAUTHORIZED", error: "登录状态无效" }, 401);
+        store.account = { ...store.account, accountStatus: "active", expiresAt: Date.now() + 86400000, version: 2, accountVersion: 2 };
+        return reply({ ok: true, account: store.account });
+      }
+      if (!authenticated || store.account?.accountStatus !== "active") {
+        return reply({ ok: false, code: store.account ? "ACCOUNT_EXPIRED" : "UNAUTHORIZED", error: "无权访问" }, store.account ? 403 : 401);
+      }
+      if (url.pathname === "/store/api/fs/list") {
+        store.catalogRequests += 1;
+        if (store.deferred) await store.deferred.promise;
+        if (store.mode === "error") return reply({ message: "provider unavailable" }, 502);
+        const content = store.mode === "empty" ? [] : [
+          { name: "Navigation.apk", is_dir: false, size: 1048576, modified: "2026-09-16T04:00:00Z" }
+        ];
+        return reply({ code: 200, data: { content, total: content.length } });
+      }
+      if (url.pathname === "/store/api/fs/get") {
+        return reply({ code: 200, data: {
+          name: "Navigation.apk", size: 1048576, modified: "2026-09-16T04:00:00Z",
+          created: "2026-09-16T04:00:00Z", provider: "Mock", raw_url: "http://appstore.cnmlynk.org/Navigation.apk"
+        } });
+      }
+      if (url.pathname === "/store/file") {
+        response.writeHead(200, { "Content-Type": "application/octet-stream", "Content-Disposition": "attachment; filename=Navigation.apk" });
+        response.end("mock-apk");
+        return;
+      }
+      return reply({ error: "Unknown Store API" }, 404);
+    }
     const [, profile, ...parts] = url.pathname.split("/");
     const route = "/" + parts.join("/");
     requests.push({ path: url.pathname, method: request.method, token: request.headers["x-token"] });
-    const reply = (data, code = 200) => { response.writeHead(code, { "Content-Type": "application/json" }); response.end(JSON.stringify(data)); };
     if (route === "/api/enrollment/config") return reply({
       ok: true,
       enabled: true,
@@ -101,7 +164,20 @@ async function startMockWorker({ rejectUpload = false } = {}) {
     reply({ error: "Unknown API" }, 404);
   });
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
-  return { url: `http://127.0.0.1:${server.address().port}`, requests, uploads, close: () => new Promise((resolve, reject) => { server.close((error) => error ? reject(error) : resolve()); server.closeAllConnections(); }) };
+  return {
+    url: `http://127.0.0.1:${server.address().port}`,
+    requests,
+    uploads,
+    store,
+    setStoreMode(mode) { store.mode = mode; },
+    deferNextStoreList() {
+      let release;
+      const promise = new Promise((resolve) => { release = resolve; });
+      store.deferred = { promise, release: () => { store.deferred = null; release(); } };
+      return store.deferred;
+    },
+    close: () => new Promise((resolve, reject) => { server.close((error) => error ? reject(error) : resolve()); server.closeAllConnections(); })
+  };
 }
 
 module.exports = { startMockWorker };

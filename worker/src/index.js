@@ -34,17 +34,24 @@ const MAOYAN_CSP = [
   "base-uri 'self'",
   "form-action 'self'"
 ].join("; ");
+const STORE_CSP = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "media-src 'self' blob:",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'"
+].join("; ");
 
-export async function serveMaoyanAsset(request, env, url = new URL(request.url)) {
-  if (url.pathname === "/maoyan") {
-    return Response.redirect(`${url.origin}/maoyan/`, 308);
-  }
-  if (!url.pathname.startsWith("/maoyan/") || !env.ASSETS) return null;
-  const response = await env.ASSETS.fetch(request);
+function staticAssetResponse(response, url, csp) {
   const headers = new Headers(response.headers);
   headers.set("X-Content-Type-Options", "nosniff");
   headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
-  headers.set("Content-Security-Policy", MAOYAN_CSP);
+  headers.set("Content-Security-Policy", csp);
   if ((headers.get("Content-Type") || "").includes("text/html")) {
     headers.set("Cache-Control", "no-store");
   } else if (url.searchParams.has("v")) {
@@ -53,6 +60,22 @@ export async function serveMaoyanAsset(request, env, url = new URL(request.url))
     headers.set("Cache-Control", "public, max-age=300");
   }
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
+export async function serveMaoyanAsset(request, env, url = new URL(request.url)) {
+  if (url.pathname === "/maoyan") {
+    return Response.redirect(`${url.origin}/maoyan/`, 308);
+  }
+  if (!url.pathname.startsWith("/maoyan/") || !env.ASSETS) return null;
+  const response = await env.ASSETS.fetch(request);
+  return staticAssetResponse(response, url, MAOYAN_CSP);
+}
+
+export async function serveStoreAsset(request, env, url = new URL(request.url)) {
+  if (url.pathname === "/store") return Response.redirect(`${url.origin}/store/`, 308);
+  if (!url.pathname.startsWith("/store/") || !env.ASSETS) return null;
+  const response = await env.ASSETS.fetch(request);
+  return staticAssetResponse(response, url, STORE_CSP);
 }
 
 // 推送/上游失败的状态码: 凭据未配置属于客户端配置问题(400), 其余(渠道侧或猫眼侧异常)归为上游错误(502)
@@ -93,6 +116,8 @@ export default {
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
 
     if (!url.pathname.startsWith("/api/")) {
+      const storeAssetResponse = await serveStoreAsset(request, env, url);
+      if (storeAssetResponse) return storeAssetResponse;
       const assetResponse = await serveMaoyanAsset(request, env, url);
       if (assetResponse) return assetResponse;
       return json({ error: "Not Found" }, 404);

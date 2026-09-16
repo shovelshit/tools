@@ -44,6 +44,17 @@ test("due cinema and subscriber queries exclude inactive accounts and paginate",
   assert.deepEqual((await listSubscribers(env.DB, { cinemaId: "1", nowMs: NOW, limit: 10 })).items.map((item) => item.userId), [first.account.id]);
 });
 
+test("due cinema queries exclude Store subscriptions", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  const { account } = await seedAccount(env, {
+    businessLine: "store", expiresAt: NOW + 60_000,
+    config: { enabled: true, cinemaId: "99", selectedMovieIds: ["7"] }
+  });
+  await syncSubscription(env.DB, account.id, { enabled: true, cinemaId: "99" }, 1, NOW);
+  assert.deepEqual((await listDueCinemas(env.DB, { nowMs: NOW })).items, []);
+  assert.deepEqual((await listSubscribers(env.DB, { cinemaId: "99", nowMs: NOW })).items, []);
+});
+
 test("cinema switch rejects prior subscription work", async () => {
   const env = await createAccountEnv({ nowMs: NOW });
   const { account } = await seedAccount(env, { expiresAt: NOW + 60_000 });

@@ -42,3 +42,15 @@ test("resource summary is compact and refreshes only with explicit admin loads",
   assert.match(source, /\/api\/admin\/resources/);
   assert.doesNotMatch(source, /setInterval/);
 });
+
+test("admin UI scopes accounts and settings by an immutable business selection", () => {
+  assert.match(html, /id="account-business-line"/);
+  assert.match(html, /value="maoyan"/);
+  assert.match(html, /value="store"/);
+  assert.match(source, /businessLine/);
+  assert.match(source, /params\.set\("businessLine"/);
+  assert.match(source, /\/api\/admin\/settings\?businessLine=/);
+  assert.match(source, /if \(account\.monitorState\)/);
+  assert.match(source, /monitor\.textContent = "-"/);
+  assert.doesNotMatch(source, /patch[^\n]+businessLine/);
+});

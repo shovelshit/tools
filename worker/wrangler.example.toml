@@ -7,7 +7,7 @@ keep_vars = true
 [assets]
 directory = "./public"
 binding = "ASSETS"
-run_worker_first = ["/api/*", "/store/auth/*", "/store/api/*", "/store/file*", "/maoyan", "/maoyan/", "/maoyan/*.html"]
+run_worker_first = ["/api/*", "/store", "/store/", "/store/*.html", "/store/auth/*", "/store/api/*", "/store/file*", "/maoyan", "/maoyan/", "/maoyan/*.html"]
 
 [triggers]
 crons = ["*/3 * * * *"]

@@ -8,13 +8,17 @@ keep_vars = true
 [assets]
 directory = "./public"
 binding = "ASSETS"
-run_worker_first = ["/api/*", "/store/auth/*", "/store/api/*", "/store/file*", "/maoyan", "/maoyan/", "/maoyan/*.html"]
+run_worker_first = ["/api/*", "/store", "/store/", "/store/*.html", "/store/auth/*", "/store/api/*", "/store/file*", "/maoyan", "/maoyan/", "/maoyan/*.html"]
 
 # ============ 自定义域名路由 (zone: ltools.asia) ============
 # 注意: routes 必须在 [triggers] 之前, 否则会被解析为 triggers 的子字段
 routes = [
   { pattern = "ltools.asia/api/*", zone_name = "ltools.asia" },
   { pattern = "www.ltools.asia/api/*", zone_name = "ltools.asia" },
+  { pattern = "ltools.asia/store", zone_name = "ltools.asia" },
+  { pattern = "www.ltools.asia/store", zone_name = "ltools.asia" },
+  { pattern = "ltools.asia/store/*", zone_name = "ltools.asia" },
+  { pattern = "www.ltools.asia/store/*", zone_name = "ltools.asia" },
   { pattern = "ltools.asia/store/auth/*", zone_name = "ltools.asia" },
   { pattern = "www.ltools.asia/store/auth/*", zone_name = "ltools.asia" },
   { pattern = "ltools.asia/store/api/*", zone_name = "ltools.asia" },

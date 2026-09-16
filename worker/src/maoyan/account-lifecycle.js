@@ -49,6 +49,9 @@ export function resumeEligibility({ account, config, rule, sessionUsable, nowMs 
 
 export async function resumeAfterRenewal(env, userId, accountVersion, nowMs = Date.now()) {
   const account = await getAccount(env.DB, userId);
+  if (account?.businessLine !== "maoyan") {
+    return { monitor: false, lock: false, reasons: ["business_line_excluded"] };
+  }
   if (!account || account.version !== Number(accountVersion)) {
     return { monitor: false, lock: false, reasons: ["account_changed"] };
   }
@@ -93,6 +96,8 @@ export async function cleanupExpiredAccount(env, {
   expectedVersion,
   nowMs = Date.now()
 }) {
+  const account = await getAccount(env.DB, userId);
+  if (account?.businessLine !== "maoyan") return { cleaned: false };
   if (!Number.isFinite(Number(expectedExpiresAt)) || nowMs < Number(expectedExpiresAt) + RETENTION_MS) return { cleaned: false };
   if (env.LOCK_COORDINATOR) await prepareAccountCleanupThroughCoordinator(env, userId);
   const session = await db.getSessionVersion(env.DB, userId);

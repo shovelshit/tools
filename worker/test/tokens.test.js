@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createDB } from "./helpers.js";
+import { createAccountEnv, seedAccount } from "./account-fixtures.js";
 import { handleAdminTokens, runScheduledChecks } from "../src/maoyan/tokens.js";
 import * as db from "../src/maoyan/db.js";
 
@@ -90,4 +91,22 @@ test("scheduled monitoring hands data off only after snapshot and status persist
     await runScheduledChecks(env, async () => { handoffs++; }, { now: WINDOW_NOW });
   });
   assert.equal(handoffs, 1);
+});
+
+test("scheduled Maoyan work never polls or notifies for Store accounts", async () => {
+  const env = await createAccountEnv({ nowMs: WINDOW_NOW });
+  const store = await seedAccount(env, {
+    businessLine: "store",
+    expiresAt: WINDOW_NOW + 60_000,
+    config: { enabled: true, cinemaId: "25428", selectedMovieIds: ["7"] }
+  });
+  let providerCalls = 0;
+  await withMockFetch(async () => {
+    providerCalls += 1;
+    return new Response(JSON.stringify({ showData: { cinemaName: "wrong", movies: [] } }));
+  }, async () => {
+    await runScheduledChecks(env, () => {}, { now: WINDOW_NOW });
+  });
+  assert.equal(providerCalls, 0);
+  assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM notification_outbox WHERE user_id=?").bind(store.account.id).first()).n, 0);
 });

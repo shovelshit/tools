@@ -94,7 +94,7 @@ export async function syncSubscription(DB, userId, config, configVersion, nowMs 
   const resetBaseline = !current || current.cinema_id !== cinemaId || Number(current.enabled) !== enabled;
   await DB.prepare(
     "INSERT INTO monitor_subscriptions(user_id,cinema_id,enabled,config_version,baseline_version,next_due_at,updated_at) " +
-    "SELECT ?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM users WHERE id=?) " +
+    "SELECT ?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM users WHERE id=? AND business_line='maoyan') " +
     "ON CONFLICT(user_id) DO UPDATE SET cinema_id=excluded.cinema_id,enabled=excluded.enabled," +
     "config_version=excluded.config_version,baseline_version=excluded.baseline_version," +
     "next_due_at=excluded.next_due_at,updated_at=excluded.updated_at"
@@ -170,7 +170,7 @@ export async function listDueCinemas(DB, { nowMs = Date.now(), afterCinemaId = "
   const { results } = await DB.prepare(
     "SELECT DISTINCT s.cinema_id FROM monitor_subscriptions s JOIN users u ON u.id=s.user_id " +
     "WHERE s.enabled=1 AND s.next_due_at<=? AND s.cinema_id>? AND u.state='active' " +
-    "AND (u.role='admin' OR u.expires_at>?) ORDER BY s.cinema_id LIMIT ?"
+    "AND u.business_line='maoyan' AND (u.role='admin' OR u.expires_at>?) ORDER BY s.cinema_id LIMIT ?"
   ).bind(Number(nowMs), String(afterCinemaId || ""), Number(nowMs), pageSize + 1).all();
   const items = results.slice(0, pageSize).map((row) => String(row.cinema_id));
   return { items, nextCursor: results.length > pageSize ? items.at(-1) : null };
@@ -184,7 +184,7 @@ export async function listSubscribers(DB, { cinemaId, afterUserId = "", limit = 
     "JOIN user_config c ON c.token_id=s.user_id AND c.version=s.config_version " +
     "LEFT JOIN lock_rule l ON l.token_id=s.user_id " +
     "WHERE s.cinema_id=? AND s.enabled=1 AND s.next_due_at<=? AND s.user_id>? AND u.state='active' " +
-    "AND (u.role='admin' OR u.expires_at>?) ORDER BY s.user_id LIMIT ?"
+    "AND u.business_line='maoyan' AND (u.role='admin' OR u.expires_at>?) ORDER BY s.user_id LIMIT ?"
   ).bind(String(cinemaId), Number(nowMs), String(afterUserId || ""), Number(nowMs), pageSize + 1).all();
   const items = results.slice(0, pageSize).map((row) => {
     let config = {};

@@ -6,7 +6,7 @@ const MAX_REDIRECTS = 5;
 
 function isAllowedStoreUrl(value) {
   const target = new URL(value);
-  return target.protocol === "http:" && target.hostname === STORE_HOST;
+  return (target.protocol === "http:" || target.protocol === "https:") && target.hostname === STORE_HOST;
 }
 
 async function fetchStore(url, init = {}) {
@@ -52,8 +52,8 @@ export async function handleStoreApi(request, url) {
   }
 }
 
-// /store/file?url=... 代理 http 直链(解决 HTTPS 页面加载 HTTP 资源被拦)
-// 安全限制: 仅允许上游 AList 域名的 http 直链, 防止被当作开放代理滥用
+// /store/file?url=... 代理上游直链，所有预览和下载继续受 Store 会话保护。
+// 安全限制: 仅允许上游 AList 域名的 http/https 直链, 防止被当作开放代理滥用
 const FILE_PROXY_ALLOWED_HOSTS = new Set(["appstore.cnmlynk.org"]);
 
 export async function handleStoreFile(url) {
@@ -64,8 +64,8 @@ export async function handleStoreFile(url) {
   } catch (e) {
     return storeError("无效的 url 参数", 400);
   }
-  if (target.protocol !== "http:" || !FILE_PROXY_ALLOWED_HOSTS.has(target.hostname)) {
-    return storeError("仅支持代理上游 AList 域名的 http 直链", 403);
+  if (!isAllowedStoreUrl(target.href) || !FILE_PROXY_ALLOWED_HOSTS.has(target.hostname)) {
+    return storeError("仅支持代理上游 AList 域名的直链", 403);
   }
   try {
     const res = await fetchStore(target.href);

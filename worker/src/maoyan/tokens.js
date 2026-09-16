@@ -63,7 +63,7 @@ export async function runScheduledChecks(env, afterMonitor, opts = {}) {
   if (!inMonitorWindow(opts.now)) return;
   const nowMs = opts.now instanceof Date ? opts.now.getTime() : Date.now();
   const { results } = await env.DB.prepare(
-    "SELECT id,role,state,expires_at,archived_at,version FROM users WHERE role='user'"
+    "SELECT id,role,state,expires_at,archived_at,version FROM users WHERE role='user' AND business_line='maoyan'"
   ).all();
   for (const row of results) {
     const account = {
@@ -101,7 +101,7 @@ export async function runScheduledChecks(env, afterMonitor, opts = {}) {
 export async function runScheduledMaintenance(env, nowMs = Date.now()) {
   const { results } = await env.DB.prepare(
     "SELECT u.id,u.role,u.state,u.expires_at,u.archived_at,u.version,c.version AS config_version " +
-    "FROM users u LEFT JOIN user_config c ON c.token_id=u.id WHERE u.role='user'"
+    "FROM users u LEFT JOIN user_config c ON c.token_id=u.id WHERE u.role='user' AND u.business_line='maoyan'"
   ).all();
   let queued = 0;
   for (const row of results) {

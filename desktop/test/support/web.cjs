@@ -3,6 +3,7 @@ const http = require("node:http");
 const path = require("node:path");
 
 const ROOT = path.resolve(__dirname, "../../../pages/maoyan");
+const STORE_ROOT = path.resolve(__dirname, "../../../pages/store");
 const MIME = new Map([
   [".html", "text/html; charset=utf-8"],
   [".css", "text/css; charset=utf-8"],
@@ -11,6 +12,7 @@ const MIME = new Map([
 ]);
 
 function proxyPath(pathname) {
+  if (pathname.startsWith("/store/auth/") || pathname.startsWith("/store/api/") || pathname === "/store/file") return pathname;
   if (pathname.startsWith("/one/api/")) return pathname;
   if (pathname.startsWith("/api/")) return `/one${pathname}`;
   return "";
@@ -35,6 +37,8 @@ async function startWebFixture({ workerUrl }) {
           headers: {
             ...(request.headers["x-token"] ? { "X-Token": request.headers["x-token"] } : {}),
             ...(request.headers["content-type"] ? { "Content-Type": request.headers["content-type"] } : {}),
+            ...(request.headers.cookie ? { Cookie: request.headers.cookie } : {}),
+            ...(request.headers.origin ? { Origin: `${url.protocol}//${request.headers.host}` } : {}),
           },
           body,
         });
@@ -42,17 +46,23 @@ async function startWebFixture({ workerUrl }) {
         response.writeHead(upstreamResponse.status, {
           "Content-Type": upstreamResponse.headers.get("content-type") || "application/json; charset=utf-8",
           "Cache-Control": "no-store",
+          ...(upstreamResponse.headers.get("set-cookie") ? { "Set-Cookie": upstreamResponse.headers.get("set-cookie") } : {}),
+          ...(upstreamResponse.headers.get("content-disposition") ? { "Content-Disposition": upstreamResponse.headers.get("content-disposition") } : {}),
         });
         response.end(bytes);
         return;
       }
-      let relative = url.pathname === "/" || url.pathname === "/maoyan/" ? "index.html" : url.pathname.replace(/^\/maoyan\//, "");
+      const store = url.pathname === "/store/" || url.pathname.startsWith("/store/");
+      const root = store ? STORE_ROOT : ROOT;
+      let relative = url.pathname === "/" || url.pathname === "/maoyan/" || url.pathname === "/store/"
+        ? "index.html"
+        : url.pathname.replace(store ? /^\/store\// : /^\/maoyan\//, "");
       if (!/^[\w./-]+$/.test(relative) || relative.split("/").includes("..")) {
         response.writeHead(404).end();
         return;
       }
-      const file = path.resolve(ROOT, relative);
-      if (!file.startsWith(`${ROOT}${path.sep}`)) {
+      const file = path.resolve(root, relative);
+      if (!file.startsWith(`${root}${path.sep}`)) {
         response.writeHead(404).end();
         return;
       }

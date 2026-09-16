@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { serveMaoyanAsset } from "../src/index.js";
+import { serveMaoyanAsset, serveStoreAsset } from "../src/index.js";
 
 function assets(contentType) {
   return {
@@ -23,4 +23,24 @@ test("versioned files are immutable and unrelated paths are not intercepted", as
   const response = await serveMaoyanAsset(request, { ASSETS: assets("text/javascript") });
   assert.match(response.headers.get("Cache-Control"), /immutable/);
   assert.equal(await serveMaoyanAsset(new Request("https://example.test/store/"), { ASSETS: assets("text/html") }), null);
+});
+
+test("Store assets use an isolated CSP and the bare path redirects", async () => {
+  const redirect = await serveStoreAsset(new Request("https://example.test/store"), { ASSETS: assets("text/html") });
+  assert.equal(redirect.status, 308);
+  assert.equal(redirect.headers.get("Location"), "https://example.test/store/");
+
+  const response = await serveStoreAsset(
+    new Request("https://example.test/store/"),
+    { ASSETS: assets("text/html; charset=utf-8") }
+  );
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.match(response.headers.get("Content-Security-Policy"), /connect-src 'self'/);
+  assert.doesNotMatch(response.headers.get("Content-Security-Policy"), /challenges\.cloudflare\.com/);
+
+  const maoyan = await serveMaoyanAsset(
+    new Request("https://example.test/maoyan/"),
+    { ASSETS: assets("text/html; charset=utf-8") }
+  );
+  assert.match(maoyan.headers.get("Content-Security-Policy"), /challenges\.cloudflare\.com/);
 });

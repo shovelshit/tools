@@ -3,13 +3,15 @@ const els = {
   loginOverlay: $("admin-login"), adminMain: $("admin-main"), workerUrl: $("admin-worker-url"),
   adminToken: $("admin-token-input"), btnLogin: $("btn-admin-login"), loginError: $("admin-login-error"),
   tbody: $("account-tbody"), summary: $("account-summary"), capacitySummary: $("capacity-summary"),
+  businessLine: $("account-business-line"), capacityLabel: $("capacity-label"),
   capacityMax: $("capacity-max"), validDays: $("default-valid-days"), publicSignup: $("public-signup-enabled"),
   btnSaveSettings: $("btn-save-settings"), remark: $("new-account-remark"), btnAdd: $("btn-add-account"),
   search: $("account-search"), statusFilter: $("account-status-filter"), btnRefresh: $("btn-refresh-accounts"),
   btnLoadMore: $("btn-load-more"), btnLogout: $("btn-admin-logout"),
   btnEnterMonitor: $("btn-enter-monitor"),
   resourceCinemas: $("resource-cinemas"), resourcePending: $("resource-pending"),
-  resourceFailed: $("resource-failed"), resourceAdmission: $("resource-admission"), resourceNote: $("resource-note")
+  resourceFailed: $("resource-failed"), resourceAdmission: $("resource-admission"), resourceNote: $("resource-note"),
+  resourceSummary: $("maoyan-resource-summary")
 };
 
 const SAME_ORIGIN_HOSTS = ["ltools.asia", "www.ltools.asia", "tools-a65.pages.dev"];
@@ -66,6 +68,7 @@ async function login() {
 
 function queryPath(after = "") {
   const params = new URLSearchParams({ limit: "20" });
+  params.set("businessLine", els.businessLine.value);
   if (els.search.value.trim()) params.set("q", els.search.value.trim());
   if (els.statusFilter.value) params.set("status", els.statusFilter.value);
   if (after) params.set("after", after);
@@ -82,7 +85,8 @@ async function refreshAccounts({ reset = true } = {}) {
 }
 
 async function loadSettings() {
-  const data = await adminApi("/api/admin/settings");
+  const businessLine = encodeURIComponent(els.businessLine.value);
+  const data = await adminApi(`/api/admin/settings?businessLine=${businessLine}`);
   settings = data.settings;
   els.capacityMax.value = settings.maxUsers;
   els.validDays.value = settings.defaultValidDays;
@@ -126,6 +130,9 @@ function renderAccounts() {
   const used = Number(capacity?.used || 0);
   const max = Number(capacity?.maxUsers || 0);
   els.capacitySummary.textContent = `${used} / ${max}`;
+  els.capacityLabel.textContent = els.businessLine.value === "store" ? "应用商店账号" : "猫眼账号";
+  els.resourceSummary.classList.toggle("hidden", els.businessLine.value !== "maoyan");
+  els.btnEnterMonitor.classList.toggle("hidden", els.businessLine.value !== "maoyan");
   els.summary.textContent = `当前显示 ${accounts.length} 个账号`;
   els.btnLoadMore.classList.toggle("hidden", !nextAfter);
   els.tbody.innerHTML = "";
@@ -144,7 +151,11 @@ function renderAccounts() {
     const qualification = document.createElement("td");
     qualification.appendChild(badge(STATUS_LABEL[account.accountStatus] || account.accountStatus, account.accountStatus));
     const monitor = document.createElement("td");
-    monitor.appendChild(badge(account.monitorState === "monitoring" ? "监控中" : "已停止", account.monitorState));
+    if (account.monitorState) {
+      monitor.appendChild(badge(account.monitorState === "monitoring" ? "监控中" : "已停止", account.monitorState));
+    } else {
+      monitor.textContent = "-";
+    }
     const expiry = document.createElement("td");
     expiry.textContent = fmtTime(account.expiresAt);
     const activity = document.createElement("td");
@@ -222,7 +233,11 @@ els.btnAdd.addEventListener("click", async () => {
   try {
     const created = await adminApi("/api/admin/accounts/create", {
       method: "POST",
-      body: JSON.stringify({ remark: els.remark.value.trim(), requestId: crypto.randomUUID() })
+      body: JSON.stringify({
+        remark: els.remark.value.trim(),
+        requestId: crypto.randomUUID(),
+        businessLine: els.businessLine.value
+      })
     });
     if (!created.key) throw new Error("账号已创建，但访问密钥仅在首次响应显示");
     try { await copyText(created.key); } catch {}
@@ -239,10 +254,11 @@ els.btnAdd.addEventListener("click", async () => {
 els.btnSaveSettings.addEventListener("click", async () => {
   if (!settings) return;
   try {
-    const data = await adminApi("/api/admin/settings", {
+    const data = await adminApi(`/api/admin/settings?businessLine=${encodeURIComponent(els.businessLine.value)}`, {
       method: "POST",
       body: JSON.stringify({
         expectedVersion: settings.version,
+        businessLine: els.businessLine.value,
         maxUsers: Number(els.capacityMax.value),
         defaultValidDays: Number(els.validDays.value),
         publicSignupEnabled: els.publicSignup.checked
@@ -263,6 +279,12 @@ els.search.addEventListener("input", () => {
   searchTimer = setTimeout(() => refreshAccounts({ reset: true }).catch((error) => showToast(error.message, "error")), 250);
 });
 els.statusFilter.addEventListener("change", () => refreshAccounts({ reset: true }).catch((error) => showToast(error.message, "error")));
+els.businessLine.addEventListener("change", () => {
+  accounts = [];
+  nextAfter = null;
+  Promise.all([refreshAccounts({ reset: true }), loadSettings()])
+    .catch((error) => showToast(error.message, "error"));
+});
 els.btnRefresh.addEventListener("click", () => Promise.all([refreshAccounts({ reset: true }), loadSettings(), loadResources()]));
 els.btnLoadMore.addEventListener("click", () => refreshAccounts({ reset: false }));
 els.btnEnterMonitor.addEventListener("click", (event) => {

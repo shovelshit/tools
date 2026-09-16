@@ -76,7 +76,9 @@ export function publicAccount(account, nowMs = Date.now()) {
     role: account.role,
     accountStatus: accountStatus(account, nowMs),
     businessLine: account.businessLine,
+    remark: account.remark || "",
     expiresAt: account.expiresAt,
+    version: account.version,
     accountVersion: account.version
   };
 }

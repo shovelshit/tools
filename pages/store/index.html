@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>L&C 应用商店</title>
+  <link rel="stylesheet" href="auth.css?v=20260916" />
   <style>
     :root {
       --primary: #2563eb;
@@ -899,11 +900,32 @@
       LC 应用商店
     </a>
     <span class="header-title">· 车载 APK 资源库</span>
+    <div class="store-account auth-hidden" id="store-account">
+      <span class="store-account-label" id="store-account-label"></span>
+      <button class="store-auth-button" id="store-header-logout" type="button">退出</button>
+    </div>
   </div>
 </header>
 
+<section class="store-auth-shell" id="store-auth" aria-label="应用商店登录">
+  <div class="store-auth-card">
+    <h1>登录应用商店</h1>
+    <p id="store-auth-status">使用应用商店访问密钥登录</p>
+    <form class="store-auth-form" id="store-login-form">
+      <label for="store-key">访问密钥</label>
+      <input id="store-key" type="password" autocomplete="current-password" required />
+      <div class="store-auth-actions">
+        <button class="store-auth-button primary" id="store-login-submit" type="submit">登录</button>
+        <button class="store-auth-button auth-hidden" id="store-renew" type="button">续期</button>
+        <button class="store-auth-button auth-hidden" id="store-logout" type="button">退出</button>
+      </div>
+    </form>
+    <div class="store-auth-error" id="store-auth-error" role="alert"></div>
+  </div>
+</section>
+
 <!-- 主体 -->
-<div class="layout">
+<div class="layout auth-hidden" id="store-app">
   <!-- 侧边栏 -->
   <aside class="sidebar">
     <div class="sidebar-header">资源分类</div>
@@ -966,6 +988,7 @@
   </div>
 </div>
 
+<script src="auth.js?v=20260916"></script>
 <script>
   // ===== API 通道 =====
   // Cloudflare Worker 反代 AList（稳定、带 CORS）。
@@ -990,6 +1013,7 @@
     if (!res.ok) {
       const err = new Error(`HTTP ${res.status}`);
       err.status = res.status;
+      await storeSession?.handleAccessFailure(res.status);
       throw err;
     }
     return res.json();
@@ -1006,10 +1030,8 @@
     try {
       const target = new URL(url);
       if (!/^https?:$/.test(target.protocol)) return '';
-      if (location.protocol === 'https:' && target.protocol === 'http:') {
-        return WORKER_BASE + '/store/file?url=' + encodeURIComponent(target.href);
-      }
-      return target.href;
+      if (target.hostname !== 'appstore.cnmlynk.org') return '';
+      return WORKER_BASE + '/store/file?url=' + encodeURIComponent(target.href);
     } catch (e) {
       return '';
     }
@@ -1027,14 +1049,14 @@
     loading: false,
     badgeCache: {},
     history: [],   // 路径历史栈，用于返回上级
-    viewMode: localStorage.getItem('viewMode') || 'list', // 'grid' | 'list'
+    viewMode: localStorage.getItem('store:viewMode') || 'list', // 'grid' | 'list'
   };
 
   // ===== 切换视图 =====
   function setView(mode) {
     if (state.viewMode === mode) return;
     state.viewMode = mode;
-    localStorage.setItem('viewMode', mode);
+    localStorage.setItem('store:viewMode', mode);
     document.getElementById('btnGrid').classList.toggle('active', mode === 'grid');
     document.getElementById('btnList').classList.toggle('active', mode === 'list');
     // 重新渲染当前列表（nameHtml 依赖 viewMode）
@@ -1252,7 +1274,8 @@
 
   // ===== 加载文件列表 =====
   async function loadList(path = state.currentPath, page = state.currentPage) {
-    if (state.loading) return;
+    if (state.loading || !storeSession?.isAuthenticated()) return;
+    const authGeneration = storeSession.generation();
     state.loading = true;
     state.currentPath = path;
     state.currentPage = page;
@@ -1281,6 +1304,7 @@
 
     try {
       const data = await fetchList(path, page);
+      if (!storeSession.isCurrent(authGeneration)) return;
       state.total = Number.isSafeInteger(Number(data.total)) ? Number(data.total) : (data.content ? data.content.length : 0);
       const items = data.content || [];
       state._lastItems = items; // 缓存供视图切换重绘用
@@ -1295,13 +1319,16 @@
       state.badgeCache[path] = state.total;
       updateBadges();
     } catch (err) {
+      if (!storeSession.isCurrent(authGeneration)) return;
       grid.innerHTML = `<div class="error-banner">
         ⚠️ 加载失败：${escapeHtml(err.message)}，请检查网络或稍后重试
       </div>`;
       meta.textContent = '加载失败';
     } finally {
-      state.loading = false;
-      refreshBtn.classList.remove('loading');
+      if (storeSession.isCurrent(authGeneration)) {
+        state.loading = false;
+        refreshBtn.classList.remove('loading');
+      }
     }
   }
 
@@ -1553,7 +1580,10 @@
 
     try {
       const resp = await fetch(safeUrl(url));
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) {
+        await storeSession?.handleAccessFailure(resp.status);
+        throw new Error(`HTTP ${resp.status}`);
+      }
       const text = await resp.text();
 
       let bodyHtml = '';
@@ -1633,6 +1663,7 @@
     for (let i = 1; i < CATEGORIES.length; i++) {
       try {
         const data = await fetchList(CATEGORIES[i].path, 1);
+        if (!storeSession?.isAuthenticated()) return;
         state.badgeCache[CATEGORIES[i].path] = data.total || (data.content ? data.content.length : 0);
         updateBadges();
       } catch (e) { /* 静默失败 */ }
@@ -1643,7 +1674,21 @@
   // 恢复视图模式按钮状态（默认列表）
   document.getElementById('btnGrid').classList.toggle('active', state.viewMode === 'grid');
   document.getElementById('btnList').classList.toggle('active', state.viewMode === 'list');
-  loadList(CATEGORIES[0].path, 1).then(() => preloadBadges());
+  let storeSession = null;
+  window.addEventListener('store:authenticated', () => {
+    document.getElementById('store-account').classList.remove('auth-hidden');
+    loadList(CATEGORIES[0].path, 1).then(() => preloadBadges());
+  });
+  window.addEventListener('store:unauthenticated', () => {
+    state.loading = false;
+    state._lastItems = [];
+    document.getElementById('store-account').classList.add('auth-hidden');
+    document.getElementById('fileGrid').innerHTML = '';
+    document.getElementById('pagination').innerHTML = '';
+    document.getElementById('modalOverlay').classList.remove('open');
+  });
+  storeSession = window.StoreAuth.init(document);
+  document.getElementById('store-header-logout').addEventListener('click', () => storeSession.logout());
 </script>
 <!-- Lightbox 全屏放大层 -->
 <div class="lightbox" id="lightbox" onclick="closeLightbox(event)">

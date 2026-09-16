@@ -29,7 +29,11 @@ export const STATIC_ASSET_FILES = [
   {
     source: join(WORKER_ROOT, "node_modules", "@thumbmarkjs", "thumbmarkjs", "LICENSE"),
     target: "maoyan/vendor/THUMBMARK-LICENSE"
-  }
+  },
+  ...["index.html", "auth.js", "auth.css"].map((name) => ({
+    source: join(REPO_ROOT, "pages", "store", name),
+    target: `store/${name}`
+  }))
 ];
 
 function assertControlledTarget(target) {

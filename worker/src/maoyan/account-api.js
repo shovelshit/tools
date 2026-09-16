@@ -53,6 +53,7 @@ function adminAccount(row, nowMs) {
     expiresAt: row.expires_at == null ? null : Number(row.expires_at),
     archivedAt: row.archived_at == null ? null : Number(row.archived_at),
     source: row.source,
+    businessLine: row.business_line || "maoyan",
     version: Number(row.version)
   };
   return {
@@ -64,25 +65,27 @@ function adminAccount(row, nowMs) {
     expiresAt: account.expiresAt,
     archivedAt: account.archivedAt,
     source: account.source,
+    businessLine: account.businessLine,
     accountVersion: account.version,
     keyHint: `${row.key_prefix || ""}...${row.key_suffix || ""}`,
-    monitorState: config.enabled === true ? "monitoring" : "stopped",
-    lastActivityAt: status.lastCheck || null
+    monitorState: account.businessLine === "maoyan" ? (config.enabled === true ? "monitoring" : "stopped") : null,
+    lastActivityAt: account.businessLine === "maoyan" ? (status.lastCheck || null) : null
   };
 }
 
 export async function listAdminAccounts(env, url, nowMs) {
+  const businessLine = String(url.searchParams.get("businessLine") || "maoyan").trim();
   const statusFilter = String(url.searchParams.get("status") || "").trim();
   const query = String(url.searchParams.get("q") || "").trim().toLowerCase();
   const after = String(url.searchParams.get("after") || "").trim();
   const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit")) || 20));
   const { results } = await env.DB.prepare(
-    "SELECT u.id,u.role,u.remark,u.state,u.created_at,u.expires_at,u.archived_at,u.source,u.version," +
+    "SELECT u.id,u.role,u.remark,u.state,u.created_at,u.expires_at,u.archived_at,u.source,u.business_line,u.version," +
     "k.key_prefix,k.key_suffix,c.data AS config_data,s.data AS status_data " +
     "FROM users u LEFT JOIN access_keys k ON k.user_id=u.id " +
     "LEFT JOIN user_config c ON c.token_id=u.id LEFT JOIN monitor_status s ON s.token_id=u.id " +
-    "WHERE u.role='user' ORDER BY u.created_at DESC,u.id DESC"
-  ).all();
+    "WHERE u.role='user' AND u.business_line=? ORDER BY u.created_at DESC,u.id DESC"
+  ).bind(businessLine).all();
   let accounts = results.map((row) => adminAccount(row, nowMs));
   if (statusFilter) accounts = accounts.filter((account) => account.accountStatus === statusFilter);
   if (query) accounts = accounts.filter((account) =>
@@ -95,7 +98,7 @@ export async function listAdminAccounts(env, url, nowMs) {
   return {
     accounts: page,
     nextAfter: accounts.length > limit ? page.at(-1)?.userId || null : null,
-    capacity: await readCapacity(env.DB, nowMs)
+    capacity: await readCapacity(env.DB, nowMs, businessLine)
   };
 }
 
@@ -112,6 +115,7 @@ export async function handleAdminAccountApi(request, env, url) {
     const result = await createManagedAccount(env, {
       remark: body.remark,
       requestId: body.requestId,
+      businessLine: body.businessLine,
       nowMs
     });
     return json({
@@ -144,7 +148,10 @@ export async function handleAdminAccountApi(request, env, url) {
     return json({ ok: true, account: publicAccount(account, nowMs) });
   }
   if (url.pathname === "/api/admin/settings" && request.method === "GET") {
-    return json({ ok: true, settings: await readServiceSettings(env.DB) }, 200, { "Cache-Control": "no-store" });
+    return json({
+      ok: true,
+      settings: await readServiceSettings(env.DB, url.searchParams.get("businessLine") || "maoyan")
+    }, 200, { "Cache-Control": "no-store" });
   }
   if (url.pathname === "/api/admin/settings" && request.method === "POST") {
     const body = await request.json().catch(() => ({}));

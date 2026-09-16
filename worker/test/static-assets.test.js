@@ -44,6 +44,15 @@ test("built monitor page includes its cinema background image", async () => {
   assert.ok(image.length > 10000);
 });
 
+test("static asset build includes the isolated Store browser application", async () => {
+  const root = await mkdtemp(join(tmpdir(), "store-assets-"));
+  const target = join(root, "public");
+  await buildAssets({ target });
+  assert.match(await readFile(join(target, "store/index.html"), "utf8"), /auth\.js/);
+  assert.match(await readFile(join(target, "store/auth.js"), "utf8"), /store:authenticated/);
+  assert.ok((await walk(target)).includes("store/auth.css"));
+});
+
 test("wrangler routes HTML through the Worker while leaving versioned files on Static Assets", async () => {
   const config = await readFile(new URL("../wrangler.example.toml", import.meta.url), "utf8");
   assert.match(config, /run_worker_first[^\n]+\/maoyan\/[^\n]+\/maoyan\/\*\.html/);
@@ -58,7 +67,10 @@ test("Worker configuration routes Store browser auth through the Worker", async 
 
   for (const text of [config, example]) {
     assert.match(text, /run_worker_first[^\n]+\/store\/auth\/\*/);
+    assert.match(text, /run_worker_first[^\n]+\/store[^\n]+\/store\/[^\n]+\/store\/\*\.html/);
   }
   assert.match(config, /ltools\.asia\/store\/auth\/\*/);
   assert.match(config, /www\.ltools\.asia\/store\/auth\/\*/);
+  assert.match(config, /ltools\.asia\/store\/\*/);
+  assert.match(config, /www\.ltools\.asia\/store\/\*/);
 });
