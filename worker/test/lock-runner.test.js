@@ -33,6 +33,7 @@ function deps(stored, overrides = {}) {
   const saved = [];
   return {
     now: () => now,
+    requireActive: async () => ({}),
     getRule: async () => stored,
     putRule: async (_env, _token, value) => { Object.assign(stored, value); saved.push(structuredClone(value)); },
     fetchCinema: async () => ({ showData: { movies: [{ id: "7", shows: [{ showDate: "2026-09-12", plist: [{ seqNo: "200", tm: "20:00" }] }] }] } }),
@@ -196,6 +197,23 @@ test("automation exact HH:mm locks only selectable matching seats", async () => 
   assert.equal(stored.orderId, "order-1");
   assert.equal(stored.payLeftSecond, 600);
   assert.equal(stored.seqNo, "200");
+});
+
+test("scheduled locking rechecks account eligibility immediately before ordering", async () => {
+  const stored = rule();
+  let orderCalls = 0;
+  await assert.rejects(
+    runOneLockRule(await runtime(), tokenId, deps(stored, {
+      requireActive: async () => {
+        const error = new Error("账号已到期，请先续期");
+        error.code = "ACCOUNT_EXPIRED";
+        throw error;
+      },
+      createOrder: async () => { orderCalls += 1; return { orderId: "forbidden" }; }
+    })),
+    { code: "ACCOUNT_EXPIRED" }
+  );
+  assert.equal(orderCalls, 0);
 });
 
 test("scheduled lock push renders hall row/seat instead of the internal identifier", async () => {

@@ -84,6 +84,7 @@ test("迁移不删 KV: 会话信封原样保留(回滚无损)", async () => {
 
 test("鉴权点查: 有效 token 返回令牌 id, 无效返回 null", async () => {
   const { env } = await migratedEnv();
+  await migrateAccounts(env, { nowMs: Date.parse("2026-09-16T00:00:00.000Z") });
   const valid = new Request("https://worker.example/api/status", { headers: { "X-Token": "tok-123" } });
   assert.equal(await checkAuthFull(valid, env), tokenId);
   const invalid = new Request("https://worker.example/api/status", { headers: { "X-Token": "nope" } });

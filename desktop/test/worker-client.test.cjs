@@ -50,12 +50,15 @@ test("session path aliases are rejected before upload or an HTTP confirmation", 
     for (const alias of ["/api/lock/./session", "/api/lock/%2e/session", "/api/lock/%2E/session?x=1", "/api/lock/sess\tion"]) {
       await assert.rejects(client.requestWorker(alias, { method: "POST", body: {}, httpRiskConfirmed: true }), /路径/);
     }
-    assert.deepEqual(requests, ["http://worker.example/prefix/api/status"]);
+    assert.deepEqual(requests, [
+      "http://worker.example/prefix/api/capabilities",
+      "http://worker.example/prefix/api/status"
+    ]);
     assert.deepEqual(confirmations, ["connect"]);
     await client.requestWorker("/api/lock/session", { method: "POST", body: {}, httpRiskConfirmed: true });
     await client.requestWorker("/api/lock/session?x=1", { method: "POST", body: {} });
     assert.deepEqual(confirmations, ["connect", "session-upload"]);
-    assert.equal(requests.length, 3);
+    assert.equal(requests.length, 4);
   } finally { fixture.cleanup(); }
 });
 
@@ -115,6 +118,51 @@ test("normalizes an HTTPS Worker and rejects credentials query fragment and non-
   assert.throws(() => normalizeWorkerUrl("file:///tmp/worker"), /HTTP|HTTPS/);
 });
 
+test("modern admin login persists only the exchanged monitor session", async () => {
+  const requests = [];
+  const fixture = makeFixture({
+    fetchImpl: async (url, options) => {
+      requests.push({ url, token: options.headers["X-Token"], method: options.method });
+      if (url.endsWith("/api/capabilities")) return { ok: true, status: 200, json: async () => ({ accountLifecycle: true, adminMonitorSession: true }) };
+      if (url.endsWith("/api/auth/session")) return { ok: true, status: 200, json: async () => ({ account: { userId: "admin-id", role: "admin", accountStatus: "active" }, monitorSession: "short-monitor-session" }) };
+      if (url.endsWith("/api/account")) return { ok: true, status: 200, json: async () => ({ account: { userId: "admin-id", role: "admin", accountStatus: "active" } }) };
+      return { ok: true, status: 200, json: async () => ({ status: {} }) };
+    }
+  });
+  try {
+    const client = createWorkerClient(fixture);
+    const connected = await client.connectWorker({ workerUrl: "https://worker.example", token: "long-admin-token" });
+    assert.equal(connected.account.role, "admin");
+    assert.equal(connected.persistInputToken, false);
+    assert.equal(requests.find((request) => request.url.endsWith("/api/auth/session")).token, "long-admin-token");
+    assert.equal(requests.find((request) => request.url.endsWith("/api/status")).token, "short-monitor-session");
+    await client.requestWorker("/api/config");
+    assert.equal(requests.at(-1).token, "short-monitor-session");
+
+    const restored = createWorkerClient(fixture);
+    await restored.connectWorker({ workerUrl: "https://worker.example" });
+    assert.equal(requests.at(-2).url, "https://worker.example/api/account");
+    assert.equal(requests.at(-2).token, "short-monitor-session");
+    assert.equal(requests.some((request, index) => index > 3 && request.token === "long-admin-token"), false);
+  } finally { fixture.cleanup(); }
+});
+
+test("modern authentication errors do not trigger legacy status fallback", async () => {
+  const requests = [];
+  const fixture = makeFixture({
+    fetchImpl: async (url) => {
+      requests.push(url);
+      if (url.endsWith("/api/capabilities")) return { ok: true, status: 200, json: async () => ({ accountLifecycle: true }) };
+      return { ok: false, status: 401, json: async () => ({ code: "UNAUTHORIZED", error: "访问密钥无效" }) };
+    }
+  });
+  try {
+    const client = createWorkerClient(fixture);
+    await assert.rejects(client.connectWorker({ workerUrl: "https://worker.example", token: "bad" }), /访问密钥无效/);
+    assert.deepEqual(requests, ["https://worker.example/api/capabilities", "https://worker.example/api/auth/session"]);
+  } finally { fixture.cleanup(); }
+});
+
 test("non-loopback HTTP requires confirmation before connect and upload", async () => {
   const fixture = makeFixture({ confirmHttp: async () => false });
   try {
@@ -152,7 +200,7 @@ test("requestWorker permits query parameters only on an in-profile API path", as
     await client.connectWorker({ workerUrl: "https://worker.example/prefix", token: "t" });
 
     await client.requestWorker("/api/cinemas?cityId=1&kw=imax");
-    assert.equal(requests[1].url, "https://worker.example/prefix/api/cinemas?cityId=1&kw=imax");
+    assert.equal(requests.at(-1).url, "https://worker.example/prefix/api/cinemas?cityId=1&kw=imax");
     await assert.rejects(client.requestWorker("/api/cinemas#other"), /路径/);
     await assert.rejects(client.requestWorker("/api/%2e%2e/admin?cityId=1"), /路径/);
     await assert.rejects(client.requestWorker("https://evil.example/api/cinemas?cityId=1"), /路径/);
@@ -175,7 +223,7 @@ test("requestWorker rejects encoded traversal before attaching the profile token
 
     await assert.rejects(client.requestWorker("/api/%2e%2e/admin"), /路径/);
     await assert.rejects(client.requestWorker("/api\\..\\admin"), /路径/);
-    assert.equal(requests.length, 1);
+    assert.equal(requests.length, 2);
   } finally {
     fixture.cleanup();
   }
@@ -191,6 +239,11 @@ test("requestWorker rejects cross-origin redirects before the token leaves the p
     response.end(JSON.stringify({ ok: true }));
   });
   const worker = await listen((request, response) => {
+    if (request.url === "/api/capabilities") {
+      response.writeHead(404, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ error: "Not Found" }));
+      return;
+    }
     if (request.url === "/api/status") {
       response.writeHead(200, { "Content-Type": "application/json" });
       response.end(JSON.stringify({ profile: {} }));
@@ -228,8 +281,8 @@ test("profiles use full normalized URLs so tokens and HTTP risk stay isolated", 
     await client.connectWorker({ workerUrl: "https://worker.example:9443/b", token: "token-b" });
     await client.requestWorker("/api/status");
 
-    assert.equal(requests[2].url, "https://worker.example:9443/b/api/status");
-    assert.deepEqual(requests[2].options.headers, { "X-Token": "token-b" });
+    assert.equal(requests.at(-1).url, "https://worker.example:9443/b/api/status");
+    assert.deepEqual(requests.at(-1).options.headers, { "X-Token": "token-b" });
     assert.deepEqual(client.getProfile(), {
       baseUrl: "https://worker.example:9443/b",
       updatedAt: client.getProfile().updatedAt,
@@ -293,7 +346,7 @@ test("a failed status request clears only the newly supplied profile token", asy
     await assert.rejects(client.connectWorker({ workerUrl: "https://worker.example/b", token: "token-b" }), /unavailable/);
     await client.connectWorker({ workerUrl: "https://worker.example/a" });
 
-    assert.equal(requests[2].options.headers["X-Token"], "token-a");
+    assert.equal(requests.at(-1).options.headers["X-Token"], "token-a");
   } finally {
     fixture.cleanup();
   }
@@ -311,7 +364,7 @@ test("remote HTTP session upload requires a second explicit confirmation before 
     const client = createWorkerClient(fixture);
     await client.connectWorker({ workerUrl: "http://worker.example", token: "t", httpRiskConfirmed: true });
     await assert.rejects(client.requestWorker("/api/lock/session", { method: "POST", body: "{}" }), /确认/);
-    assert.equal(requests.length, 1);
+    assert.equal(requests.length, 2);
   } finally {
     fixture.cleanup();
   }
@@ -339,7 +392,7 @@ test("remote HTTP session upload with query parameters still needs a second conf
       /确认/
     );
     assert.deepEqual(confirmations, ["connect", "session-upload"]);
-    assert.equal(requests.length, 1);
+    assert.equal(requests.length, 2);
   } finally {
     fixture.cleanup();
   }
@@ -361,7 +414,7 @@ test("remote HTTP session upload with a trailing slash still needs a second conf
       client.requestWorker("/api/lock/session/", { method: "POST", body: "{}", httpRiskConfirmed: true }),
       /确认/
     );
-    assert.equal(requests.length, 1);
+    assert.equal(requests.length, 2);
   } finally {
     fixture.cleanup();
   }
@@ -382,8 +435,8 @@ test("requestWorker limits methods and JSON body size while constructing the fix
     await assert.rejects(client.requestWorker("/api/status", { method: "POST", body: JSON.stringify("x".repeat(256 * 1024 + 1)) }), /256 KiB/);
     await client.requestWorker("/api/test", { method: "POST", body: { ok: true } });
 
-    assert.deepEqual(requests[1].options.headers, { "X-Token": "t", "Content-Type": "application/json" });
-    assert.equal(requests[1].options.body, '{"ok":true}');
+    assert.deepEqual(requests.at(-1).options.headers, { "X-Token": "t", "Content-Type": "application/json" });
+    assert.equal(requests.at(-1).options.body, '{"ok":true}');
   } finally {
     fixture.cleanup();
   }
@@ -402,10 +455,10 @@ test("main-only upload confirms HTTP again and sends a bound payload with abort 
     const controller = new AbortController();
     await upload({ cookies: [], mtgsig: "signature" }, { signal: controller.signal });
     assert.deepEqual(confirmations, ["connect", "session-upload"]);
-    assert.equal(requests[1].url, "http://worker.example/api/lock/session");
-    assert.equal(requests[1].options.signal, controller.signal);
-    assert.equal(requests[1].options.body, '{"cookies":[],"mtgsig":"signature"}');
-    assert.equal(requests[1].options.redirect, "error");
+    assert.equal(requests.at(-1).url, "http://worker.example/api/lock/session");
+    assert.equal(requests.at(-1).options.signal, controller.signal);
+    assert.equal(requests.at(-1).options.body, '{"cookies":[],"mtgsig":"signature"}');
+    assert.equal(requests.at(-1).options.redirect, "error");
   } finally { fixture.cleanup(); }
 });
 
@@ -426,7 +479,7 @@ test("upload cannot follow a changed profile or continue after cancellation duri
     const pending = client.prepareSessionUpload()({}, { signal: controller.signal });
     await new Promise(setImmediate); controller.abort(); confirmUpload(true);
     await assert.rejects(pending, { name: "AbortError" });
-    assert.equal(requests.length, 3);
+    assert.equal(requests.length, 6);
   } finally { fixture.cleanup(); }
 });
 
@@ -443,7 +496,7 @@ test("profile changes during native HTTP confirmation cannot upload to an old Wo
     await new Promise(setImmediate);
     await client.connectWorker({ workerUrl: "https://other.example" }); confirmUpload(true);
     await assert.rejects(pending, { code: "disconnected" });
-    assert.equal(requests.length, 2);
+    assert.equal(requests.length, 4);
   } finally { fixture.cleanup(); }
 });
 
@@ -460,7 +513,7 @@ test("lost upload response reconciles only an exact source timestamp and otherwi
       let sent = false; const pending = client.prepareSessionUpload()({ saved_at: savedAt }, { onSend: () => { sent = true; } });
       if (matches) assert.equal((await pending).session.uploaded, true);
       else await assert.rejects(pending, (error) => error.code === "unknown" && !/Cookie|123456789|mtgsig/.test(error.message));
-      assert.equal(sent, true); assert.equal(requests[2].url, "https://worker.example/api/lock/session/status");
+      assert.equal(sent, true); assert.equal(requests.at(-1).url, "https://worker.example/api/lock/session/status");
     } finally { fixture.cleanup(); }
   }
 });
@@ -476,7 +529,7 @@ test("server upload errors redact remote messages and treat server failures as a
     try {
       const client = createWorkerClient(fixture); await client.connectWorker({ workerUrl: "https://worker.example" });
       await assert.rejects(client.prepareSessionUpload()({}), (error) => error.code === (status === 400 ? "upload" : "unknown") && !/Cookie|123456789|mtgsig/.test(error.message));
-      assert.equal(requests.length, status === 400 ? 2 : 3);
+      assert.equal(requests.length, status === 400 ? 3 : 4);
     } finally { fixture.cleanup(); }
   }
 });
@@ -509,6 +562,6 @@ test("same-URL token replacement blocks login preparation throughout approval an
     await assert.rejects(uploadUnderA({}), { code: "disconnected" });
     assert.equal(requests.filter(({ options }) => options.method === "POST").length, 0);
     await client.prepareSessionUpload()({});
-    assert.equal(requests[2].options.headers["X-Token"], "token-b");
+    assert.equal(requests.at(-1).options.headers["X-Token"], "token-b");
   } finally { fixture.cleanup(); }
 });

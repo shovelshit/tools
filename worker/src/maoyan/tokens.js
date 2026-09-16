@@ -3,13 +3,14 @@
 
 import * as db from "./db.js";
 import { cleanupUserData, getUserConfig } from "./user.js";
-import { isExpired } from "./ddl.js";
 import { json } from "../common/http.js";
 import { runCheck } from "./check.js";
 import { monitorError } from "./log.js";
 import { inMonitorWindow } from "./cron.js";
 import { listSeatFeedback, deleteSeatFeedback } from "./seat-feedback.js";
 import { migrateKvToD1 } from "./migrate.js";
+import { accountStatus } from "./accounts.js";
+import { authenticate } from "./auth.js";
 
 export function randomToken() {
   const bytes = new Uint8Array(16);
@@ -45,15 +46,14 @@ async function publicTokenRecord(env, token) {
     token: maskToken(token.token),
     remark: token.remark || "",
     createdAt: token.createdAt || null,
-    state: config.enabled === true && !isExpired(config) ? "monitoring" : "stopped",
+    state: config.enabled === true ? "monitoring" : "stopped",
   };
 }
 
 // 仅认 X-Token; 返回随机 namespace ID，而不是令牌本身。按 token 点查(D1 unique 索引)。
 export async function checkAuthFull(request, env) {
-  const given = request.headers.get("X-Token") || "";
-  const hit = await db.findTokenByToken(env.DB, given);
-  return hit ? hit.id : null;
+  const principal = await authenticate(request, env);
+  return principal ? principal.userId : null;
 }
 
 // cron 直接读取唯一的令牌元数据，不维护会与删除操作竞争的副本。
@@ -61,11 +61,21 @@ export async function checkAuthFull(request, env) {
 // opts.now 供测试注入固定时刻; 手动检查不经此函数, 不受窗口限制。
 export async function runScheduledChecks(env, afterMonitor, opts = {}) {
   if (!inMonitorWindow(opts.now)) return;
-  for (const token of await getManagedTokens(env)) {
+  const nowMs = opts.now instanceof Date ? opts.now.getTime() : Date.now();
+  const { results } = await env.DB.prepare(
+    "SELECT id,role,state,expires_at FROM users WHERE role='user'"
+  ).all();
+  for (const row of results) {
+    const account = {
+      role: row.role,
+      state: row.state,
+      expiresAt: row.expires_at === null ? null : Number(row.expires_at)
+    };
+    if (accountStatus(account, nowMs) !== "active") continue;
     try {
-      await runCheck(env, false, token.id, {
+      await runCheck(env, false, row.id, {
         afterPersist: typeof afterMonitor === "function"
-          ? (cinemaData) => afterMonitor(token.id, cinemaData)
+          ? (cinemaData) => afterMonitor(row.id, cinemaData)
           : undefined
       });
     } catch (e) {

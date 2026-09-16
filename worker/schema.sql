@@ -38,6 +38,17 @@ CREATE TABLE IF NOT EXISTS access_keys (
   created_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS admin_monitor_sessions (
+  token_hash TEXT PRIMARY KEY CHECK (length(token_hash) = 64),
+  user_id TEXT NOT NULL REFERENCES users(id),
+  expires_at INTEGER NOT NULL,
+  admin_token_hash TEXT NOT NULL CHECK (length(admin_token_hash) = 64),
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_admin_monitor_sessions_expiry
+  ON admin_monitor_sessions(expires_at);
+
 CREATE TABLE IF NOT EXISTS enrollment_claims (
   user_id TEXT NOT NULL REFERENCES users(id),
   fingerprint_digest TEXT,

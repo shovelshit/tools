@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import * as db from "../src/maoyan/db.js";
+import { hashAccessKey } from "../src/maoyan/accounts.js";
 
 export class MemoryKV {
   constructor(entries = {}) {
@@ -119,7 +120,18 @@ export class MemoryD1 {
 //          statuses: {id: obj}, changes: {id: [新在前]}, lockRules: {id: rule} }
 export async function createDB(seeds = {}) {
   const d1 = new MemoryD1();
-  for (const token of seeds.tokens || []) await db.upsertToken(d1, token);
+  for (const token of seeds.tokens || []) {
+    // Runtime auth is account-based. Keep the legacy row as migration/admin
+    // fixture while giving existing endpoint tests the same UUID identity.
+    await db.upsertToken(d1, token);
+    const nowMs = Date.now();
+    await d1.prepare(
+      "INSERT OR IGNORE INTO users(id,role,remark,state,created_at,expires_at,source,version) VALUES (?,'user',?,'active',?,?,'test',1)"
+    ).bind(token.id, token.remark || "", nowMs, nowMs + 15 * 86400000).run();
+    await d1.prepare(
+      "INSERT OR IGNORE INTO access_keys(user_id,token_hash,key_prefix,key_suffix,created_at) VALUES (?,?,?,?,?)"
+    ).bind(token.id, await hashAccessKey(token.token), String(token.token).slice(0, 4), String(token.token).slice(-4), nowMs).run();
+  }
   for (const [tokenId, config] of Object.entries(seeds.configs || {})) await db.putConfig(d1, tokenId, config);
   for (const [tokenId, snapshot] of Object.entries(seeds.snapshots || {})) await db.saveSnapshot(d1, tokenId, snapshot);
   for (const [tokenId, status] of Object.entries(seeds.statuses || {})) await db.putStatus(d1, tokenId, status);

@@ -16,7 +16,9 @@ test("profile switching isolates tokens, clears page state, and invalidates pend
   assert.equal(await generation.run(oldGeneration, Promise.resolve("stale"), () => { state.cinemaId = "stale"; }), false);
   await assert.rejects(upload({}), { code: "disconnected" });
   await app.runtime.requestWorker("/api/config");
-  assert.deepEqual(app.worker.requests.map(({ token }) => token), ["one-token", "two-token", "two-token"]);
+  assert.deepEqual(app.worker.requests.map(({ token }) => token), [
+    "one-token", "one-token", "two-token", "two-token", "two-token"
+  ]);
   assert.equal(app.bridge.cookies, undefined);
   assert.equal(app.bridge.getToken, undefined);
   assert.equal(app.bridge.ipcRenderer, undefined);

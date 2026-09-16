@@ -5,7 +5,6 @@ import { getUserConfig } from "./user.js";
 import { fetchCinemaDetail } from "./api.js";
 import { pushNotify } from "./notify.js";
 import { minBatchMinutes, resolveCronExprs } from "./cron.js";
-import { isExpired } from "./ddl.js";
 import { monitorError } from "./log.js";
 import { newShowsNotification } from "./notification-copy.js";
 
@@ -39,17 +38,6 @@ export async function runCheck(env, manual, token, options = {}) {
         : { ok: false, error: "尚未开始监控，请先在界面点「开始监控」", status: 409 };
     }
     return { ok: true, skipped: true, stopped: cfg.enabled === false };
-  }
-  // 到期自动停止: 每次开始监控刷新截止时间, 防止设完就不管
-  if (isExpired(cfg)) {
-    cfg.enabled = false;
-    await db.putConfig(env.DB, token, cfg);
-    await appendChange(env, token, {
-      type: "warn",
-      text: `监控已到期（截止 ${(cfg.monitorDdl || "").slice(0, 10) || "未设置"}），已自动停止；在监控页点「开始监控」可再续 ${30} 天`,
-    });
-    if (manual) return { ok: false, error: "监控已到期，已自动停止；点「开始监控」可再续 30 天", status: 409 };
-    return { ok: true, stopped: true, expired: true };
   }
   const selected = new Set((cfg.selectedMovieIds || []).map(String));
   const st = await db.getStatus(env.DB, token) || {};

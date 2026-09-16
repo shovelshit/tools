@@ -44,18 +44,56 @@ test("web runtime connects with the supplied worker credentials", async () => {
   const runtime = createWebRuntime({
     fetchImpl: async (url, options) => {
       requests.push({ url, options });
-      return { ok: true, json: async () => ({ profile: { id: "user-a" } }) };
+      if (url.endsWith("/api/capabilities")) return { ok: true, status: 200, json: async () => ({ accountLifecycle: true }) };
+      if (url.endsWith("/api/auth/session")) return { ok: true, status: 200, json: async () => ({ account: { userId: "user-a", role: "user", accountStatus: "active" } }) };
+      return { ok: true, status: 200, json: async () => ({ ok: true, status: {} }) };
     },
     getWorkerUrl: () => "https://stale.example",
     getToken: () => "stale-token"
   });
 
   const result = await runtime.connectWorker({ workerUrl: "https://worker.example", token: "token-a" });
-  assert.equal(requests[0].url, "https://worker.example/api/status");
+  assert.equal(requests[0].url, "https://worker.example/api/capabilities");
   assert.equal(requests[0].options.headers["X-Token"], "token-a");
   assert.deepEqual(JSON.parse(JSON.stringify(result)), {
-    status: { profile: { id: "user-a" } }, profile: { id: "user-a" }, httpRisk: false
+    status: { ok: true, status: {} },
+    profile: { userId: "user-a", role: "user", accountStatus: "active" },
+    account: { userId: "user-a", role: "user", accountStatus: "active" },
+    capabilities: { accountLifecycle: true },
+    httpRisk: false,
+    persistInputToken: true
   });
+});
+
+test("web runtime falls back only when capabilities explicitly returns 404", async () => {
+  const requests = [];
+  const runtime = loadRuntime().createWebRuntime({
+    fetchImpl: async (url) => {
+      requests.push(url);
+      if (url.endsWith("/api/capabilities")) return { ok: false, status: 404, json: async () => ({ error: "Not Found" }) };
+      return { ok: true, status: 200, json: async () => ({ profile: { id: "legacy" }, status: {} }) };
+    },
+    getWorkerUrl: () => "https://worker.example",
+    getToken: () => "token-a"
+  });
+  const result = await runtime.connectWorker({ workerUrl: "https://worker.example", token: "token-a" });
+  assert.deepEqual(requests, ["https://worker.example/api/capabilities", "https://worker.example/api/status"]);
+  assert.equal(result.capabilities.accountLifecycle, false);
+});
+
+test("web runtime does not downgrade authentication failures to legacy", async () => {
+  const requests = [];
+  const runtime = loadRuntime().createWebRuntime({
+    fetchImpl: async (url) => {
+      requests.push(url);
+      if (url.endsWith("/api/capabilities")) return { ok: true, status: 200, json: async () => ({ accountLifecycle: true }) };
+      return { ok: false, status: 401, json: async () => ({ code: "UNAUTHORIZED", error: "访问密钥无效" }) };
+    },
+    getWorkerUrl: () => "https://worker.example",
+    getToken: () => "bad"
+  });
+  await assert.rejects(runtime.connectWorker({ workerUrl: "https://worker.example", token: "bad" }), /访问密钥无效/);
+  assert.deepEqual(requests, ["https://worker.example/api/capabilities", "https://worker.example/api/auth/session"]);
 });
 
 test("web runtime hides transport details when worker connection fails", async () => {

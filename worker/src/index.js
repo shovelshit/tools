@@ -4,7 +4,9 @@ import { CORS, json } from "./common/http.js";
 import { NOTIFY_CHANNELS, pushBark } from "./common/notify.js";
 import { getUserConfig } from "./maoyan/user.js";
 import * as db from "./maoyan/db.js";
-import { CITY_LIST, fetchCinemaDetail, publicCinemaShows, searchCinemasByKw, runCheck, appendChange, pushNotify, currentChannel, currentCredential, isNotificationVerified, notificationVerification, minBatchMinutes, describeCrons, isMinuteStepCrons, resolveCronExprs, ddlFromNow, checkAuthFull, handleAdminTokens, handleLockApi, runScheduledChecks, runScheduledLockAfterMonitor, MONITOR_WINDOW_LABEL } from "./maoyan/index.js";
+import { CITY_LIST, fetchCinemaDetail, publicCinemaShows, searchCinemasByKw, runCheck, appendChange, pushNotify, currentChannel, currentCredential, isNotificationVerified, notificationVerification, minBatchMinutes, describeCrons, isMinuteStepCrons, resolveCronExprs, handleAdminTokens, handleLockApi, runScheduledChecks, runScheduledLockAfterMonitor, MONITOR_WINDOW_LABEL } from "./maoyan/index.js";
+import { authenticate, requireActiveAccount, serviceNow } from "./maoyan/auth.js";
+import { accountErrorResponse, handleAccountApi, handlePublicAccountApi } from "./maoyan/account-api.js";
 import { handleStoreApi, handleStoreFile } from "./store/proxy.js";
 import { testNotification } from "./maoyan/notification-copy.js";
 
@@ -18,7 +20,7 @@ function upstreamStatus(message) {
 }
 
 async function publicConfig(config) {
-  const { barkKey, serverChanKey, notifyVerification, ...safeConfig } = config || {};
+  const { barkKey, serverChanKey, notifyVerification, monitorDdl, ...safeConfig } = config || {};
   return {
     ...safeConfig,
     enabled: config?.enabled === true,
@@ -41,15 +43,46 @@ export default {
       return json({ error: "Not Found" }, 404);
     }
 
+    try {
+      const publicAccountResponse = await handlePublicAccountApi(request, env, url);
+      if (publicAccountResponse) return publicAccountResponse;
+    } catch (error) {
+      return accountErrorResponse(error);
+    }
+
     // ---- 令牌管理接口(管理员, X-Admin-Token 鉴权) ----
     if (url.pathname === "/api/admin/tokens" || url.pathname === "/api/admin/tokens/revoke" || url.pathname === "/api/admin/seat-feedback" || url.pathname === "/api/admin/migrate-kv-to-d1") {
       return handleAdminTokens(request, env, url);
     }
 
-    // ---- 以下接口均需 X-Token ----
-    const token = await checkAuthFull(request, env);
-    if (token === null) return json({ error: "访问令牌错误" }, 401);
+    // ---- 以下接口均需账号凭据或管理员监控会话 ----
+    const principal = await authenticate(request, env, serviceNow(env));
+    if (!principal) return json({ ok: false, code: "UNAUTHORIZED", error: "访问密钥无效" }, 401);
+    const token = principal.userId;
     try {
+      const accountResponse = await handleAccountApi(request, env, url, principal);
+      if (accountResponse) return accountResponse;
+
+      // 到期/暂停账号仍可查看自身状态、既有规则，并主动清理会话或取消规则。
+      const restrictedLockRoute =
+        (url.pathname === "/api/lock/rule" && request.method === "GET") ||
+        (url.pathname === "/api/lock/session/status" && request.method === "GET") ||
+        (url.pathname === "/api/lock/session/remove" && request.method === "POST") ||
+        (url.pathname === "/api/lock/rule/cancel" && request.method === "POST");
+      if (restrictedLockRoute) return await handleLockApi(request, env, url, token);
+      if (url.pathname === "/api/config" && request.method === "POST" && principal.accountStatus !== "active") {
+        const body = await request.json().catch(() => null);
+        const keys = body && typeof body === "object" && !Array.isArray(body) ? Object.keys(body) : [];
+        if (keys.length === 1 && keys[0] === "enabled" && body.enabled === false) {
+          const cfg = await getUserConfig(env, token);
+          cfg.enabled = false;
+          await db.putConfig(env.DB, token, cfg);
+          return json({ ok: true, config: await publicConfig(cfg) });
+        }
+      }
+      const restrictedAccountRoute = url.pathname === "/api/status" && request.method === "GET";
+      if (!restrictedAccountRoute) await requireActiveAccount(env, token, serviceNow(env));
+
       const lockResponse = await handleLockApi(request, env, url, token);
       if (lockResponse) return lockResponse;
       // ---- 城市列表 ----
@@ -133,8 +166,6 @@ export default {
             return json({ ok: false, error: "请先发送并确认当前推送渠道的测试推送" }, 400);
           }
           cfg.enabled = enabled;
-          // 每次显式「开始监控」都刷新一次截止时间(30 天)
-          if (cfg.enabled) cfg.monitorDdl = ddlFromNow();
         }
         // 运行中必须始终有「可用且已验证」的推送渠道: 切到未配置/未验证的渠道时自动停止监控,
         // 否则监控继续跑、推送全部失败, 页面却仍显示"监控中"(静默失效)
@@ -188,8 +219,7 @@ export default {
           lastError: st.lastError || null,
           cinemaName: st.cinemaName,
           newTotal: st.newTotal,
-          enabled: cfg.enabled === true,
-          monitorDdl: cfg.monitorDdl || null
+          enabled: cfg.enabled === true
         };
         const changes = await db.listChanges(env.DB, token);
         return json({
@@ -206,6 +236,7 @@ export default {
       }
       return json({ error: "Unknown API" }, 404);
     } catch (e) {
+      if (e?.code) return accountErrorResponse(e);
       return json({ ok: false, error: e.message }, 500);
     }
   },

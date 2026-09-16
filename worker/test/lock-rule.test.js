@@ -25,6 +25,7 @@ async function envWithConfig(config = { cinemaId: "25428", selectedMovieIds: ["7
 function dependencies(overrides = {}) {
   return {
     now,
+    requireActive: async () => ({}),
     loadSession: async () => validSession(),
     fetchCinema: async () => ({ showData: {
       cinemaName: "测试影院",
@@ -198,6 +199,23 @@ test("an immediate successful lock sends the same terminal notification after pe
     "💳 已创建待支付订单，请尽快前往猫眼付款",
     "⏳ 猫眼返回剩余支付时间：600 秒"
   ].join("\n"));
+});
+
+test("immediate locking rechecks account eligibility before ordering", async () => {
+  const env = await envWithConfig();
+  let orderCalls = 0;
+  await assert.rejects(
+    createLockRule(env, "token-a", validInput({ targetDate: "2026-09-11", riskAccepted: false }), dependencies({
+      requireActive: async () => {
+        const error = new Error("账号已到期，请先续期");
+        error.code = "ACCOUNT_EXPIRED";
+        throw error;
+      },
+      placeOrder: async () => { orderCalls += 1; return { orderId: "forbidden" }; }
+    })),
+    { code: "ACCOUNT_EXPIRED" }
+  );
+  assert.equal(orderCalls, 0);
 });
 
 test("an immediate notification failure keeps the successful order locked", async () => {

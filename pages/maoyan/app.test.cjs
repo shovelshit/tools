@@ -70,17 +70,23 @@ async function startWebApp({ savedWorker, requestedWorker, savedToken = "token-a
 
 test("Web startup URL override never sends another Worker's legacy token", async () => {
   const app = await startWebApp({ savedWorker: "https://a.example", requestedWorker: "https://b.example" });
-  assert.deepEqual(app.requests, [{ url: "https://b.example/api/status", token: "" }]);
+  assert.deepEqual(app.requests.map((request) => request.url), [
+    "https://b.example/api/capabilities", "https://b.example/api/auth/session", "https://b.example/api/status"
+  ]);
+  assert.equal(app.requests.every((request) => request.token === ""), true);
   assert.equal(app.els.token.value, "");
 });
 
 test("Web startup restores only the requested profile and migrates bound legacy credentials", async () => {
   const equivalent = await startWebApp({ savedWorker: "HTTPS://A.EXAMPLE:443/", requestedWorker: "https://a.example" });
-  assert.deepEqual(equivalent.requests, [{ url: "https://a.example/api/status", token: "token-a" }]);
+  assert.deepEqual(equivalent.requests.map((request) => request.url), [
+    "https://a.example/api/capabilities", "https://a.example/api/auth/session", "https://a.example/api/status"
+  ]);
+  assert.equal(equivalent.requests.every((request) => request.token === "token-a"), true);
   assert.equal(equivalent.entries.get("token:https%3A%2F%2Fa.example"), "token-a");
   assert.equal(equivalent.entries.has("token"), false);
   const another = await startWebApp({ savedWorker: "https://a.example", requestedWorker: "https://b.example", tokens: { "token:https%3A%2F%2Fb.example": "token-b" } });
-  assert.deepEqual(another.requests, [{ url: "https://b.example/api/status", token: "token-b" }]);
+  assert.equal(another.requests.every((request) => request.token === "token-b"), true);
   assert.equal(another.entries.get("token:https%3A%2F%2Fa.example"), "token-a");
   const unbound = await startWebApp({ requestedWorker: "https://b.example" });
   assert.equal(unbound.requests[0].token, "");
@@ -151,7 +157,6 @@ test("logout resets Worker-scoped UI before another profile can connect", () => 
   assert.match(source, /function resetProfileUi[\s\S]*?selectedCity = null;/);
   assert.match(source, /function resetProfileUi[\s\S]*?allCities = \[\];/);
   assert.match(source, /function resetProfileUi[\s\S]*?monitorEnabled = false;/);
-  assert.match(source, /function resetProfileUi[\s\S]*?monitorDdl = null;/);
   assert.match(source, /function resetProfileUi[\s\S]*?lockController\.reset\?\.\(\);/);
 });
 
@@ -197,11 +202,20 @@ test("monitor start stays disabled until the current push configuration is teste
   assert.match(source, /pushVerified = true;[\s\S]*?updateMonitorBtn\(\)/);
 });
 
-test("stopped monitor status never falls back to an expired label", () => {
+test("monitor status no longer uses the retired independent deadline", () => {
   const source = readSource("app.js");
-  // 手动停止后服务端仍保留未来 monitorDdl, 状态文案必须依据 expired 而不是 monitorDdl 是否存在
-  assert.match(source, /const main = stopped \? \(expired \? "已到期" : "已停止"\)/);
+  assert.doesNotMatch(source, /monitorDdl/);
+  assert.match(source, /const main = stopped \? "已停止"/);
   assert.match(source, /await refreshChanges\(\);/);
+});
+
+test("expired accounts expose self-service renewal with optimistic versioning", () => {
+  const source = readSource("app.js");
+  const html = readSource("index.html");
+  assert.match(html, /id="btn-renew-account"/);
+  assert.match(source, /accountConnection\.canRenew/);
+  assert.match(source, /\/api\/account\/renew/);
+  assert.match(source, /expectedVersion: currentAccount\.accountVersion/);
 });
 
 test("cinema selection no longer depends on the removed manual input", () => {

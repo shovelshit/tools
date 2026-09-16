@@ -10,6 +10,7 @@ import { pushNotify } from "./notify.js";
 import { lockError, lockLog } from "./log.js";
 import { withSeatFeedback } from "./seat-feedback.js";
 import { lockNotification } from "./notification-copy.js";
+import { requireActiveAccount } from "./auth.js";
 
 const TOKEN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -166,6 +167,7 @@ export async function runOneLockRule(env, tokenId, deps = {}) {
     return { ok: false, waiting: true };
   }
 
+  await (deps.requireActive || requireActiveAccount)(env, tokenId);
   try {
     const order = await createOrder(session, seatMap, matching.seats.map((seat) => seat.seatNo));
     return await terminal(env, tokenId, matching, "locked", {

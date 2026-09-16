@@ -98,6 +98,6 @@ test("monitor keeps running and follows the new cinema after a switch (config un
   assert.equal(post.status, 200);
   const cfg = await db.getConfig(env.DB, tokenId);
   assert.equal(cfg.enabled, true); // 切影院不停止监控
-  assert.equal(cfg.monitorDdl !== undefined && cfg.monitorDdl !== null, true); // 截止时间不重置
+  assert.equal(cfg.monitorDdl == null, true); // 账号有效期已取代独立监控截止时间
   assert.deepEqual(cfg.selectedMovieIds, ["900"]); // 未随请求变化
 });

@@ -20,6 +20,7 @@ const els = {
   updateStatus: $("update-status"),
   updateText: $("update-text"),
   btnOpenUpdate: $("btn-open-update"),
+  btnRenewAccount: $("btn-renew-account"),
   btnLogout: $("btn-logout"),
   // 影院设置
   cityInput: $("city-input"),
@@ -61,9 +62,9 @@ const profileGeneration = window.createProfileGeneration();
 let activeProfileKey = "";
 let runtimeInfo = { kind: window.maoyanRuntime?.kind || "web", canLoginMaoyan: false, persistentTokenStorage: false };
 let tokenProfileKey = "";
+let currentAccount = null;
 let lockServiceEnabled = false;
 let monitorEnabled = false; // 默认停止, 需显式「开始监控」
-let monitorDdl = null; // 监控截止时间(ISO), 每次开始监控刷新 30 天
 let pushSaved = false; // 云端已存有当前渠道的推送配置(接口不回显时, 保存时避免误覆盖)
 let pushVerified = false; // 当前渠道 + 当前密钥已成功发送过测试推送
 
@@ -270,9 +271,10 @@ function resetProfileUi(nextProfileKey) {
     profileKey: activeProfileKey
   }, nextProfileKey);
   connected = false;
+  currentAccount = null;
+  els.btnRenewAccount?.classList.add("hidden");
   lockServiceEnabled = false;
   monitorEnabled = false;
-  monitorDdl = null;
   pushSaved = false;
   pushVerified = false;
   realKeys.bark = "";
@@ -390,13 +392,20 @@ async function connect() {
         const typedToken = els.token.value.trim();
         if (typedToken) connection.token = typedToken;
         if (runtimeInfo.kind === "electron") els.token.value = "";
-        const { status: st, profile } = await window.maoyanRuntime.connectWorker(connection);
+        const connectionResult = await window.maoyanRuntime.connectWorker(connection);
+        const { status: st, profile, account, capabilities } = connectionResult;
         if (!profileGeneration.isCurrent(generation)) return;
+        const accountConnection = window.normalizeAccountConnection({ account, capabilities });
+        currentAccount = account || null;
+        els.btnRenewAccount?.classList.toggle("hidden", !accountConnection.canRenew);
         connected = true;
         activeProfileKey = workerUrl;
         tokenProfileKey = workerUrl;
         localStorage.setItem("workerUrl", els.workerUrl.value.trim());
-        if (runtimeInfo.kind === "web") await secureSet(webTokenKey(workerUrl), typedToken);
+        if (runtimeInfo.kind === "web") {
+          await secureSet(webTokenKey(workerUrl), connectionResult.persistInputToken === false ? "" : typedToken);
+          if (connectionResult.persistInputToken === false) els.token.value = "";
+        }
         else els.token.value = "";
         setConnectionState({ profileKey: profile?.id || profile?.baseUrl || workerUrl, workerUrl });
         lockServiceEnabled = st.lockServiceEnabled === true;
@@ -406,10 +415,22 @@ async function connect() {
         if (openMode) localStorage.setItem("authMode", "open");
         else localStorage.removeItem("authMode");
         const lastTxt = st.status.lastCheck ? fmtClock(new Date(st.status.lastCheck).getTime()) : "从未";
-        setStatus(statusText("监控中", [`上次检查 ${lastTxt}`, nextBatchText(), openMode && "免令牌模式"]), "running");
+        const restrictedText = account?.accountStatus === "expired" ? "账号已到期，可续期后恢复"
+          : account?.accountStatus === "suspended" ? "账号已暂停"
+            : "账号当前不可监控";
+        setStatus(
+          accountConnection.canMonitor
+            ? statusText("监控中", [`上次检查 ${lastTxt}`, nextBatchText(), openMode && "免令牌模式"])
+            : restrictedText,
+          accountConnection.canMonitor ? "running" : "stopped"
+        );
         enterMainPage();
         lockController.syncAvailability();
         log("ok", "云端连接成功");
+        if (!accountConnection.canMonitor) {
+          log("warn", restrictedText);
+          return;
+        }
         await Promise.all([loadCities(), restoreConfig()]);
         if (!profileGeneration.isCurrent(generation)) return;
         refreshChanges();
@@ -433,6 +454,29 @@ els.token.addEventListener("keydown", (e) => {
   if (e.key === "Enter") connect();
 });
 els.token.addEventListener("input", () => { tokenProfileKey = normalizedWorkerUrl(); });
+
+els.btnRenewAccount?.addEventListener("click", async () => {
+  if (!currentAccount || currentAccount.role !== "user" || currentAccount.accountStatus !== "expired") return;
+  const generation = profileGeneration.current();
+  await withButtonLoading(els.btnRenewAccount, "续期中...", async () => {
+    try {
+      const result = await api("/api/account/renew", {
+        method: "POST",
+        body: JSON.stringify({ requestId: crypto.randomUUID(), expectedVersion: currentAccount.accountVersion })
+      });
+      if (!profileGeneration.isCurrent(generation)) return;
+      currentAccount = result.account;
+      els.btnRenewAccount.classList.add("hidden");
+      setStatus("账号已续期，正在恢复配置", "running");
+      showToast("账号已续期 15 天", "success");
+      await Promise.all([loadCities(), restoreConfig()]);
+      if (profileGeneration.isCurrent(generation)) refreshChanges();
+    } catch (error) {
+      if (!profileGeneration.isCurrent(generation) || isStaleProfileError(error)) return;
+      showToast("续期失败：" + error.message, "error");
+    }
+  });
+});
 
 // 切换连接: 仅清除当前工具的连接信息，不影响同域管理页等其他本地数据
 els.btnLogout.addEventListener("click", async () => {
@@ -466,7 +510,6 @@ async function restoreConfig() {
     const { config } = await api("/api/config");
     cloudConfig = config;
     monitorEnabled = config.enabled === true; // 默认停止, 需显式「开始监控」
-    monitorDdl = config.monitorDdl || null;
     updateMonitorBtn();
     if (config.cinemaId) selectedCinemaId = String(config.cinemaId);
     // 批次信息以服务端 cron 为准
@@ -607,7 +650,6 @@ async function autoSaveConfig(extra = {}, { msg = "配置已自动保存", silen
     pushVerified = res.config?.notifyVerified === true;
     // 服务端可能因推送渠道不可用而自动停止监控: 同步真实状态, 避免界面仍显示"监控中"
     if (res.config && typeof res.config.enabled === "boolean") monitorEnabled = res.config.enabled;
-    if (res.config && res.config.monitorDdl !== void 0) monitorDdl = res.config.monitorDdl || null;
     updateMonitorBtn();
     if (res.notice) {
       await refreshChanges(); // 拉取服务端刚写入的告警与最新状态
@@ -694,10 +736,6 @@ els.serverChanInput.addEventListener("focus", keyInputFocused);
 els.serverChanInput.addEventListener("blur", keyInputBlurred);
 
 // ---------------- 监控启停 ----------------
-function fmtDate(ts) {
-  return new Date(ts).toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" });
-}
-
 function updateMonitorBtn() {
   els.btnToggleMonitor.textContent = monitorEnabled ? "停止监控" : "开始监控";
   els.btnToggleMonitor.classList.toggle("danger", monitorEnabled);
@@ -720,16 +758,14 @@ els.btnToggleMonitor.addEventListener("click", async () => {
       if (!profileGeneration.isCurrent(generation)) return;
       monitorEnabled = target;
       pushVerified = res.config?.notifyVerified === true;
-      if (res.config) monitorDdl = res.config.monitorDdl || monitorDdl;
       log(
         target ? "ok" : "info",
         target
-          ? statusText("监控已开始", [monitorDdl && `截止 ${fmtDate(Date.parse(monitorDdl))}，到期前再次开始可续期`])
+          ? "监控已开始"
           : "监控已停止，云端不再自动检查（配置已保留）"
       );
       setStatus(
         statusText(monitorEnabled ? "监控中" : "已停止", [
-          monitorEnabled && monitorDdl && `截止 ${fmtDate(Date.parse(monitorDdl))}`,
           monitorEnabled && nextBatchText(),
         ]),
         monitorEnabled ? "running" : "stopped"
@@ -1171,16 +1207,10 @@ async function refreshChanges(showLoading = false) {
     lockServiceEnabled = data.lockServiceEnabled === true;
     lockController.syncAvailability();
     syncCronInfo(data); // 批次描述保持与服务端一致
-    if (status.monitorDdl !== void 0) monitorDdl = status.monitorDdl;
     const stopped = status.enabled === false;
-    // 已到期 = 被自动停止 且 截止时间确实已过; 手动停止后服务端仍保留未来的截止时间, 不能据此判定到期
-    const expired = Boolean(stopped && monitorDdl && Date.now() > Date.parse(monitorDdl));
     const lastTxt = status.lastCheck ? fmtClock(new Date(status.lastCheck).getTime()) : "从未";
-    const main = stopped ? (expired ? "已到期" : "已停止") : status.lastError ? "检查异常" : "监控中";
-    // 停止状态下不再展示"截止 xxx"(那是下次续期用的未来时间, 与"未在监控"矛盾); 到期时保留以便说明原因
-    const showDdl = Boolean(monitorDdl) && (!stopped || expired);
+    const main = stopped ? "已停止" : status.lastError ? "检查异常" : "监控中";
     const segments = [
-      showDdl && `截止 ${fmtDate(Date.parse(monitorDdl))}`,
       `上次检查 ${lastTxt}`,
       !stopped && nextBatchText(),
       !stopped && status.lastError && `失败原因: ${status.lastError}`,

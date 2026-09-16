@@ -28,14 +28,20 @@
   }
 
   function createWebRuntime({ fetchImpl = root.fetch, getWorkerUrl, getToken } = {}) {
+    const connectedTokens = new Map();
     async function requestWorker(path, options = {}, connection = {}) {
       if (!/^\/api\//.test(path) || /^https?:/i.test(path)) throw new Error("API 路径无效");
-      const headers = { "X-Token": connection.token ?? getToken() };
-      if (options.body !== undefined) headers["Content-Type"] = "application/json";
       const workerUrl = (connection.workerUrl ?? getWorkerUrl()).replace(/\/+$/, "");
+      const headers = { "X-Token": connection.token ?? connectedTokens.get(workerUrl) ?? getToken() };
+      if (options.body !== undefined) headers["Content-Type"] = "application/json";
       const response = await fetchImpl(workerUrl + path, { method: "GET", ...options, headers });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      if (!response.ok) {
+        const error = new Error(data.error || `HTTP ${response.status}`);
+        error.status = response.status;
+        error.code = data.code;
+        throw error;
+      }
       return data;
     }
 
@@ -48,13 +54,26 @@
         if (!normalizedWorkerUrl) throw new Error("服务地址不能为空");
         const httpRisk = /^http:/i.test(normalizedWorkerUrl);
         if (httpRisk && !httpRiskConfirmed) throw new Error("HTTP 服务需要确认安全风险");
-        let status;
+        let capabilities;
         try {
-          status = await requestWorker("/api/status", {}, { workerUrl: normalizedWorkerUrl, token });
-        } catch {
+          capabilities = await requestWorker("/api/capabilities", {}, { workerUrl: normalizedWorkerUrl, token });
+        } catch (error) {
+          if (error?.status !== 404) throw new Error("无法连接服务，请检查服务地址和网络");
+          const status = await requestWorker("/api/status", {}, { workerUrl: normalizedWorkerUrl, token });
+          connectedTokens.set(normalizedWorkerUrl, token);
+          return { status, profile: status.profile || null, account: null, capabilities: { accountLifecycle: false }, httpRisk };
+        }
+        let auth;
+        try {
+          auth = await requestWorker("/api/auth/session", { method: "POST" }, { workerUrl: normalizedWorkerUrl, token });
+          const effectiveToken = auth.monitorSession || token;
+          const status = await requestWorker("/api/status", {}, { workerUrl: normalizedWorkerUrl, token: effectiveToken });
+          connectedTokens.set(normalizedWorkerUrl, effectiveToken);
+          return { status, profile: auth.account || null, account: auth.account || null, capabilities, httpRisk, persistInputToken: !auth.monitorSession };
+        } catch (error) {
+          if (error?.status === 401 || error?.status === 403) throw error;
           throw new Error("无法连接服务，请检查服务地址和网络");
         }
-        return { status, profile: status.profile || null, httpRisk };
       },
       loginMaoyan: async () => ({ ok: false, code: "unsupported" }),
       cancelMaoyanLogin: async () => ({ ok: true }),

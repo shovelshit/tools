@@ -160,7 +160,13 @@ function createWorkerClient({ app, safeStorage, fetchImpl = globalThis.fetch, co
       throw error;
     }
     const data = await responseJson(response);
-    if (!response.ok) throw sessionUpload ? safeError(response.status >= 500 ? "unknown" : "upload") : new Error(data.error || `HTTP ${response.status}`);
+    if (!response.ok) {
+      if (sessionUpload) throw safeError(response.status >= 500 ? "unknown" : "upload");
+      const error = new Error(data.error || `HTTP ${response.status}`);
+      error.status = response.status;
+      error.code = data.code;
+      throw error;
+    }
     return data;
   }
 
@@ -188,7 +194,26 @@ function createWorkerClient({ app, safeStorage, fetchImpl = globalThis.fetch, co
         const suppliedToken = typeof connection.token === "string";
         // Keep unverified credentials local to this attempt until it owns the commit.
         const token = suppliedToken ? connection.token : credentialStore.getToken(normalized.baseUrl) ?? "";
-        const status = await send(normalized, "/api/status", { token });
+        let capabilities;
+        let account = null;
+        let effectiveToken = token;
+        try {
+          capabilities = await send(normalized, "/api/capabilities", { token });
+        } catch (error) {
+          if (error?.status !== 404) throw error;
+          capabilities = { accountLifecycle: false };
+        }
+        if (capabilities.accountLifecycle === true) {
+          if (suppliedToken) {
+            const auth = await send(normalized, "/api/auth/session", { method: "POST", token });
+            account = auth.account || null;
+            effectiveToken = auth.monitorSession || token;
+          } else {
+            const own = await send(normalized, "/api/account", { token });
+            account = own.account || null;
+          }
+        }
+        const status = await send(normalized, "/api/status", { token: effectiveToken });
         checkCurrentAttempt();
         const profile = {
           baseUrl: normalized.baseUrl,
@@ -198,10 +223,17 @@ function createWorkerClient({ app, safeStorage, fetchImpl = globalThis.fetch, co
           httpRiskConfirmed: normalized.requiresHttpConfirmation && (candidate.httpRiskConfirmed || httpRiskConfirmed === true),
           httpSessionUploadConfirmed: normalized.requiresHttpConfirmation && candidate.httpSessionUploadConfirmed
         };
-        if (suppliedToken) credentialStore.setToken(normalized.baseUrl, token);
+        if (suppliedToken) credentialStore.setToken(normalized.baseUrl, effectiveToken);
         persistProfile(profile);
         activeProfileKey = normalized.baseUrl;
-        return { status, profile: status?.profile ?? null, httpRisk: normalized.requiresHttpConfirmation };
+        return {
+          status,
+          profile: account ?? status?.profile ?? null,
+          account,
+          capabilities,
+          httpRisk: normalized.requiresHttpConfirmation,
+          persistInputToken: !suppliedToken || effectiveToken === token
+        };
       } finally {
         if (attempt === connectionAttempt) connecting = false;
       }

@@ -42,6 +42,7 @@ function ruleInput(overrides = {}) {
 function orderDependencies(placeOrder) {
   return {
     now,
+    requireActive: async () => ({}),
     loadSession: async () => validSession(),
     fetchCinema: async () => ({ showData: {
       cinemaName: "测试影院",

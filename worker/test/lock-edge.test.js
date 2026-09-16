@@ -28,6 +28,7 @@ async function envWithConfig(config = { cinemaId: "25428", selectedMovieIds: ["7
 function dependencies(overrides = {}) {
   return {
     now,
+    requireActive: async () => ({}),
     loadSession: async () => validSession(),
     fetchCinema: async () => ({ showData: {
       cinemaName: "测试影院",

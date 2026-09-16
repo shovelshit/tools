@@ -10,6 +10,7 @@ import { getUserConfig } from "./user.js";
 import { pushNotify } from "./notify.js";
 import { lockError, lockLog } from "./log.js";
 import { lockNotification } from "./notification-copy.js";
+import { requireActiveAccount } from "./auth.js";
 
 // 这些错误会原样透传给前端(而不是笼统的"锁座参数无效")
 // 注意: 与上游(猫眼)相关的文案直接引用 lock-client 导出的常量, 避免文案漂移
@@ -247,6 +248,7 @@ export async function createLockRule(env, tokenId, input, options = {}) {
   });
   if (targetShow) {
     // 目标场次真实存在: 跳过等待, 立即尝试锁座下单
+    await (options.requireActive || requireActiveAccount)(env, tokenId);
     try {
       const order = await placeOrder(session, seatMap, seats.map((seat) => seat.seatNo));
       lockLog("rule_create", { phase: "complete", state: "locked" });
