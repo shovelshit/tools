@@ -5,6 +5,7 @@ const test = require("node:test");
 
 const workflowPath = path.resolve(__dirname, "../../.github/workflows/electron.yml");
 const workflow = fs.readFileSync(workflowPath, "utf8");
+const packageJson = JSON.parse(fs.readFileSync(path.resolve(__dirname, "../package.json"), "utf8"));
 
 test("master pushes publish installers directly to a GitHub Release", () => {
   assert.match(workflow, /push:\s*\n\s+branches: \[master\]\s*\n\s+pull_request:/);
@@ -39,7 +40,7 @@ test("master pushes publish installers directly to a GitHub Release", () => {
 });
 
 test("release workflow never stores installers as Actions artifacts", () => {
-  assert.doesNotMatch(workflow, /actions\/upload-artifact/);
+  assert.doesNotMatch(workflow, /actions\/(?:upload-artifact|upload-pages-artifact|deploy-pages)/);
   const packageJob = workflow.split("\n  package_release:")[1].split("\n  publish_release:")[0];
   assert.doesNotMatch(packageJob, /CSC_IDENTITY_AUTO_DISCOVERY: "false"\s*\n\s+GH_TOKEN:/);
   assert.match(packageJob, /Upload macOS release assets[\s\S]*?GH_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}/);
@@ -48,4 +49,24 @@ test("release workflow never stores installers as Actions artifacts", () => {
   assert.match(workflow, /prepare_release:[\s\S]*?permissions:\s*\n\s+contents: write/);
   assert.match(workflow, /package_release:[\s\S]*?permissions:\s*\n\s+contents: write/);
   assert.match(workflow, /publish_release:[\s\S]*?permissions:\s*\n\s+contents: write/);
+});
+
+test("release verification runs every shared browser unit test", () => {
+  const verifyJob = workflow.split("\n  verify:")[1].split("\n  prepare_release:")[0];
+  assert.match(verifyJob, /node --test pages\/maoyan\/\*\.test\.cjs/);
+  assert.match(verifyJob, /npm --prefix desktop test/);
+  assert.match(verifyJob, /npm --prefix worker test/);
+  assert.match(verifyJob, /npm --prefix desktop run test:e2e -- --output \"\$RUNNER_TEMP\/maoyan-ui-verification\"/);
+});
+
+test("desktop package uses an explicit monitor-only shared asset whitelist", () => {
+  const shared = packageJson.build.files.find((entry) => entry && typeof entry === "object" && entry.from === "../pages/maoyan");
+  assert.ok(shared);
+  const required = [
+    "index.html", "style.css", "maoyan-seat.css", "account.js", "app.js", "connection-profile.js",
+    "lock.js", "platform.js", "polling.js", "runtime.js", "secure-store.js", "ui.js", "workflow.js"
+  ];
+  assert.deepEqual([...shared.filter].sort(), [...required].sort());
+  assert.equal(packageJson.scripts["test:e2e"], "node test/ui-e2e.cjs");
+  for (const entry of shared.filter) assert.doesNotMatch(entry, /\*|admin|claim|fingerprint|test/i);
 });

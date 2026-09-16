@@ -28,6 +28,7 @@ jobs:
       - run: npm --prefix worker test
       - run: npm --prefix desktop test
       - run: node --test pages/maoyan/*.test.cjs
+      - run: npm --prefix desktop run test:e2e -- --output "$RUNNER_TEMP/maoyan-ui-verification"
 
   prepare_release:
     needs: verify

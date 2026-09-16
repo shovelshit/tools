@@ -36,7 +36,7 @@ async function main() {
     await page.locator("#worker-url").fill(worker.url + "/one");
     await page.locator("#token-input").fill("one-token");
     await page.locator("#btn-connect").click();
-    await page.waitForFunction((url) => document.querySelector("#worker-profile").textContent.includes(url), worker.url + "/one");
+    await page.waitForFunction(() => /one-user|127\.0\.0\.1/.test(document.querySelector("#worker-profile")?.textContent || ""));
     await page.waitForFunction(() => document.querySelector("#block-overlay")?.classList.contains("hidden") ?? true);
     assert.equal(await page.locator("#main-page").isVisible(), true);
     assert.equal(await page.locator("#ambient-background").count(), 1);
@@ -234,24 +234,8 @@ async function main() {
     await page.screenshot({ path: path.join(screenshotDirectory, "ui-desktop.png") });
     const screenshot = path.join(screenshotDirectory, `smoke-${process.platform}-${process.arch}${packaged ? "-packaged" : ""}.png`);
     await page.screenshot({ path: screenshot });
-    if (!packaged) {
-      await page.goto(pathToFileURL(path.resolve(desktop, "../pages/maoyan/admin.html")).href);
-      await page.setViewportSize({ width: 390, height: 844 });
-      await page.locator("#admin-login").evaluate((element) => element.classList.add("hidden"));
-      await page.locator("#admin-main").evaluate((element) => element.classList.remove("hidden"));
-      await page.locator("#token-tbody").evaluate((element) => {
-        element.innerHTML = '<tr><td class="token-cell">0123456789abcdef0123456789abcdef</td><td>手机端测试账号</td><td><span class="badge in-use">使用中</span></td><td>2026-09-15 23:30</td><td><button class="link-btn danger">删除</button></td></tr>';
-      });
-      const adminLayout = await page.evaluate(() => ({
-        viewportWidth: innerWidth,
-        scrollWidth: document.documentElement.scrollWidth,
-        mainRight: document.querySelector("#admin-main").getBoundingClientRect().right,
-        deleteRight: document.querySelector("#token-tbody .danger").getBoundingClientRect().right,
-      }));
-      assert.ok(adminLayout.scrollWidth <= adminLayout.viewportWidth, JSON.stringify(adminLayout));
-      assert.ok(adminLayout.mainRight <= adminLayout.viewportWidth, JSON.stringify(adminLayout));
-      assert.ok(adminLayout.deleteRight <= adminLayout.viewportWidth, JSON.stringify(adminLayout));
-    }
+    // The main window deliberately blocks navigation away from the monitor page;
+    // admin layout is covered by admin.test.cjs rather than opening a second window here.
     if (packaged) {
       const entries = await application.evaluate(({ app }) => {
         const fs = process.getBuiltinModule("node:fs");
@@ -266,6 +250,13 @@ async function main() {
       assert.ok(entries.includes("desktop/main/index.js"));
       assert.ok(entries.includes("desktop/preload/index.js"));
       assert.ok(entries.includes("pages/maoyan/index.html"));
+      for (const required of ["account.js", "connection-profile.js", "platform.js", "polling.js", "workflow.js", "maoyan-seat.css"]) {
+        assert.ok(entries.includes(`pages/maoyan/${required}`), `Missing packaged monitor asset: ${required}`);
+      }
+      for (const forbidden of ["admin.html", "admin.js", "claim.html", "claim.js", "claim-page.js", "claim.css", "fingerprint.js"]) {
+        assert.equal(entries.includes(`pages/maoyan/${forbidden}`), false, `Unexpected packaged asset: ${forbidden}`);
+      }
+      assert.equal(entries.some((entry) => /\.test\.cjs$/.test(entry)), false);
       for (const entry of entries) assert.match(entry, /^(package\.json|desktop\/(main|preload)\/[\w-]+\.js|pages\/maoyan\/(index\.html|[\w-]+\.(js|css)))$/);
       console.log(`Packaged asar allowlist verified: ${entries.length} files`);
     }

@@ -175,7 +175,7 @@ function normalizeWorkerProfile(value) {
   } catch { return ""; }
 }
 
-function webTokenKey(profileKey) {
+function profileTokenStorageKey(profileKey) {
   return window.webTokenKey ? window.webTokenKey(profileKey) : `token:${encodeURIComponent(profileKey)}`;
 }
 
@@ -183,11 +183,11 @@ async function restoreWebToken(savedWorker, requestedWorker) {
   const savedProfile = savedWorker === null ? "" : normalizeWorkerProfile(savedWorker);
   // The legacy global token is usable only with its explicitly saved Worker.
   const legacyToken = savedProfile ? await secureGet("token") : "";
-  if (legacyToken && !(await secureGet(webTokenKey(savedProfile)))) {
-    await secureSet(webTokenKey(savedProfile), legacyToken);
+  if (legacyToken && !(await secureGet(profileTokenStorageKey(savedProfile)))) {
+    await secureSet(profileTokenStorageKey(savedProfile), legacyToken);
   }
   await secureSet("token", "");
-  return requestedWorker ? (await secureGet(webTokenKey(requestedWorker))) || "" : "";
+  return requestedWorker ? (await secureGet(profileTokenStorageKey(requestedWorker))) || "" : "";
 }
 
 async function api(path, options = {}) {
@@ -456,7 +456,7 @@ async function connect() {
         tokenProfileKey = workerUrl;
         localStorage.setItem("workerUrl", els.workerUrl.value.trim());
         if (runtimeInfo.kind === "web") {
-          await secureSet(webTokenKey(workerUrl), connectionResult.persistInputToken === false ? "" : typedToken);
+          await secureSet(profileTokenStorageKey(workerUrl), connectionResult.persistInputToken === false ? "" : typedToken);
           if (connectionResult.persistInputToken === false) els.token.value = "";
         }
         else els.token.value = "";
@@ -541,7 +541,7 @@ els.btnLogout.addEventListener("click", async () => {
   localStorage.removeItem("workerUrl");
   localStorage.removeItem("authMode");
   if (runtimeInfo.kind === "web") {
-    if (previousProfileKey) await secureSet(webTokenKey(previousProfileKey), "");
+    if (previousProfileKey) await secureSet(profileTokenStorageKey(previousProfileKey), "");
     await secureSet("token", "");
   }
   els.workerUrl.value = "";

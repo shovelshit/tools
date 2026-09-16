@@ -44,6 +44,8 @@ async function startWebApp({ savedWorker, requestedWorker, savedToken = "token-a
   const els = { workerUrl: { value: "" }, token: { value: "" } };
   const location = { hostname: "page.example", origin: "https://page.example", protocol: "https:", search: requestedWorker ? `?worker=${encodeURIComponent(requestedWorker)}` : "" };
   const window = loadRuntime();
+  const { webTokenKey } = require("./connection-profile.js");
+  window.webTokenKey = webTokenKey;
   window.maoyanRuntime = window.createWebRuntime({
     getWorkerUrl: () => els.workerUrl.value, getToken: () => els.token.value,
     fetchImpl: async (url, options) => { requests.push({ url, token: options.headers["X-Token"] }); return { ok: true, json: async () => ({}) }; }

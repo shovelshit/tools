@@ -8,6 +8,7 @@
   "scripts": {
     "test": "node --test test/*.test.cjs",
     "test:ui": "node --test test/ui-workflow.test.cjs",
+    "test:e2e": "node test/ui-e2e.cjs",
     "start": "electron .",
     "test:smoke": "node test/smoke.cjs",
     "package:mac": "electron-builder --mac --arm64 --x64 --publish never",
@@ -30,7 +31,25 @@
       "package.json",
       { "from": "main", "to": "desktop/main", "filter": ["*.js"] },
       { "from": "preload", "to": "desktop/preload", "filter": ["*.js"] },
-      { "from": "../pages/maoyan", "to": "pages/maoyan", "filter": ["index.html", "*.css", "*.js", "!admin.js"] }
+      {
+        "from": "../pages/maoyan",
+        "to": "pages/maoyan",
+        "filter": [
+          "index.html",
+          "style.css",
+          "maoyan-seat.css",
+          "account.js",
+          "app.js",
+          "connection-profile.js",
+          "lock.js",
+          "platform.js",
+          "polling.js",
+          "runtime.js",
+          "secure-store.js",
+          "ui.js",
+          "workflow.js"
+        ]
+      }
     ],
     "mac": {
       "identity": null,

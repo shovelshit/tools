@@ -111,9 +111,12 @@ npm --prefix worker run build:assets
 # Web 与 Electron 单测
 node --test pages/maoyan/*.test.cjs
 npm --prefix desktop ci && npm --prefix desktop test
+
+# 浏览器跨视口交互验收（截图目录必须在仓库外）
+npm --prefix desktop run test:e2e -- --output /absolute/path/to/ui-verification
 ```
 
-- **E2E**：本地 mock harness + 无头 Chrome 全链路断言（8 个分部），测试方案与执行报告见 `docs/maoyan-e2e-test-plan.md` / `docs/maoyan-e2e-report.md`
+- **E2E**：本地 mock Worker + 无头 Chrome 覆盖 1440/1200/1024/768/390/320 视口、监控配置、锁座状态、官方图按需加载和公开申请满额页；截图和结果只写入命令指定的仓库外目录
 - **独立部署**：按 [worker/DEPLOY-D1.md](worker/DEPLOY-D1.md) 创建自己的 D1/KV、配置 secret、运行迁移和构建，再部署 Worker；模板默认关闭公开申请
 - **发布**：合入 `master` 后 GitHub Actions 先执行 Worker/Web/Electron 验证，再创建 GitHub Release 并由各平台任务直接上传安装包；不上传 Actions artifact
 - **前端发布惯例**：修改 `pages/maoyan/*.js`、`style.css` 等静态资源后，必须同步 bump `index.html` 中对应的 `?v=` 版本参数（格式 `v=YYYYMMDDx`），否则老用户会命中边缘缓存旧版

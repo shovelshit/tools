@@ -22,8 +22,22 @@ async function startMockWorker({ rejectUpload = false } = {}) {
     const route = "/" + parts.join("/");
     requests.push({ path: url.pathname, method: request.method, token: request.headers["x-token"] });
     const reply = (data, code = 200) => { response.writeHead(code, { "Content-Type": "application/json" }); response.end(JSON.stringify(data)); };
+    if (route === "/api/enrollment/config") return reply({
+      ok: true,
+      enabled: true,
+      validDays: 15,
+      capacity: { maxUsers: 20, used: 20, reserved: 0, remaining: 0 },
+      sourceUrl: "https://github.com/shovelshit/tools",
+      turnstileSiteKey: "mock-site-key",
+    });
     if (request.headers["x-token"] !== `${profile}-token`) return reply({ error: "Invalid token" }, 401);
+    if (route === "/api/capabilities") return reply({ ok: true, accountLifecycle: true, adminMonitorSession: true });
+    if (route === "/api/auth/session" && request.method === "POST") return reply({
+      ok: true,
+      account: { id: `${profile}-user`, role: "user", state: "active", accountStatus: "active", expiresAt: Date.now() + 86400000, version: 1 },
+    });
     if (route === "/api/status") return reply({ ok: true, authMode: "token", lockServiceEnabled: true, status: { lastCheckTs: 0, lastCheck: null, lastError: null, cinemaName: "", newTotal: 0, enabled: false, monitorDdl: null }, changes: [], ...cron });
+    if (route === "/api/changes") return reply({ ok: true, items: [], nextAfterId: null });
     if (route === "/api/config") {
       if (request.method === "POST") {
         let text = "";

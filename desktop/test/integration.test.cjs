@@ -16,8 +16,14 @@ test("profile switching isolates tokens, clears page state, and invalidates pend
   assert.equal(await generation.run(oldGeneration, Promise.resolve("stale"), () => { state.cinemaId = "stale"; }), false);
   await assert.rejects(upload({}), { code: "disconnected" });
   await app.runtime.requestWorker("/api/config");
-  assert.deepEqual(app.worker.requests.map(({ token }) => token), [
-    "one-token", "one-token", "two-token", "two-token", "two-token"
+  assert.deepEqual(app.worker.requests.map(({ path, token }) => [path, token]), [
+    ["/one/api/capabilities", "one-token"],
+    ["/one/api/auth/session", "one-token"],
+    ["/one/api/status", "one-token"],
+    ["/two/api/capabilities", "two-token"],
+    ["/two/api/auth/session", "two-token"],
+    ["/two/api/status", "two-token"],
+    ["/two/api/config", "two-token"],
   ]);
   assert.equal(app.bridge.cookies, undefined);
   assert.equal(app.bridge.getToken, undefined);
@@ -34,7 +40,7 @@ test("failed Maoyan upload preserves the existing Worker session and cleans the 
   assert.equal(result.ok, false);
   assert.equal(result.code, "upload");
   assert.deepEqual(await app.runtime.requestWorker("/api/lock/session/status"), before);
-  assert.deepEqual(app.worker.requests.filter(({ method }) => method === "POST").map(({ path }) => path), ["/one/api/lock/session"]);
+  assert.deepEqual(app.worker.requests.filter(({ method, path }) => method === "POST" && path.endsWith("/api/lock/session")).map(({ path }) => path), ["/one/api/lock/session"]);
   app.assertClean();
 });
 

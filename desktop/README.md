@@ -28,10 +28,10 @@
 
 ## 开发与发行
 
-使用 Node.js 22.23.2，先执行 `npm --prefix desktop ci`。`npm --prefix desktop start` 启动本地客户端；`npm --prefix desktop test` 运行桌面单元和集成测试；`npm --prefix desktop run test:smoke` 使用临时用户配置启动真实 Electron 并连接本机模拟 Worker。
+使用 Node.js 22.23.2，先执行 `npm --prefix desktop ci`。`npm --prefix desktop start` 启动本地客户端；`npm --prefix desktop test` 运行桌面单元和集成测试；`npm --prefix desktop run test:smoke` 使用临时用户配置启动真实 Electron 并连接本机模拟 Worker。浏览器跨视口验收使用 `npm --prefix desktop run test:e2e -- --output <仓库外绝对目录>`，需要 Chrome/Chromium，并将截图与检查结果写入指定目录。
 
 macOS 上执行 `npm --prefix desktop run package:mac` 生成 arm64 / x64 DMG 和 ZIP；Windows 上执行 `npm --prefix desktop run package:win` 生成 x64 NSIS 安装程序和 ZIP。追加 `-- --dir` 只构建应用目录。产物位于 `desktop/dist/`。构建后执行 `npm --prefix desktop run test:smoke -- --packaged`，检查本机架构的应用、asar 白名单、共享页面加载和 Worker 地址显示。
 
-CI 在 macOS 和 Windows 分别执行 Worker、共享页面、桌面测试，构建并启动本机架构的应用，生成 SHA-256 附件，再上传 Actions artifacts。macOS 同时生成两种架构，启动检查覆盖 runner 的架构。维护者确认验证结果后，手动把安装包与对应 `.sha256` 附件一起添加到 GitHub Release；CI 不自动发布，不安装到用户机器。
+CI 先运行 Worker、共享页面、桌面和浏览器跨视口验收。`master` 推送验证通过后创建草稿 Release，在 macOS 和 Windows runner 分别构建并启动本机架构应用，生成 SHA-256 并直接上传到该 Release；全部平台成功后才发布，失败则清理未完成草稿和标签。安装包不会上传为 Actions artifact，也不会自动安装到用户机器。
 
 打包器直接读取共享 `pages/maoyan` 源文件，在 asar 内保留 `desktop/main`、`desktop/preload` 与 `pages/maoyan` 目录关系。只收集运行代码和页面资源，不收集测试、Worker、开发密钥、用户配置、浏览器资料或登录态。
