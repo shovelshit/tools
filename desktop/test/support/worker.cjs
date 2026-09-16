@@ -21,6 +21,7 @@ async function startMockWorker({ rejectUpload = false } = {}) {
     mode: "normal",
     deferred: null,
     loginDeferred: null,
+    detailAuthFailureDeferred: null,
     detailDeferred: null,
     fileDeferred: null,
     account: null,
@@ -36,6 +37,13 @@ async function startMockWorker({ rejectUpload = false } = {}) {
       for await (const chunk of request) text += chunk;
       let body = {};
       try { body = JSON.parse(text || "{}"); } catch {}
+      if (url.pathname === "/store/api/fs/get" && store.detailAuthFailureDeferred) {
+        const pending = store.detailAuthFailureDeferred;
+        store.detailAuthFailureDeferred = null;
+        pending.startedResolve();
+        await pending.promise;
+        return reply({ ok: false, code: "UNAUTHORIZED", error: "登录状态无效" }, 401);
+      }
       const authenticated = /(?:^|;\s*)store_session=valid(?:;|$)/.test(request.headers.cookie || "");
       if (url.pathname === "/store/auth/session" && request.method === "POST") {
         if (store.loginDeferred) {
@@ -228,6 +236,19 @@ async function startMockWorker({ rejectUpload = false } = {}) {
         release: () => { store.detailDeferred = null; release(); }
       };
       return store.detailDeferred;
+    },
+    deferNextStoreDetailAuthFailure() {
+      let release;
+      let startedResolve;
+      const promise = new Promise((resolve) => { release = resolve; });
+      const started = new Promise((resolve) => { startedResolve = resolve; });
+      store.detailAuthFailureDeferred = {
+        promise,
+        started,
+        startedResolve,
+        release
+      };
+      return store.detailAuthFailureDeferred;
     },
     deferNextStoreFile() {
       let release;

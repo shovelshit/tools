@@ -91,6 +91,29 @@ async function main() {
     await screenshot(page, output, "store-catalog-mobile", 390, 844);
     await assertCatalogClearsHeader(page);
 
+    const staleAuthFailure = worker.deferNextStoreDetailAuthFailure();
+    await page.evaluate(() => {
+      window.__staleAuthDetail = openDetail("/CarMax/stale-auth.apk", false);
+    });
+    await staleAuthFailure.started;
+    await page.locator("#store-header-logout").evaluate((button) => button.click());
+    await page.locator("#store-login-form").waitFor({ state: "visible" });
+    await login(page, "store-token");
+    await page.locator(".file-card").waitFor();
+    await page.evaluate(() => openDetail("/CarMax/fresh-auth.apk", false));
+    await page.locator(".download-btn").waitFor();
+    assert.match(await page.locator(".download-btn").getAttribute("href"), /fresh-auth\.apk/);
+    const staleFailureResponse = page.waitForResponse((response) =>
+      response.url().includes("/store/api/fs/get") && response.status() === 401
+    );
+    staleAuthFailure.release();
+    await staleFailureResponse;
+    await page.evaluate(() => window.__staleAuthDetail);
+    assert.equal(await page.locator("#store-app").isVisible(), true);
+    assert.equal(await page.locator("#store-auth").isVisible(), false);
+    assert.equal(await page.evaluate(() => fetch("/store/auth/session").then((response) => response.status)), 200);
+    assert.match(await page.locator(".download-btn").getAttribute("href"), /fresh-auth\.apk/);
+
     const staleDetail = worker.deferNextStoreDetail();
     await page.evaluate(() => openDetail("/CarMax/stale.apk", false));
     await staleDetail.started;
