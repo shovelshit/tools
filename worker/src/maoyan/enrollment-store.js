@@ -47,6 +47,44 @@ async function settings(DB) {
   return { maxUsers: Number(row.max_users), defaultValidDays: Number(row.default_valid_days) };
 }
 
+export async function readServiceSettings(DB) {
+  const row = await DB.prepare(
+    "SELECT max_users,default_valid_days,public_signup_enabled,version,updated_at FROM service_settings WHERE id=1"
+  ).first();
+  if (!row) fail("SERVICE_UNAVAILABLE", "账号容量尚未配置");
+  return {
+    maxUsers: Number(row.max_users),
+    defaultValidDays: Number(row.default_valid_days),
+    publicSignupEnabled: Number(row.public_signup_enabled) === 1,
+    version: Number(row.version),
+    updatedAt: Number(row.updated_at)
+  };
+}
+
+export async function updateServiceSettings(env, input) {
+  const expectedVersion = Number(input?.expectedVersion);
+  const maxUsers = Number(input?.maxUsers);
+  const defaultValidDays = Number(input?.defaultValidDays);
+  const publicSignupEnabled = input?.publicSignupEnabled === true ? 1 : 0;
+  const nowMs = Number(input?.nowMs ?? Date.now());
+  if (!Number.isInteger(expectedVersion) || expectedVersion < 1 ||
+      !Number.isInteger(maxUsers) || maxUsers < 0 ||
+      !Number.isInteger(defaultValidDays) || defaultValidDays < 1) {
+    fail("INVALID_REQUEST", "账号设置参数无效");
+  }
+  let result;
+  try {
+    result = await env.DB.prepare(
+      "UPDATE service_settings SET max_users=?,default_valid_days=?,public_signup_enabled=?," +
+      "version=version+1,updated_at=? WHERE id=1 AND version=?"
+    ).bind(maxUsers, defaultValidDays, publicSignupEnabled, nowMs, expectedVersion).run();
+  } catch (error) {
+    throw translateDatabaseError(error);
+  }
+  if (Number(result?.meta?.changes || 0) !== 1) fail("VERSION_CONFLICT", "账号设置已变化");
+  return await readServiceSettings(env.DB);
+}
+
 export async function readCapacity(DB, nowMs = Date.now()) {
   const config = await settings(DB);
   const users = await DB.prepare(

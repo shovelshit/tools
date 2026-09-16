@@ -67,6 +67,7 @@ let lockServiceEnabled = false;
 let monitorEnabled = false; // 默认停止, 需显式「开始监控」
 let pushSaved = false; // 云端已存有当前渠道的推送配置(接口不回显时, 保存时避免误覆盖)
 let pushVerified = false; // 当前渠道 + 当前密钥已成功发送过测试推送
+let configVersion = 0;
 
 // 城市 / 影院搜索
 let allCities = [];        // [{id, name, pinyin}]
@@ -277,6 +278,7 @@ function resetProfileUi(nextProfileKey) {
   monitorEnabled = false;
   pushSaved = false;
   pushVerified = false;
+  configVersion = 0;
   realKeys.bark = "";
   realKeys.serverchan = "";
   keyStored.bark = false;
@@ -509,6 +511,7 @@ async function restoreConfig() {
   try {
     const { config } = await api("/api/config");
     cloudConfig = config;
+    configVersion = Number(config.version) || 0;
     monitorEnabled = config.enabled === true; // 默认停止, 需显式「开始监控」
     updateMonitorBtn();
     if (config.cinemaId) selectedCinemaId = String(config.cinemaId);
@@ -646,7 +649,11 @@ async function autoSaveConfig(extra = {}, { msg = "配置已自动保存", silen
   saving = true;
   lastSavedSig = sig;
   try {
-    const res = await api("/api/config", { method: "POST", body: sig });
+    const res = await api("/api/config", {
+      method: "POST",
+      body: JSON.stringify({ ...body, ...(configVersion ? { expectedVersion: configVersion } : {}) })
+    });
+    configVersion = Number(res.config?.version) || configVersion;
     pushVerified = res.config?.notifyVerified === true;
     // 服务端可能因推送渠道不可用而自动停止监控: 同步真实状态, 避免界面仍显示"监控中"
     if (res.config && typeof res.config.enabled === "boolean") monitorEnabled = res.config.enabled;
@@ -661,6 +668,9 @@ async function autoSaveConfig(extra = {}, { msg = "配置已自动保存", silen
   } catch (e) {
     if (!profileGeneration.isCurrent(generation) || isStaleProfileError(e)) return;
     lastSavedSig = ""; // 失败允许重试
+    if (/配置已在其他设备更新/.test(String(e.message || ""))) {
+      await restoreConfig();
+    }
     showToast("自动保存失败：" + e.message, "error");
   } finally {
     if (!profileGeneration.isCurrent(generation)) return;
@@ -754,9 +764,13 @@ els.btnToggleMonitor.addEventListener("click", async () => {
   await withButtonLoading(els.btnToggleMonitor, "处理中...", async () => {
     try {
       const target = !monitorEnabled;
-      const res = await api("/api/config", { method: "POST", body: JSON.stringify({ enabled: target }) });
+      const res = await api("/api/config", {
+        method: "POST",
+        body: JSON.stringify({ enabled: target, ...(configVersion ? { expectedVersion: configVersion } : {}) })
+      });
       if (!profileGeneration.isCurrent(generation)) return;
       monitorEnabled = target;
+      configVersion = Number(res.config?.version) || configVersion;
       pushVerified = res.config?.notifyVerified === true;
       log(
         target ? "ok" : "info",
@@ -1178,7 +1192,11 @@ els.btnTestPush.addEventListener("click", async () => {
       // 先保存当前渠道的推送配置再测试(密钥从内存取, 输入框里是掩码)
       const key = currentRealKey();
       if (key) {
-        await api("/api/config", { method: "POST", body: JSON.stringify(pushConfigBody()) });
+        const saved = await api("/api/config", {
+          method: "POST",
+          body: JSON.stringify({ ...pushConfigBody(), ...(configVersion ? { expectedVersion: configVersion } : {}) })
+        });
+        configVersion = Number(saved.config?.version) || configVersion;
         pushSaved = true;
       }
       const res = await api("/api/test-push", { method: "POST" });

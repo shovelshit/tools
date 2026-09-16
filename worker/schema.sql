@@ -182,7 +182,8 @@ END;
 CREATE TABLE IF NOT EXISTS user_config (
   token_id TEXT PRIMARY KEY,
   data TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0)
 );
 
 CREATE TABLE IF NOT EXISTS monitor_status (

@@ -10,6 +10,12 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function configData(config) {
+  const data = { ...(config || {}) };
+  delete data.version;
+  return data;
+}
+
 // ---------- tokens ----------
 
 export async function listTokens(db) {
@@ -47,26 +53,39 @@ export async function getAccountMigration(db, name = "accounts-v1") {
 // ---------- config(每令牌一行 JSON) ----------
 
 export async function getConfig(db, tokenId) {
-  const row = await db.prepare("SELECT data FROM user_config WHERE token_id = ?").bind(tokenId).first();
-  return row ? JSON.parse(row.data) : null;
+  const row = await db.prepare("SELECT data,version FROM user_config WHERE token_id = ?").bind(tokenId).first();
+  return row ? { ...JSON.parse(row.data), version: Number(row.version) } : null;
 }
 
 export async function getConfigRecord(db, tokenId) {
-  const row = await db.prepare("SELECT data FROM user_config WHERE token_id = ?").bind(tokenId).first();
-  return row ? { raw: row.data, config: JSON.parse(row.data) } : null;
+  const row = await db.prepare("SELECT data,version FROM user_config WHERE token_id = ?").bind(tokenId).first();
+  return row ? { raw: row.data, config: { ...JSON.parse(row.data), version: Number(row.version) } } : null;
 }
 
 export async function putConfig(db, tokenId, config) {
   await db.prepare(
-    "INSERT INTO user_config (token_id, data, updated_at) VALUES (?, ?, ?) " +
-    "ON CONFLICT(token_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at"
-  ).bind(tokenId, JSON.stringify(config), nowIso()).run();
+    "INSERT INTO user_config (token_id, data, updated_at, version) VALUES (?, ?, ?, 1) " +
+    "ON CONFLICT(token_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at, version=user_config.version+1"
+  ).bind(tokenId, JSON.stringify(configData(config)), nowIso()).run();
+}
+
+export async function putConfigVersioned(db, tokenId, config, expectedVersion) {
+  const expected = Number(expectedVersion);
+  const result = await db.prepare(
+    "UPDATE user_config SET data=?,updated_at=?,version=version+1 WHERE token_id=? AND version=?"
+  ).bind(JSON.stringify(configData(config)), nowIso(), tokenId, expected).run();
+  if (Number(result?.meta?.changes || 0) !== 1) {
+    const error = new Error("配置已在其他设备更新，请刷新后重试");
+    error.code = "CONFIG_CONFLICT";
+    throw error;
+  }
+  return { ...configData(config), version: expected + 1 };
 }
 
 export async function replaceConfigIfUnchanged(db, tokenId, expectedRaw, config) {
   return await db.prepare(
-    "UPDATE user_config SET data=?,updated_at=? WHERE token_id=? AND data=?"
-  ).bind(JSON.stringify(config), nowIso(), tokenId, expectedRaw).run();
+    "UPDATE user_config SET data=?,updated_at=?,version=version+1 WHERE token_id=? AND data=?"
+  ).bind(JSON.stringify(configData(config)), nowIso(), tokenId, expectedRaw).run();
 }
 
 export async function deleteConfig(db, tokenId) {

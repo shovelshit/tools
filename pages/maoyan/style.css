@@ -1187,33 +1187,61 @@ summary:focus-visible {
   text-decoration: none;
 }
 
-.admin-page .card {
+.admin-page .admin-toolbar,
+.admin-page .admin-table-panel {
   width: 100%;
   min-width: 0;
   display: flex;
   flex: 0 0 auto;
   flex-direction: column;
-  padding: 14px 16px;
+  padding: 10px 12px;
   border: 1px solid var(--border-glass);
   border-radius: 8px;
   background: var(--surface-glass);
   box-shadow: var(--glass-shadow);
 }
 
-.admin-page .card.grow {
+.admin-page .admin-table-panel {
   min-height: 0;
   flex: 1 1 auto;
 }
 
-.admin-page .card h2 {
+.admin-page .admin-table-panel h2 {
   margin-bottom: 8px;
   font-size: 14px;
 }
 
-.admin-page .card > .row input {
-  min-width: 180px;
-  flex: 1 1 220px;
+.admin-page .admin-toolbar {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
 }
+.admin-page .admin-toolbar label,
+.admin-page .capacity-meter,
+.admin-page .admin-create,
+.admin-page .admin-filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.admin-page .capacity-meter { min-width: 110px; }
+.admin-page .admin-toolbar input[type="number"] { width: 68px; min-height: 30px; padding: 4px 7px; }
+.admin-page .admin-create { margin-right: auto; }
+.admin-page .admin-create input { width: min(260px, 38vw); }
+.admin-page .admin-filters input { width: min(240px, 34vw); }
+.admin-page .admin-filters select { min-height: 30px; }
+.admin-page .admin-table-panel { overflow: hidden; }
+.admin-page .account-hint { display: block; margin-top: 2px; font-size: 10px; }
+.admin-page .account-actions { display: flex; gap: 2px; }
+.admin-page .admin-pagination { display: flex; justify-content: center; padding-top: 8px; }
+.badge.account-active,
+.badge.account-monitoring { border-color: rgba(8, 127, 122, 0.32); color: var(--success); }
+.badge.account-expired { color: var(--warning); }
+.badge.account-suspended { color: var(--muted); }
+.badge.account-revoked { color: var(--danger); }
+.badge.account-stopped { color: var(--muted); }
+.admin-toggle input { width: auto; min-height: auto; }
 
 ::-webkit-scrollbar { width: 7px; height: 7px; }
 ::-webkit-scrollbar-thumb { border-radius: 4px; background: rgba(92, 111, 122, 0.3); }
@@ -1293,29 +1321,28 @@ summary:focus-visible {
     width: 100%;
   }
 
-  .admin-page .card > .row:not(.space-between) {
-    display: grid;
-    grid-template-columns: 1fr;
-  }
-
-  .admin-page .card > .row input {
-    min-width: 0;
-  }
+  .admin-page .admin-toolbar { align-items: stretch; }
+  .admin-page .admin-create,
+  .admin-page .admin-filters { width: 100%; }
+  .admin-page .admin-create input,
+  .admin-page .admin-filters input { min-width: 0; width: auto; flex: 1 1 auto; }
 
   .admin-page .token-table {
     table-layout: fixed;
   }
 
   .admin-page .token-table th:nth-child(1),
-  .admin-page .token-table td:nth-child(1) { width: 44%; }
+  .admin-page .token-table td:nth-child(1) { width: 34%; }
   .admin-page .token-table th:nth-child(2),
-  .admin-page .token-table td:nth-child(2) { width: 34%; }
+  .admin-page .token-table td:nth-child(2) { width: 19%; }
   .admin-page .token-table th:nth-child(3),
   .admin-page .token-table td:nth-child(3),
-  .admin-page .token-table th:nth-child(4),
-  .admin-page .token-table td:nth-child(4) { display: none; }
   .admin-page .token-table th:nth-child(5),
-  .admin-page .token-table td:nth-child(5) { width: 22%; }
+  .admin-page .token-table td:nth-child(5) { display: none; }
+  .admin-page .token-table th:nth-child(4),
+  .admin-page .token-table td:nth-child(4) { width: 25%; }
+  .admin-page .token-table th:nth-child(6),
+  .admin-page .token-table td:nth-child(6) { width: 22%; }
   .admin-page .token-table td {
     overflow: hidden;
     text-overflow: ellipsis;

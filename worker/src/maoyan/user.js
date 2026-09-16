@@ -2,7 +2,7 @@
 // 用户状态(config/snapshot/changes/status/lock-rule/seatfb)已迁移 D1(见 db.js),
 // KV 仅保留加密会话(maoyan-session)。userKey 现在只服务会话键名。
 
-import { deleteUserData, getConfigRecord, getSessionVersion, putConfig, replaceConfigIfUnchanged } from "./db.js";
+import { deleteUserData, getConfigRecord, getSessionVersion, putConfig, putConfigVersioned, replaceConfigIfUnchanged } from "./db.js";
 import { decryptNotifyCredential, encryptNotifyCredential } from "./notify-secrets.js";
 
 const CREDENTIALS = {
@@ -30,13 +30,15 @@ export async function getUserConfig(env, tokenId) {
   const hasLegacyPlaintext = Object.values(CREDENTIALS).some((field) => Object.hasOwn(record.config, field));
   if (hasLegacyPlaintext && (env.NOTIFY_ENCRYPTION_KEY || env.SESSION_ENCRYPTION_KEY)) {
     const migrated = await storedConfig(env, tokenId, config);
-    await replaceConfigIfUnchanged(env.DB, tokenId, record.raw, migrated);
+    const result = await replaceConfigIfUnchanged(env.DB, tokenId, record.raw, migrated);
+    if (Number(result?.meta?.changes || 0) === 1) config.version += 1;
   }
   return config;
 }
 
 async function storedConfig(env, tokenId, config) {
   const stored = { ...(config || {}) };
+  delete stored.version;
   delete stored.notifyCredentials;
   const credentials = {};
   for (const [channel, field] of Object.entries(CREDENTIALS)) {
@@ -50,6 +52,22 @@ async function storedConfig(env, tokenId, config) {
 
 export async function putUserConfig(env, tokenId, config) {
   await putConfig(env.DB, tokenId, await storedConfig(env, tokenId, config));
+}
+
+export async function putUserConfigVersioned(env, tokenId, config, expectedVersion) {
+  return await putConfigVersioned(env.DB, tokenId, await storedConfig(env, tokenId, config), expectedVersion);
+}
+
+export async function saveUserConfig(env, tokenId, config, expectedVersion = config?.version) {
+  if (Number.isInteger(Number(expectedVersion)) && Number(expectedVersion) > 0) {
+    const saved = await putUserConfigVersioned(env, tokenId, config, Number(expectedVersion));
+    config.version = saved.version;
+    return config;
+  }
+  await putUserConfig(env, tokenId, config);
+  const saved = await getUserConfig(env, tokenId);
+  config.version = saved.version;
+  return config;
 }
 
 // 令牌注销: 清 D1 全部用户状态行 + KV 加密会话

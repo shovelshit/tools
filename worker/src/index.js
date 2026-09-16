@@ -2,7 +2,7 @@
 
 import { CORS, json } from "./common/http.js";
 import { NOTIFY_CHANNELS, pushBark } from "./common/notify.js";
-import { getUserConfig, putUserConfig } from "./maoyan/user.js";
+import { getUserConfig, saveUserConfig } from "./maoyan/user.js";
 import * as db from "./maoyan/db.js";
 import { CITY_LIST, fetchCinemaDetail, publicCinemaShows, searchCinemasByKw, runCheck, appendChange, pushNotify, currentChannel, currentCredential, isNotificationVerified, notificationVerification, minBatchMinutes, describeCrons, isMinuteStepCrons, resolveCronExprs, handleAdminTokens, handleLockApi, runScheduledChecks, runScheduledLockAfterMonitor, MONITOR_WINDOW_LABEL } from "./maoyan/index.js";
 import { authenticate, requireActiveAccount, serviceNow } from "./maoyan/auth.js";
@@ -51,7 +51,7 @@ export default {
     }
 
     // ---- 令牌管理接口(管理员, X-Admin-Token 鉴权) ----
-    if (url.pathname === "/api/admin/tokens" || url.pathname === "/api/admin/tokens/revoke" || url.pathname === "/api/admin/seat-feedback" || url.pathname === "/api/admin/migrate-kv-to-d1") {
+    if (url.pathname.startsWith("/api/admin/")) {
       return handleAdminTokens(request, env, url);
     }
 
@@ -77,7 +77,7 @@ export default {
           const cfg = await getUserConfig(env, token);
           cfg.enabled = false;
           cfg.stopReason = "manual";
-          await putUserConfig(env, token, cfg);
+          await saveUserConfig(env, token, cfg);
           return json({ ok: true, config: await publicConfig(cfg) });
         }
       }
@@ -138,6 +138,8 @@ export default {
           return json({ ok: false, error: "请求体须为 JSON 对象" }, 400);
         }
         const cfg = await getUserConfig(env, token);
+        const expectedVersion = body.expectedVersion === undefined ? cfg.version : Number(body.expectedVersion);
+        let cinemaChanged = false;
         if (body.cinemaId !== void 0 && String(body.cinemaId).trim()) {
           // 空值不覆盖: 防止异常状态下误清空已配置的影院
           const cinemaId = String(body.cinemaId).trim();
@@ -145,7 +147,7 @@ export default {
           // 影院切换时旧场次快照失效: 快照按影片 id 记 seqNo, 换影院后同影片的 seqNo 全部不同,
           // 不清理会把新影院该影片的全部场次误报为"新增场次"; 同一影院重复保存不受影响
           if (cfg.cinemaId && cfg.cinemaId !== cinemaId) {
-            await db.deleteSnapshot(env.DB, token);
+            cinemaChanged = true;
           }
           cfg.cinemaId = cinemaId;
         }
@@ -178,7 +180,8 @@ export default {
           cfg.stopReason = "notification_invalid";
           notice = `推送渠道（${NOTIFY_CHANNELS[currentChannel(cfg)].label}）未配置或未验证，监控已自动停止；配置并发送测试推送后可重新开始监控`;
         }
-        await putUserConfig(env, token, cfg);
+        await saveUserConfig(env, token, cfg, expectedVersion);
+        if (cinemaChanged) await db.deleteSnapshot(env.DB, token);
         if (notice) await appendChange(env, token, { type: "warn", text: notice });
         return json({ ok: true, config: await publicConfig(cfg), ...(notice ? { notice } : {}) });
       }
@@ -196,7 +199,7 @@ export default {
           return json({ ok: false, error: e.message }, upstreamStatus(e.message));
         }
         cfg.notifyVerification = await notificationVerification({ ...cfg, notifyChannel: "bark" });
-        await putUserConfig(env, token, cfg);
+        await saveUserConfig(env, token, cfg);
         return json({ ok: true });
       }
       // ---- 按当前选中渠道发送测试推送 ----
@@ -210,7 +213,7 @@ export default {
           return json({ ok: false, error: e.message }, upstreamStatus(e.message));
         }
         cfg.notifyVerification = await notificationVerification(cfg);
-        await putUserConfig(env, token, cfg);
+        await saveUserConfig(env, token, cfg);
         return json({ ok: true, channel: currentChannel(cfg), label });
       }
       if (url.pathname === "/api/status" && request.method === "GET") {

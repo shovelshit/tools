@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>访问令牌管理 - 猫眼场次监控</title>
+  <title>账号管理 - 猫眼场次监控</title>
   <link rel="stylesheet" href="style.css?v=20260915d" />
 </head>
 <body class="admin-page">
@@ -11,8 +11,8 @@
   <div id="admin-login" class="overlay">
     <div class="login-card">
       <div class="login-logo">🛡️</div>
-      <h1>访问令牌管理</h1>
-      <p class="login-sub">管理员登录 · 新增 / 删除监控页访问令牌</p>
+      <h1>账号管理</h1>
+      <p class="login-sub">管理员登录</p>
       <div class="form-grid login-grid">
         <label for="admin-worker-url" class="hidden">服务地址</label>
         <input id="admin-worker-url" class="hidden" type="text" placeholder="默认使用本站服务，无需填写" />
@@ -29,48 +29,68 @@
   <div id="admin-main" class="container hidden">
     <header>
       <div class="title-block">
-        <h1>访问令牌管理</h1>
-        <span class="subtitle">监控页访问令牌的新增、删除与状态查看</span>
+        <h1>账号管理</h1>
+        <span class="subtitle">容量、有效期与运行状态</span>
       </div>
       <div class="header-right">
-        <button id="btn-refresh-tokens" class="btn small ghost">刷新</button>
+        <button id="btn-refresh-accounts" class="btn small ghost">刷新</button>
         <button id="btn-admin-logout" class="btn small ghost">退出登录</button>
-        <a class="btn small ghost" href="index.html">🎬 监控页</a>
+        <a id="btn-enter-monitor" class="btn small ghost" href="index.html">🎬 管理员监控</a>
         <a class="btn small ghost" href="../">🧰 工具箱</a>
       </div>
     </header>
 
-    <section class="card">
-      <h2>新增令牌</h2>
-      <div class="row">
-        <input id="new-token-remark" type="text" placeholder="备注（如：张三的 iPhone）" />
-        <input id="new-token-value" type="text" placeholder="自定义令牌（留空自动生成）" autocomplete="off" />
-        <button id="btn-add-token" class="btn success">新增</button>
+    <section class="admin-toolbar" aria-label="账号容量设置">
+      <div class="capacity-meter">
+        <span class="muted">普通账号</span>
+        <strong id="capacity-summary">-- / --</strong>
       </div>
-      <div class="muted tip-line">令牌留空将自动生成 32 位随机串；新增后请把令牌发给使用者在监控页登录时填写</div>
+      <label>名额上限 <input id="capacity-max" type="number" min="0" step="1" /></label>
+      <label>默认有效期 <input id="default-valid-days" type="number" min="1" step="1" /><span>天</span></label>
+      <label class="admin-toggle"><input id="public-signup-enabled" type="checkbox" /><span>开放申请</span></label>
+      <button id="btn-save-settings" class="btn small primary">保存设置</button>
     </section>
 
-    <section class="card grow">
+    <section class="admin-toolbar" aria-label="新增和筛选账号">
+      <div class="admin-create">
+        <input id="new-account-remark" type="text" maxlength="50" placeholder="新账号备注" />
+        <button id="btn-add-account" class="btn small success">新增账号</button>
+      </div>
+      <div class="admin-filters">
+        <input id="account-search" type="search" placeholder="搜索备注或账号 ID" />
+        <select id="account-status-filter" aria-label="账号状态">
+          <option value="">全部状态</option>
+          <option value="active">有效</option>
+          <option value="expired">已到期</option>
+          <option value="suspended">已暂停</option>
+          <option value="revoked">已撤销</option>
+        </select>
+      </div>
+    </section>
+
+    <section class="admin-table-panel">
       <div class="row space-between">
-        <h2>令牌列表</h2>
-        <span id="token-summary" class="muted"></span>
+        <h2>账号列表</h2>
+        <span id="account-summary" class="muted"></span>
       </div>
       <div class="token-table-wrap">
         <table class="token-table">
           <thead>
             <tr>
-              <th>令牌</th>
-              <th>备注</th>
-              <th>状态</th>
-              <th>创建时间</th>
+              <th>账号</th>
+              <th>资格</th>
+              <th>监控</th>
+              <th>到期时间</th>
+              <th>最近活动</th>
               <th>操作</th>
             </tr>
           </thead>
-          <tbody id="token-tbody">
-            <tr><td colspan="5" class="muted empty-tip">加载中...</td></tr>
+          <tbody id="account-tbody">
+            <tr><td colspan="6" class="muted empty-tip">加载中...</td></tr>
           </tbody>
         </table>
       </div>
+      <div class="admin-pagination"><button id="btn-load-more" class="btn small ghost hidden">加载更多</button></div>
     </section>
   </div>
 

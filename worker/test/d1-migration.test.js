@@ -51,7 +51,7 @@ test("全量迁移: 令牌/配置/状态/快照/变化/规则/反馈各就各位
   assert.deepEqual(await db.listTokens(env.DB), [
     { id: tokenId, token: "tok-123", remark: "主令牌", createdAt: "2026-09-01T00:00:00.000Z" }
   ]);
-  assert.deepEqual(await db.getConfig(env.DB, tokenId), { cinemaId: "25428", enabled: true, selectedMovieIds: ["7"] });
+  assert.deepEqual(await db.getConfig(env.DB, tokenId), { cinemaId: "25428", enabled: true, selectedMovieIds: ["7"], version: 1 });
   assert.deepEqual(await db.getStatus(env.DB, tokenId), { lastCheckTs: 1700000000000, newTotal: 2, cinemaName: "测试影院" });
   assert.deepEqual(await db.getSnapshot(env.DB, tokenId), { "900": ["A1", "A2"], "901": ["B1"] });
   assert.deepEqual(await db.getLockRuleRow(env.DB, tokenId), { id: "rule-1", state: "waiting_schedule" });

@@ -9,9 +9,11 @@ import { monitorError } from "./log.js";
 import { inMonitorWindow } from "./cron.js";
 import { listSeatFeedback, deleteSeatFeedback } from "./seat-feedback.js";
 import { migrateKvToD1 } from "./migrate.js";
-import { accountStatus } from "./accounts.js";
+import { accountStatus, getAccount } from "./accounts.js";
 import { authenticate } from "./auth.js";
 import { cleanupExpiredAccount } from "./account-lifecycle.js";
+import { accountErrorResponse, handleAdminAccountApi, listAdminAccounts } from "./account-api.js";
+import { createManagedAccount, updateManagedAccount } from "./enrollment-store.js";
 
 export function randomToken() {
   const bytes = new Uint8Array(16);
@@ -28,10 +30,6 @@ function maskToken(token) {
 
 export async function getManagedTokens(env) {
   return await db.listTokens(env.DB);
-}
-
-async function saveManagedTokens(env, list) {
-  await db.saveTokens(env.DB, list);
 }
 
 function checkAdminAuth(request, env) {
@@ -104,33 +102,43 @@ export async function handleAdminTokens(request, env, url) {
     return json({ error: "管理令牌错误或未配置 ADMIN_TOKEN" }, 401);
   }
   try {
+    const accountResponse = await handleAdminAccountApi(request, env, url);
+    if (accountResponse) return accountResponse;
     if (url.pathname === "/api/admin/tokens" && request.method === "GET") {
-      const tokens = await Promise.all((await getManagedTokens(env)).map((token) => publicTokenRecord(env, token)));
+      const accountUrl = new URL(url);
+      accountUrl.pathname = "/api/admin/accounts";
+      accountUrl.search = "?limit=100";
+      const listed = await listAdminAccounts(env, accountUrl, Date.now());
+      const tokens = listed.accounts.map((account) => ({
+        id: account.userId,
+        token: account.keyHint.replace("...", " **** "),
+        remark: account.remark,
+        createdAt: new Date(account.createdAt).toISOString(),
+        state: account.monitorState
+      }));
       return json({ ok: true, tokens });
     }
     if (url.pathname === "/api/admin/tokens" && request.method === "POST") {
       const body = await request.json().catch(() => ({}));
-      const token = String(body.token || "").trim() || randomToken();
-      if (!/^[\x21-\x7e]{6,64}$/.test(token)) {
-        return json({ ok: false, error: "令牌须为 6-64 位可见 ASCII 字符" }, 400);
-      }
-      const list = await getManagedTokens(env);
-      if (list.some((item) => item.token === token)) {
-        return json({ ok: false, error: "令牌已存在" }, 400);
-      }
-      const id = crypto.randomUUID();
-      list.push({ id, token, remark: String(body.remark || "").slice(0, 50), createdAt: new Date().toISOString() });
-      await saveManagedTokens(env, list);
-      return json({ ok: true, id, token });
+      if (String(body.token || "").trim()) return json({ ok: false, error: "访问密钥仅支持系统随机生成" }, 400);
+      const created = await createManagedAccount(env, {
+        remark: body.remark,
+        requestId: body.requestId || crypto.randomUUID(),
+        nowMs: Date.now()
+      });
+      return json({ ok: true, id: created.account.id, ...(created.key ? { token: created.key } : {}) }, created.replayed ? 200 : 201);
     }
     if (url.pathname === "/api/admin/tokens/revoke" && request.method === "POST") {
       const body = await request.json().catch(() => ({}));
       const id = String(body.id || "");
-      const list = await getManagedTokens(env);
-      const revoked = list.find((token) => token.id === id);
+      const revoked = await getAccount(env.DB, id);
       if (!revoked) return json({ ok: false, error: "令牌不存在" }, 404);
-      await saveManagedTokens(env, list.filter((token) => token.id !== id));
-      await cleanupUserData(env, id);
+      await updateManagedAccount(env, {
+        userId: id,
+        expectedVersion: body.expectedVersion ?? revoked.version,
+        patch: { state: "revoked" },
+        nowMs: Date.now()
+      });
       return json({ ok: true });
     }
     if (url.pathname === "/api/admin/seat-feedback" && request.method === "GET") {
@@ -151,6 +159,7 @@ export async function handleAdminTokens(request, env, url) {
     }
     return json({ error: "Method Not Allowed" }, 405);
   } catch (e) {
+    if (e?.code) return accountErrorResponse(e);
     return json({ ok: false, error: e.message }, 500);
   }
 }

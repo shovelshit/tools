@@ -70,7 +70,7 @@ test("BUG-1: cron 跳过从未开始监控的用户, 不写告警也不抓取上
   assert.equal(upstreamCalls, 0);
   assert.deepEqual(await listChanges(env.DB, tokenId), []);
   // 配置未被改写(不会被写入 enabled:false 或误导性的到期文案)
-  assert.deepEqual(await getConfig(env.DB, tokenId), config);
+  assert.deepEqual(await getConfig(env.DB, tokenId), { ...config, version: 1 });
 });
 
 test("BUG-2: 手动检查用真实状态码回报, 不再假装成功", async () => {
@@ -122,7 +122,7 @@ test("BUG-5: 非法 cinemaId 被拒绝且不落库", async () => {
   const rejected = await worker.fetch(request("/api/config", { cinemaId: "abc" }), env);
   assert.equal(rejected.status, 400);
   assert.match((await rejected.json()).error, /纯数字/);
-  assert.deepEqual(await getConfig(env.DB, tokenId), {});
+  assert.deepEqual(await getConfig(env.DB, tokenId), { version: 1 });
 });
 
 test("状态码统一: shows/cinemas 的非法入参返回 400 而非 500", async () => {

@@ -1,51 +1,41 @@
-// 猫眼场次监控 - 访问令牌管理页
-// 与 Cloudflare Worker 的 /api/admin/tokens 交互; 管理令牌(ADMIN_TOKEN)存 localStorage
-// 依赖的 Worker 接口:
-//   GET    /api/admin/tokens                       -> { tokens: [{id, token, remark, state, createdAt}] }
-//   POST   /api/admin/tokens  body {token?, remark} -> { ok, token }
-//   POST   /api/admin/tokens/revoke body {id}       -> { ok }
-// 鉴权: 请求头 X-Admin-Token
-// 注意: 同域部署(Pages)下 Worker 地址可留空, 直接请求当前域名
-
 const $ = (id) => document.getElementById(id);
 const els = {
-  loginOverlay: $("admin-login"),
-  adminMain: $("admin-main"),
-  workerUrl: $("admin-worker-url"),
-  adminToken: $("admin-token-input"),
-  btnLogin: $("btn-admin-login"),
-  loginError: $("admin-login-error"),
-  tbody: $("token-tbody"),
-  summary: $("token-summary"),
-  remark: $("new-token-remark"),
-  tokenValue: $("new-token-value"),
-  btnAdd: $("btn-add-token"),
-  btnRefresh: $("btn-refresh-tokens"),
-  btnLogout: $("btn-admin-logout"),
+  loginOverlay: $("admin-login"), adminMain: $("admin-main"), workerUrl: $("admin-worker-url"),
+  adminToken: $("admin-token-input"), btnLogin: $("btn-admin-login"), loginError: $("admin-login-error"),
+  tbody: $("account-tbody"), summary: $("account-summary"), capacitySummary: $("capacity-summary"),
+  capacityMax: $("capacity-max"), validDays: $("default-valid-days"), publicSignup: $("public-signup-enabled"),
+  btnSaveSettings: $("btn-save-settings"), remark: $("new-account-remark"), btnAdd: $("btn-add-account"),
+  search: $("account-search"), statusFilter: $("account-status-filter"), btnRefresh: $("btn-refresh-accounts"),
+  btnLoadMore: $("btn-load-more"), btnLogout: $("btn-admin-logout"),
+  btnEnterMonitor: $("btn-enter-monitor")
 };
 
-// 同域部署下 API 地址可留空(直接请求当前域名)
 const SAME_ORIGIN_HOSTS = ["ltools.asia", "www.ltools.asia", "tools-a65.pages.dev"];
 const SAME_ORIGIN = SAME_ORIGIN_HOSTS.includes(location.hostname);
 const DEFAULT_WORKER = SAME_ORIGIN ? "" : "https://ltools.asia";
-
+const STATUS_LABEL = { active: "有效", expired: "已到期", suspended: "已暂停", revoked: "已撤销" };
 let baseUrl = "";
 let adminToken = "";
-let tokens = [];
+let accounts = [];
+let capacity = null;
+let settings = null;
+let nextAfter = null;
 
-// ---------------- 请求 ----------------
 async function adminApi(path, options = {}) {
   const headers = { "X-Admin-Token": adminToken };
   if (options.body) headers["Content-Type"] = "application/json";
-  const res = await fetch(baseUrl + path, { ...options, headers });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || "HTTP " + res.status);
+  const response = await fetch(baseUrl + path, { ...options, headers });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(data.error || `HTTP ${response.status}`);
+    error.code = data.code || "";
+    throw error;
+  }
   return data;
 }
 
-// ---------------- 登录 ----------------
-function showLoginError(msg) {
-  els.loginError.textContent = msg;
+function showLoginError(message) {
+  els.loginError.textContent = message;
   els.loginError.classList.remove("hidden");
 }
 
@@ -58,183 +48,237 @@ async function login() {
   els.btnLogin.textContent = "验证中...";
   els.loginError.classList.add("hidden");
   try {
-    const res = await adminApi("/api/admin/tokens");
-    tokens = res.tokens || [];
+    await Promise.all([refreshAccounts({ reset: true }), loadSettings()]);
     localStorage.setItem("adminWorkerUrl", baseUrl);
     await secureSet("adminToken", adminToken);
-    renderTokens();
+    els.adminToken.value = "";
     els.loginOverlay.classList.add("hidden");
     els.adminMain.classList.remove("hidden");
-  } catch (e) {
-    let msg = e.message;
-    if (/HTTP 40[13]/.test(msg)) {
-      msg = `管理令牌错误或无权限（${msg}）`;
-    } else if (msg.includes("HTTP 404") || msg.includes("Unknown API")) {
-      msg = "服务端暂不支持令牌管理接口，请先更新服务端部署";
-    }
-    showLoginError("连接失败：" + msg);
+  } catch (error) {
+    showLoginError(`连接失败：${error.message}`);
   } finally {
     els.btnLogin.disabled = false;
     els.btnLogin.textContent = "进入管理";
   }
 }
 
-els.btnLogin.addEventListener("click", login);
-els.adminToken.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") login();
+function queryPath(after = "") {
+  const params = new URLSearchParams({ limit: "20" });
+  if (els.search.value.trim()) params.set("q", els.search.value.trim());
+  if (els.statusFilter.value) params.set("status", els.statusFilter.value);
+  if (after) params.set("after", after);
+  return `/api/admin/accounts?${params}`;
+}
+
+async function refreshAccounts({ reset = true } = {}) {
+  if (reset) renderMessage("加载中...");
+  const data = await adminApi(queryPath(reset ? "" : nextAfter || ""));
+  accounts = reset ? data.accounts : accounts.concat(data.accounts || []);
+  capacity = data.capacity;
+  nextAfter = data.nextAfter || null;
+  renderAccounts();
+}
+
+async function loadSettings() {
+  const data = await adminApi("/api/admin/settings");
+  settings = data.settings;
+  els.capacityMax.value = settings.maxUsers;
+  els.validDays.value = settings.defaultValidDays;
+  els.publicSignup.checked = settings.publicSignupEnabled === true;
+}
+
+function fmtTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "-" : date.toLocaleString("zh-CN", { hour12: false });
+}
+
+function badge(text, state) {
+  const element = document.createElement("span");
+  element.className = `badge account-${state}`;
+  element.textContent = text;
+  return element;
+}
+
+function actionButton(text, className, handler) {
+  const button = document.createElement("button");
+  button.className = `link-btn ${className || ""}`.trim();
+  button.textContent = text;
+  button.addEventListener("click", handler);
+  return button;
+}
+
+function renderAccounts() {
+  const used = Number(capacity?.used || 0);
+  const max = Number(capacity?.maxUsers || 0);
+  els.capacitySummary.textContent = `${used} / ${max}`;
+  els.summary.textContent = `当前显示 ${accounts.length} 个账号`;
+  els.btnLoadMore.classList.toggle("hidden", !nextAfter);
+  els.tbody.innerHTML = "";
+  if (!accounts.length) return renderMessage("没有符合条件的账号");
+
+  for (const account of accounts) {
+    const row = document.createElement("tr");
+    const identity = document.createElement("td");
+    const title = document.createElement("strong");
+    title.textContent = account.remark || "未命名账号";
+    const hint = document.createElement("small");
+    hint.className = "muted account-hint";
+    hint.textContent = `${account.keyHint || ""} · ${account.source || "-"}`;
+    identity.append(title, hint);
+
+    const qualification = document.createElement("td");
+    qualification.appendChild(badge(STATUS_LABEL[account.accountStatus] || account.accountStatus, account.accountStatus));
+    const monitor = document.createElement("td");
+    monitor.appendChild(badge(account.monitorState === "monitoring" ? "监控中" : "已停止", account.monitorState));
+    const expiry = document.createElement("td");
+    expiry.textContent = fmtTime(account.expiresAt);
+    const activity = document.createElement("td");
+    activity.textContent = fmtTime(account.lastActivityAt);
+    const operations = document.createElement("td");
+    operations.className = "account-actions";
+
+    if (account.accountStatus === "active") {
+      operations.appendChild(actionButton("暂停", "", () => updateAccount(account, { state: "suspended" })));
+    } else if (account.accountStatus === "suspended") {
+      operations.appendChild(actionButton("恢复", "", () => updateAccount(account, { state: "active" })));
+    } else if (account.accountStatus === "expired") {
+      operations.appendChild(actionButton("续 15 天", "", () => updateAccount(account, { expiresAt: Date.now() + 15 * 86400000 })));
+    }
+    if (account.accountStatus !== "revoked") {
+      operations.appendChild(actionButton("撤销", "danger", () => revokeAccount(account)));
+    }
+    row.append(identity, qualification, monitor, expiry, activity, operations);
+    els.tbody.appendChild(row);
+  }
+}
+
+function renderMessage(text) {
+  els.tbody.innerHTML = "";
+  const row = document.createElement("tr");
+  const cell = document.createElement("td");
+  cell.colSpan = 6;
+  cell.className = "muted empty-tip";
+  cell.textContent = text;
+  row.appendChild(cell);
+  els.tbody.appendChild(row);
+}
+
+async function updateAccount(account, patch) {
+  try {
+    await adminApi("/api/admin/accounts/update", {
+      method: "POST",
+      body: JSON.stringify({ id: account.userId, expectedVersion: account.accountVersion, patch })
+    });
+    await refreshAccounts({ reset: true });
+  } catch (error) {
+    showToast(`操作失败：${error.message}`, "error");
+    if (error.code === "VERSION_CONFLICT") await refreshAccounts({ reset: true });
+  }
+}
+
+async function revokeAccount(account) {
+  const ok = await showConfirm(`确定撤销「${account.remark || account.userId}」？撤销后不能恢复。`, {
+    title: "撤销账号", danger: true, okText: "撤销"
+  });
+  if (ok) await updateAccount(account, { state: "revoked" });
+}
+
+async function openMonitor() {
+  try {
+    const response = await fetch(baseUrl + "/api/auth/session", {
+      method: "POST",
+      headers: { "X-Token": adminToken }
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.monitorSession) throw new Error(data.error || "无法创建管理员监控会话");
+    const profile = (baseUrl || location.origin).replace(/\/$/, "");
+    await secureSet(`token:${encodeURIComponent(profile)}`, data.monitorSession);
+    localStorage.setItem("workerUrl", baseUrl);
+    const target = new URL("index.html", location.href);
+    if (baseUrl) target.searchParams.set("worker", baseUrl);
+    location.href = target.toString();
+  } catch (error) {
+    showToast(`进入监控失败：${error.message}`, "error");
+  }
+}
+
+els.btnAdd.addEventListener("click", async () => {
+  els.btnAdd.disabled = true;
+  try {
+    const created = await adminApi("/api/admin/accounts/create", {
+      method: "POST",
+      body: JSON.stringify({ remark: els.remark.value.trim(), requestId: crypto.randomUUID() })
+    });
+    if (!created.key) throw new Error("账号已创建，但访问密钥仅在首次响应显示");
+    try { await copyText(created.key); } catch {}
+    await showDialog(`访问密钥已复制，仅显示一次：\n\n${created.key}`, { title: "账号已创建", type: "success" });
+    els.remark.value = "";
+    await refreshAccounts({ reset: true });
+  } catch (error) {
+    showToast(`新增失败：${error.message}`, "error");
+  } finally {
+    els.btnAdd.disabled = false;
+  }
 });
 
+els.btnSaveSettings.addEventListener("click", async () => {
+  if (!settings) return;
+  try {
+    const data = await adminApi("/api/admin/settings", {
+      method: "POST",
+      body: JSON.stringify({
+        expectedVersion: settings.version,
+        maxUsers: Number(els.capacityMax.value),
+        defaultValidDays: Number(els.validDays.value),
+        publicSignupEnabled: els.publicSignup.checked
+      })
+    });
+    settings = data.settings;
+    showToast("账号设置已保存", "success");
+    await refreshAccounts({ reset: true });
+  } catch (error) {
+    showToast(`保存失败：${error.message}`, "error");
+    await loadSettings().catch(() => {});
+  }
+});
+
+let searchTimer;
+els.search.addEventListener("input", () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => refreshAccounts({ reset: true }).catch((error) => showToast(error.message, "error")), 250);
+});
+els.statusFilter.addEventListener("change", () => refreshAccounts({ reset: true }).catch((error) => showToast(error.message, "error")));
+els.btnRefresh.addEventListener("click", () => Promise.all([refreshAccounts({ reset: true }), loadSettings()]));
+els.btnLoadMore.addEventListener("click", () => refreshAccounts({ reset: false }));
+els.btnEnterMonitor.addEventListener("click", (event) => {
+  event.preventDefault();
+  void openMonitor();
+});
+els.btnLogin.addEventListener("click", login);
+els.adminToken.addEventListener("keydown", (event) => { if (event.key === "Enter") login(); });
 els.btnLogout.addEventListener("click", () => {
   adminToken = "";
-  els.adminToken.value = "";
   void secureSet("adminToken", "");
   els.adminMain.classList.add("hidden");
   els.loginOverlay.classList.remove("hidden");
-  els.loginError.classList.add("hidden");
 });
 
-// ---------------- 令牌列表 ----------------
-async function refreshTokens() {
-  els.btnRefresh.disabled = true;
-  renderMsgRow("加载中...");
-  try {
-    const res = await adminApi("/api/admin/tokens");
-    tokens = res.tokens || [];
-    renderTokens();
-  } catch (e) {
-    renderMsgRow("加载失败：" + e.message);
-  } finally {
-    els.btnRefresh.disabled = false;
-  }
-}
-
-function fmtTime(v) {
-  if (!v) return "-";
-  const d = new Date(v);
-  return isNaN(d.getTime()) ? "-" : d.toLocaleString("zh-CN", { hour12: false });
-}
-
-function renderTokens() {
-  const monitoring = tokens.filter((t) => t.state === "monitoring").length;
-  els.summary.textContent = `共 ${tokens.length} 个令牌 · ${monitoring} 个监控中`;
-  els.tbody.innerHTML = "";
-  if (!tokens.length) {
-    renderMsgRow("还没有令牌，请在上方新增");
-    return;
-  }
-  for (const t of tokens) {
-    const tr = document.createElement("tr");
-
-    const tdToken = document.createElement("td");
-    tdToken.className = "token-cell";
-    tdToken.textContent = t.token || "-";
-
-    const tdRemark = document.createElement("td");
-    tdRemark.textContent = t.remark || "-";
-
-    const tdStatus = document.createElement("td");
-    const badge = document.createElement("span");
-    const monitoring = t.state === "monitoring";
-    badge.className = "badge " + (monitoring ? "in-use" : "idle");
-    badge.textContent = monitoring ? "监控中" : "已停止";
-    tdStatus.appendChild(badge);
-
-    const tdCreated = document.createElement("td");
-    tdCreated.textContent = fmtTime(t.createdAt);
-
-    const tdOps = document.createElement("td");
-    const btnDel = document.createElement("button");
-    btnDel.className = "link-btn danger";
-    btnDel.textContent = "删除";
-    btnDel.addEventListener("click", () => deleteToken(t));
-    tdOps.append(btnDel);
-
-    tr.append(tdToken, tdRemark, tdStatus, tdCreated, tdOps);
-    els.tbody.appendChild(tr);
-  }
-}
-
-function renderMsgRow(text) {
-  els.tbody.innerHTML = "";
-  const tr = document.createElement("tr");
-  const td = document.createElement("td");
-  td.colSpan = 5;
-  td.className = "muted empty-tip";
-  td.textContent = text;
-  tr.appendChild(td);
-  els.tbody.appendChild(tr);
-}
-
-// ---------------- 新增 / 删除 ----------------
-els.btnAdd.addEventListener("click", async () => {
-  const remark = els.remark.value.trim();
-  const token = els.tokenValue.value.trim();
-  const body = { remark };
-  if (token) body.token = token;
-  els.btnAdd.disabled = true;
-  els.btnAdd.textContent = "新增中...";
-  try {
-    const res = await adminApi("/api/admin/tokens", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-    const newToken = res.token || token;
-    try { await copyText(newToken); } catch (e) { /* 复制失败不阻断 */ }
-    await showDialog(
-      `令牌已创建并复制到剪贴板：\n\n${newToken}\n\n请发给使用者在监控页登录时填写。`,
-      { title: "令牌已创建", type: "success" }
-    );
-    els.remark.value = "";
-    els.tokenValue.value = "";
-    await refreshTokens();
-  } catch (e) {
-    showToast("新增失败：" + e.message, "error");
-  } finally {
-    els.btnAdd.disabled = false;
-    els.btnAdd.textContent = "新增";
-  }
-});
-
-async function deleteToken(t) {
-  const label = t.remark ? `「${t.remark}」` : "";
-  const ok = await showConfirm(
-    `确定删除令牌 ${t.token || ""} ${label}？\n删除后使用者将无法再连接云端。`,
-    { title: "删除令牌", danger: true, okText: "删除" }
-  );
-  if (!ok) return;
-  try {
-    await adminApi("/api/admin/tokens/revoke", { method: "POST", body: JSON.stringify({ id: t.id }) });
-    tokens = tokens.filter((x) => x.id !== t.id);
-    renderTokens();
-  } catch (e) {
-    showToast("删除失败：" + e.message, "error");
-  }
-}
-
-// ---------------- 工具 ----------------
 async function copyText(text) {
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch (e) {
-    // 非安全上下文(file://)回退方案
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand("copy");
-    ta.remove();
-  }
+  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
 }
 
-// ---------------- 初始化 ----------------
 (async function init() {
-  // 管理令牌不接受 URL 参数，避免泄露到历史记录或日志。
-  const qs = new URLSearchParams(location.search);
-  els.workerUrl.value = qs.get("worker") || (localStorage.getItem("adminWorkerUrl") ?? DEFAULT_WORKER);
+  const query = new URLSearchParams(location.search);
+  els.workerUrl.value = query.get("worker") || (localStorage.getItem("adminWorkerUrl") ?? DEFAULT_WORKER);
   els.adminToken.value = (await secureGet("adminToken")) || "";
-  if (els.adminToken.value.trim()) {
-    await login();
-  }
+  if (els.adminToken.value.trim()) await login();
 })();

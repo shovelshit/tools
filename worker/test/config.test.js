@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import worker from "../src/index.js";
 import { createDB, testEncryptionKey } from "./helpers.js";
-import { getConfig } from "../src/maoyan/db.js";
+import { getConfig, putConfigVersioned } from "../src/maoyan/db.js";
 
 const tokenId = "11111111-1111-4111-8111-111111111111";
 
@@ -92,4 +92,26 @@ test("a successful test verifies only the current channel and credential", async
   const restartResponse = await worker.fetch(request("/api/config", { enabled: true }), env);
   assert.equal(restartResponse.status, 400);
   assert.match((await restartResponse.json()).error, /测试推送/);
+});
+
+test("stale config writes cannot overwrite another device", async () => {
+  const env = await runtime({ cinemaId: "1" });
+  const before = await getConfig(env.DB, tokenId);
+  const first = await putConfigVersioned(env.DB, tokenId, { ...before, cinemaId: "2" }, before.version);
+  assert.equal(first.version, before.version + 1);
+  await assert.rejects(
+    () => putConfigVersioned(env.DB, tokenId, { ...before, cinemaId: "3" }, before.version),
+    { code: "CONFIG_CONFLICT" }
+  );
+  assert.equal((await getConfig(env.DB, tokenId)).cinemaId, "2");
+});
+
+test("config API rejects a stale expectedVersion", async () => {
+  const env = await runtime({ cinemaId: "1" });
+  const current = (await (await worker.fetch(request("/api/config"), env)).json()).config;
+  const first = await worker.fetch(request("/api/config", { cinemaId: "2", expectedVersion: current.version }), env);
+  assert.equal(first.status, 200);
+  const stale = await worker.fetch(request("/api/config", { cinemaId: "3", expectedVersion: current.version }), env);
+  assert.equal(stale.status, 409);
+  assert.equal((await getConfig(env.DB, tokenId)).cinemaId, "2");
 });

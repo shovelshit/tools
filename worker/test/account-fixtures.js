@@ -21,6 +21,7 @@ export async function createAccountEnv({ nowMs = Date.now(), maxUsers = 20 } = {
 export async function seedAccount(env, {
   id = crypto.randomUUID(),
   key = `test-${crypto.randomUUID()}`,
+  remark = "",
   role = "user",
   state = "active",
   expiresAt,
@@ -31,8 +32,8 @@ export async function seedAccount(env, {
   const actualExpiry = role === "admin" ? null : (expiresAt ?? nowMs + 15 * DAY_MS);
   const tokenHash = await hashAccessKey(key);
   await env.DB.prepare(
-    "INSERT INTO users(id,role,state,created_at,expires_at,source,version) VALUES (?,?,?,?,?,?,1)"
-  ).bind(id, role, state, nowMs, actualExpiry, "test").run();
+    "INSERT INTO users(id,role,remark,state,created_at,expires_at,source,version) VALUES (?,?,?,?,?,?,?,1)"
+  ).bind(id, role, remark, state, nowMs, actualExpiry, "test").run();
   await env.DB.prepare(
     "INSERT INTO access_keys(user_id,token_hash,key_prefix,key_suffix,created_at) VALUES (?,?,?,?,?)"
   ).bind(id, tokenHash, key.slice(0, 4), key.slice(-4), nowMs).run();

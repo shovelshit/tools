@@ -218,6 +218,14 @@ test("expired accounts expose self-service renewal with optimistic versioning", 
   assert.match(source, /expectedVersion: currentAccount\.accountVersion/);
 });
 
+test("config writes carry and refresh the optimistic config version", () => {
+  const source = readSource("app.js");
+  assert.match(source, /configVersion = Number\(config\.version\) \|\| 0/);
+  assert.match(source, /expectedVersion: configVersion/);
+  assert.match(source, /configVersion = Number\(res\.config\?\.version\) \|\| configVersion/);
+  assert.match(source, /配置已在其他设备更新/);
+});
+
 test("cinema selection no longer depends on the removed manual input", () => {
   const source = readSource("app.js");
   const html = readSource("index.html");
