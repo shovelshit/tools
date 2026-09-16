@@ -50,12 +50,23 @@ function response(data, status = 200, headers = {}) {
   });
 }
 
-function requireSameOrigin(request, url) {
+export function requireStoreSameOrigin(request, url) {
   const origin = String(request.headers.get("Origin") || "");
   const fetchSite = String(request.headers.get("Sec-Fetch-Site") || "").toLowerCase();
   if ((origin && origin !== url.origin) || fetchSite === "cross-site") {
     fail("FORBIDDEN", "请求来源无效");
   }
+}
+
+export function storeErrorResponse(error) {
+  const code = error?.code || "INTERNAL_ERROR";
+  const status = code === "UNAUTHORIZED" ? 401
+    : code === "ACCOUNT_NOT_FOUND" ? 404
+      : code === "SERVICE_UNAVAILABLE" ? 503
+        : code === "ACCOUNT_EXPIRED" || code === "ACCOUNT_SUSPENDED" || code === "ACCOUNT_REVOKED" || code === "FORBIDDEN" ? 403
+          : ["CONFLICT", "REQUEST_CONFLICT", "VERSION_CONFLICT", "CONFIG_CONFLICT", "ACCOUNT_NOT_EXPIRED", "ACCOUNT_NOT_RENEWABLE", "CAPACITY_FULL", "FINGERPRINT_IN_USE"].includes(code) ? 409
+            : code === "INVALID_REQUEST" ? 400 : 500;
+  return response({ ok: false, code, error: error?.message || "服务暂时不可用" }, status);
 }
 
 async function jsonBody(request) {
@@ -90,7 +101,7 @@ export async function authenticateStore(request, env, nowMs = Date.now()) {
 }
 
 async function storeLogin(request, env, url) {
-  requireSameOrigin(request, url);
+  requireStoreSameOrigin(request, url);
   const body = await jsonBody(request);
   const raw = String(body.key ?? body.token ?? body.accessKey ?? "").trim();
   if (!raw) fail("UNAUTHORIZED", "访问密钥无效");
@@ -138,14 +149,14 @@ export async function handleStoreAuth(request, env, url) {
     return response({ ok: true, account: publicAccount(await getAccount(env.DB, principal.userId), nowMs) });
   }
   if (url.pathname === "/store/auth/logout" && request.method === "POST") {
-    requireSameOrigin(request, url);
+    requireStoreSameOrigin(request, url);
     await storePrincipal(request, env, nowMs);
     await env.DB.prepare("DELETE FROM store_sessions WHERE token_hash=?")
       .bind(await hashAccessKey(cookieValue(request))).run();
     return response({ ok: true }, 200, { "Set-Cookie": sessionCookie("", url, 0) });
   }
   if (url.pathname === "/store/auth/renew" && request.method === "POST") {
-    requireSameOrigin(request, url);
+    requireStoreSameOrigin(request, url);
     const principal = await storePrincipal(request, env, nowMs);
     const body = await jsonBody(request);
     if (principal.role !== "user") fail("FORBIDDEN", "管理员账号无需续期");

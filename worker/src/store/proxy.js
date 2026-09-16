@@ -1,7 +1,5 @@
 // ---------------- store 工具页: AList API 反代 + http 文件代理 ----------------
 
-import { CORS, json } from "../common/http.js";
-
 const STORE_UPSTREAM = "http://appstore.cnmlynk.org";
 const STORE_HOST = "appstore.cnmlynk.org";
 const MAX_REDIRECTS = 5;
@@ -24,7 +22,18 @@ async function fetchStore(url, init = {}) {
   throw new Error("上游重定向超过限制");
 }
 
-// /store/api/* -> 上游 AList /api/* (隐藏真实地址, 统一 CORS)
+function storeError(message, status = 502) {
+  return new Response(JSON.stringify({ ok: false, error: message }), {
+    status,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff"
+    }
+  });
+}
+
+// /store/api/* -> 上游 AList /api/* (隐藏真实地址, 仅允许同源 Store 会话访问)
 export async function handleStoreApi(request, url) {
   try {
     const sub = url.pathname.slice("/store/api".length);
@@ -35,12 +44,11 @@ export async function handleStoreApi(request, url) {
       status: res.status,
       headers: {
         "Content-Type": res.headers.get("content-type") || "application/json; charset=utf-8",
-        "X-Content-Type-Options": "nosniff",
-        ...CORS,
+        "X-Content-Type-Options": "nosniff"
       }
     });
   } catch (e) {
-    return json({ ok: false, error: "AList 反代失败: " + e.message }, 502);
+    return storeError("AList 反代失败: " + e.message);
   }
 }
 
@@ -54,10 +62,10 @@ export async function handleStoreFile(url) {
   try {
     target = new URL(fileUrl);
   } catch (e) {
-    return json({ error: "无效的 url 参数" }, 400);
+    return storeError("无效的 url 参数", 400);
   }
   if (target.protocol !== "http:" || !FILE_PROXY_ALLOWED_HOSTS.has(target.hostname)) {
-    return json({ error: "仅支持代理上游 AList 域名的 http 直链" }, 403);
+    return storeError("仅支持代理上游 AList 域名的 http 直链", 403);
   }
   try {
     const res = await fetchStore(target.href);
@@ -66,11 +74,10 @@ export async function handleStoreFile(url) {
       headers: {
         "Content-Type": res.headers.get("content-type") || "application/octet-stream",
         "Content-Disposition": res.headers.get("content-disposition") || "",
-        "X-Content-Type-Options": "nosniff",
-        ...CORS
+        "X-Content-Type-Options": "nosniff"
       }
     });
   } catch (e) {
-    return json({ ok: false, error: "文件代理失败: " + e.message }, 502);
+    return storeError("文件代理失败: " + e.message);
   }
 }

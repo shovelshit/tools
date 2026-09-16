@@ -49,3 +49,16 @@ test("wrangler routes HTML through the Worker while leaving versioned files on S
   assert.match(config, /run_worker_first[^\n]+\/maoyan\/[^\n]+\/maoyan\/\*\.html/);
   assert.doesNotMatch(config, /"\/maoyan\/\*"/);
 });
+
+test("Worker configuration routes Store browser auth through the Worker", async () => {
+  const [config, example] = await Promise.all([
+    readFile(new URL("../wrangler.toml", import.meta.url), "utf8"),
+    readFile(new URL("../wrangler.example.toml", import.meta.url), "utf8")
+  ]);
+
+  for (const text of [config, example]) {
+    assert.match(text, /run_worker_first[^\n]+\/store\/auth\/\*/);
+  }
+  assert.match(config, /ltools\.asia\/store\/auth\/\*/);
+  assert.match(config, /www\.ltools\.asia\/store\/auth\/\*/);
+});

@@ -9,7 +9,7 @@ import { authenticate, requireActiveAccount, serviceNow } from "./maoyan/auth.js
 import { accountErrorResponse, handleAccountApi, handlePublicAccountApi } from "./maoyan/account-api.js";
 import { requireBusinessAccess } from "./common/business.js";
 import { handleStoreApi, handleStoreFile } from "./store/proxy.js";
-import { handleStoreAuth, requireActiveStoreAccount } from "./store/auth.js";
+import { handleStoreAuth, requireActiveStoreAccount, requireStoreSameOrigin, storeErrorResponse } from "./store/auth.js";
 import { testNotification } from "./maoyan/notification-copy.js";
 
 export { LockCoordinator } from "./maoyan/lock-runner.js";
@@ -81,11 +81,14 @@ export default {
       if (storeAuthResponse) return storeAuthResponse;
       if (url.pathname.startsWith("/store/api/") || url.pathname === "/store/file") {
         await requireActiveStoreAccount(request, env, serviceNow(env));
+        if (url.pathname.startsWith("/store/api/") && request.method === "POST") {
+          requireStoreSameOrigin(request, url);
+        }
         if (url.pathname.startsWith("/store/api/")) return handleStoreApi(request, url);
         return handleStoreFile(url);
       }
     } catch (error) {
-      return accountErrorResponse(error);
+      return storeErrorResponse(error);
     }
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
 

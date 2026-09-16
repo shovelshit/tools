@@ -118,6 +118,43 @@ test("Store sessions recheck suspended accounts before download access", async (
   assert.equal((await response.json()).code, "ACCOUNT_SUSPENDED");
 });
 
+test("Store API mutation rejects cross-site requests and does not emit wildcard CORS", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  env.NOW_MS = String(NOW);
+  const { key } = await seedAccount(env, { businessLine: "store", expiresAt: NOW + 60_000 });
+  const login = await worker.fetch(storeRequest("/store/auth/session", {
+    method: "POST", body: { key }
+  }), env);
+  const cookie = login.headers.get("Set-Cookie").split(";")[0];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("{}", {
+    headers: { "Content-Type": "application/json" }
+  });
+  try {
+    const foreign = await worker.fetch(storeRequest("/store/api/fs/list", {
+      method: "POST", cookie, body: {}, headers: { Origin: "https://attacker.example" }
+    }), env);
+    assert.equal(foreign.status, 403);
+    assert.equal((await foreign.json()).code, "FORBIDDEN");
+    assert.equal(foreign.headers.get("Access-Control-Allow-Origin"), null);
+
+    const crossSite = await worker.fetch(storeRequest("/store/api/fs/list", {
+      method: "POST", cookie, body: {}, headers: {
+        Origin: "https://worker.example", "Sec-Fetch-Site": "cross-site"
+      }
+    }), env);
+    assert.equal(crossSite.status, 403);
+
+    const sameOrigin = await worker.fetch(storeRequest("/store/api/fs/list", {
+      method: "POST", cookie, body: {}, headers: { Origin: "https://worker.example" }
+    }), env);
+    assert.equal(sameOrigin.status, 200);
+    assert.equal(sameOrigin.headers.get("Access-Control-Allow-Origin"), null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("rotating the administrator credential invalidates Store browser sessions", async () => {
   const env = await createAccountEnv({ nowMs: NOW });
   env.NOW_MS = String(NOW);
