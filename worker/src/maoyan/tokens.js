@@ -11,6 +11,7 @@ import { listSeatFeedback, deleteSeatFeedback } from "./seat-feedback.js";
 import { migrateKvToD1 } from "./migrate.js";
 import { accountStatus } from "./accounts.js";
 import { authenticate } from "./auth.js";
+import { cleanupExpiredAccount } from "./account-lifecycle.js";
 
 export function randomToken() {
   const bytes = new Uint8Array(16);
@@ -63,7 +64,7 @@ export async function runScheduledChecks(env, afterMonitor, opts = {}) {
   if (!inMonitorWindow(opts.now)) return;
   const nowMs = opts.now instanceof Date ? opts.now.getTime() : Date.now();
   const { results } = await env.DB.prepare(
-    "SELECT id,role,state,expires_at FROM users WHERE role='user'"
+    "SELECT id,role,state,expires_at,archived_at,version FROM users WHERE role='user'"
   ).all();
   for (const row of results) {
     const account = {
@@ -71,7 +72,21 @@ export async function runScheduledChecks(env, afterMonitor, opts = {}) {
       state: row.state,
       expiresAt: row.expires_at === null ? null : Number(row.expires_at)
     };
-    if (accountStatus(account, nowMs) !== "active") continue;
+    if (accountStatus(account, nowMs) !== "active") {
+      if (row.state === "active" && row.archived_at == null) {
+        try {
+          await cleanupExpiredAccount(env, {
+            userId: row.id,
+            expectedExpiresAt: Number(row.expires_at),
+            expectedVersion: Number(row.version),
+            nowMs
+          });
+        } catch {
+          monitorError("account_cleanup", { state: "failed", reason: "internal_error" });
+        }
+      }
+      continue;
+    }
     try {
       await runCheck(env, false, row.id, {
         afterPersist: typeof afterMonitor === "function"

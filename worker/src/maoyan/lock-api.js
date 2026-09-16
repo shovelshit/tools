@@ -7,7 +7,7 @@ import {
   saveLockSession
 } from "./lock-session.js";
 import { getLockRule, publicLockRule, RULE_KNOWN_ERRORS, validateLockRuleInput } from "./lock-rule.js";
-import { cancelLockRuleThroughCoordinator, createLockRuleThroughCoordinator, removeLockSessionThroughCoordinator } from "./lock-runner.js";
+import { cancelLockRuleThroughCoordinator, createLockRuleThroughCoordinator, removeLockSessionThroughCoordinator, saveLockSessionThroughCoordinator } from "./lock-runner.js";
 
 const MAX_UPLOAD_BYTES = 256 * 1024;
 const DECIMAL = /^\d+$/;
@@ -133,7 +133,11 @@ export async function handleLockApi(request, env, url, tokenId) {
   }
   try {
     if (url.pathname === "/api/lock/session" && request.method === "POST") {
-      return response({ session: await saveLockSession(env, tokenId, await uploadBody(request)) });
+      const input = await uploadBody(request);
+      const session = env.LOCK_COORDINATOR
+        ? await saveLockSessionThroughCoordinator(env, tokenId, input)
+        : await saveLockSession(env, tokenId, input);
+      return response({ session });
     }
     if (url.pathname === "/api/lock/session/status" && request.method === "GET") {
       return response({ session: await getLockSessionStatus(env, tokenId) });

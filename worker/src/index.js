@@ -2,7 +2,7 @@
 
 import { CORS, json } from "./common/http.js";
 import { NOTIFY_CHANNELS, pushBark } from "./common/notify.js";
-import { getUserConfig } from "./maoyan/user.js";
+import { getUserConfig, putUserConfig } from "./maoyan/user.js";
 import * as db from "./maoyan/db.js";
 import { CITY_LIST, fetchCinemaDetail, publicCinemaShows, searchCinemasByKw, runCheck, appendChange, pushNotify, currentChannel, currentCredential, isNotificationVerified, notificationVerification, minBatchMinutes, describeCrons, isMinuteStepCrons, resolveCronExprs, handleAdminTokens, handleLockApi, runScheduledChecks, runScheduledLockAfterMonitor, MONITOR_WINDOW_LABEL } from "./maoyan/index.js";
 import { authenticate, requireActiveAccount, serviceNow } from "./maoyan/auth.js";
@@ -76,7 +76,8 @@ export default {
         if (keys.length === 1 && keys[0] === "enabled" && body.enabled === false) {
           const cfg = await getUserConfig(env, token);
           cfg.enabled = false;
-          await db.putConfig(env.DB, token, cfg);
+          cfg.stopReason = "manual";
+          await putUserConfig(env, token, cfg);
           return json({ ok: true, config: await publicConfig(cfg) });
         }
       }
@@ -166,15 +167,18 @@ export default {
             return json({ ok: false, error: "请先发送并确认当前推送渠道的测试推送" }, 400);
           }
           cfg.enabled = enabled;
+          if (enabled) delete cfg.stopReason;
+          else cfg.stopReason = "manual";
         }
         // 运行中必须始终有「可用且已验证」的推送渠道: 切到未配置/未验证的渠道时自动停止监控,
         // 否则监控继续跑、推送全部失败, 页面却仍显示"监控中"(静默失效)
         let notice = "";
         if (cfg.enabled === true && (!currentCredential(cfg) || !await isNotificationVerified(cfg))) {
           cfg.enabled = false;
+          cfg.stopReason = "notification_invalid";
           notice = `推送渠道（${NOTIFY_CHANNELS[currentChannel(cfg)].label}）未配置或未验证，监控已自动停止；配置并发送测试推送后可重新开始监控`;
         }
-        await db.putConfig(env.DB, token, cfg);
+        await putUserConfig(env, token, cfg);
         if (notice) await appendChange(env, token, { type: "warn", text: notice });
         return json({ ok: true, config: await publicConfig(cfg), ...(notice ? { notice } : {}) });
       }
@@ -192,7 +196,7 @@ export default {
           return json({ ok: false, error: e.message }, upstreamStatus(e.message));
         }
         cfg.notifyVerification = await notificationVerification({ ...cfg, notifyChannel: "bark" });
-        await db.putConfig(env.DB, token, cfg);
+        await putUserConfig(env, token, cfg);
         return json({ ok: true });
       }
       // ---- 按当前选中渠道发送测试推送 ----
@@ -206,7 +210,7 @@ export default {
           return json({ ok: false, error: e.message }, upstreamStatus(e.message));
         }
         cfg.notifyVerification = await notificationVerification(cfg);
-        await db.putConfig(env.DB, token, cfg);
+        await putUserConfig(env, token, cfg);
         return json({ ok: true, channel: currentChannel(cfg), label });
       }
       if (url.pathname === "/api/status" && request.method === "GET") {

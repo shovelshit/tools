@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { MemoryKV, testEncryptionKey, validSession } from "./helpers.js";
+import { createAccountEnv, seedAccount } from "./account-fixtures.js";
 import {
   getLockSessionStatus,
   loadLockSession,
@@ -89,4 +90,42 @@ test("status and removal never return credentials", async () => {
   assert.deepEqual(Object.keys(status).sort(), ["sourceSavedAt", "uidMasked", "uploaded", "uploadedAt"]);
   await removeLockSession(env, "token-a");
   assert.deepEqual(await getLockSessionStatus(env, "token-a"), { uploaded: false });
+});
+
+test("D1 selects the only active versioned session", async () => {
+  const env = await createAccountEnv();
+  const { account } = await seedAccount(env);
+  await saveLockSession(env, account.id, validSession());
+  const first = await env.DB.prepare(
+    "SELECT active_version FROM session_versions WHERE user_id=?"
+  ).bind(account.id).first();
+  const firstVersion = Number(first.active_version);
+  assert.equal(firstVersion > 0, true);
+  assert.equal(env.MAOYAN_KV.data.has(userKey(account.id, `maoyan-session:v${firstVersion}`)), true);
+
+  await saveLockSession(env, account.id, validSession({
+    cookies: validSession().cookies.map((cookie) => cookie.name === "uid" ? { ...cookie, value: "987654321" } : cookie)
+  }));
+  const second = await env.DB.prepare(
+    "SELECT active_version FROM session_versions WHERE user_id=?"
+  ).bind(account.id).first();
+  assert.notEqual(Number(second.active_version), firstVersion);
+  assert.equal(env.MAOYAN_KV.data.has(userKey(account.id, `maoyan-session:v${firstVersion}`)), false);
+  assert.equal((await loadLockSession(env, account.id)).uid, "987654321");
+});
+
+test("removing a versioned session deletes only the active object and pointer", async () => {
+  const env = await createAccountEnv();
+  const { account } = await seedAccount(env);
+  await saveLockSession(env, account.id, validSession());
+  await saveLockSession(env, account.id, validSession());
+  const current = await env.DB.prepare("SELECT active_version FROM session_versions WHERE user_id=?").bind(account.id).first();
+  const activeKey = userKey(account.id, `maoyan-session:v${current.active_version}`);
+  const unrelatedKey = userKey(account.id, "maoyan-session:v999");
+  await env.MAOYAN_KV.put(unrelatedKey, "unrelated");
+  await removeLockSession(env, account.id);
+  assert.equal(env.MAOYAN_KV.data.has(activeKey), false);
+  assert.equal(env.MAOYAN_KV.data.has(unrelatedKey), true);
+  assert.equal(await env.DB.prepare("SELECT 1 AS ok FROM session_versions WHERE user_id=?").bind(account.id).first(), null);
+  assert.deepEqual(await getLockSessionStatus(env, account.id), { uploaded: false });
 });

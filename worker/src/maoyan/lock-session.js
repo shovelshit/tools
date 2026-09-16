@@ -1,4 +1,5 @@
 import { userKey } from "./user.js";
+import { activateSessionVersion, deleteSessionVersion, getSessionVersion } from "./db.js";
 
 const QUERY_KEYS = ["yodaReady", "csecplatform", "csecversion"];
 const SAFE_QUERY_VALUE = /^[A-Za-z0-9._:-]{1,64}$/;
@@ -17,12 +18,18 @@ function bytesToBase64(bytes) {
   return btoa(binary);
 }
 
-function sessionKey(tokenId) {
+function legacySessionKey(tokenId) {
   return userKey(tokenId, SESSION_NAME);
 }
 
-function sessionAad(tokenId) {
-  return encoder.encode(`maoyan-session:${tokenId}`);
+function versionedSessionKey(tokenId, version) {
+  return userKey(tokenId, `${SESSION_NAME}:v${version}`);
+}
+
+function sessionAad(tokenId, version = null) {
+  return encoder.encode(version == null
+    ? `maoyan-session:${tokenId}`
+    : `maoyan-session:${tokenId}:v${version}`);
 }
 
 async function encryptionKey(value) {
@@ -96,47 +103,101 @@ export function normalizeSession(raw) {
 
 export async function saveLockSession(env, tokenId, raw) {
   const session = normalizeSession(raw);
+  if (!env.DB) return saveLegacySession(env, tokenId, session);
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const current = await getSessionVersion(env.DB, tokenId);
+    let version;
+    do {
+      version = crypto.getRandomValues(new Uint32Array(1))[0] || 1;
+    } while (version === current?.activeVersion);
+    const envelope = await encryptSessionEnvelope(env, tokenId, session, version);
+    const key = versionedSessionKey(tokenId, version);
+    await env.MAOYAN_KV.put(key, JSON.stringify(envelope));
+    const result = await activateSessionVersion(env.DB, tokenId, version, current?.activeVersion ?? null);
+    if (Number(result?.meta?.changes ?? 1) > 0) {
+      if (current) await env.MAOYAN_KV.delete(versionedSessionKey(tokenId, current.activeVersion));
+      return publicStatus(envelope);
+    }
+    await env.MAOYAN_KV.delete(key);
+  }
+  throw new Error("猫眼会话保存冲突，请重试");
+}
+
+async function encryptSessionEnvelope(env, tokenId, session, version = null) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const data = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv, additionalData: sessionAad(tokenId) },
+    { name: "AES-GCM", iv, additionalData: sessionAad(tokenId, version) },
     await encryptionKey(env.SESSION_ENCRYPTION_KEY),
     encoder.encode(JSON.stringify(session))
   );
-  const envelope = {
-    v: 1,
+  return {
+    v: version == null ? 1 : 2,
+    ...(version == null ? {} : { sessionVersion: version }),
     iv: bytesToBase64(iv),
     data: bytesToBase64(new Uint8Array(data)),
     uploadedAt: new Date().toISOString(),
     uidMasked: maskUid(session.uid),
     sourceSavedAt: session.sourceSavedAt
   };
-  await env.MAOYAN_KV.put(sessionKey(tokenId), JSON.stringify(envelope));
+}
+
+async function saveLegacySession(env, tokenId, session) {
+  const envelope = await encryptSessionEnvelope(env, tokenId, session);
+  await env.MAOYAN_KV.put(legacySessionKey(tokenId), JSON.stringify(envelope));
   return publicStatus(envelope);
+}
+
+async function readEnvelope(env, tokenId) {
+  if (!env.DB) {
+    return { envelope: await env.MAOYAN_KV.get(legacySessionKey(tokenId), "json"), version: null };
+  }
+  const current = await getSessionVersion(env.DB, tokenId);
+  if (current) {
+    return {
+      envelope: await env.MAOYAN_KV.get(versionedSessionKey(tokenId, current.activeVersion), "json"),
+      version: current.activeVersion
+    };
+  }
+  const legacy = await env.MAOYAN_KV.get(legacySessionKey(tokenId), "json");
+  if (!legacy) return { envelope: null, version: null };
+  const session = await decryptSessionEnvelope(env, tokenId, legacy, null);
+  await saveLockSession(env, tokenId, normalizedSessionAsUpload(session));
+  await env.MAOYAN_KV.delete(legacySessionKey(tokenId));
+  return readEnvelope(env, tokenId);
+}
+
+async function decryptSessionEnvelope(env, tokenId, envelope, version) {
+  const expectedEnvelopeVersion = version == null ? 1 : 2;
+  if (
+    envelope?.v !== expectedEnvelopeVersion ||
+    (version != null && Number(envelope.sessionVersion) !== version) ||
+    typeof envelope?.iv !== "string" || typeof envelope?.data !== "string"
+  ) throw encryptedSessionError();
+  const plaintext = await crypto.subtle.decrypt(
+    {
+      name: "AES-GCM",
+      iv: base64ToBytes(envelope.iv),
+      additionalData: sessionAad(tokenId, version)
+    },
+    await encryptionKey(env.SESSION_ENCRYPTION_KEY),
+    base64ToBytes(envelope.data)
+  );
+  return normalizeSession(normalizedSessionAsUpload(JSON.parse(decoder.decode(plaintext))));
 }
 
 export async function loadLockSession(env, tokenId) {
   let envelope;
+  let version;
   try {
-    envelope = await env.MAOYAN_KV.get(sessionKey(tokenId), "json");
+    ({ envelope, version } = await readEnvelope(env, tokenId));
   } catch {
     throw encryptedSessionError();
   }
   if (!envelope) throw new Error("未上传猫眼会话");
-  if (envelope.v !== 1 || typeof envelope.iv !== "string" || typeof envelope.data !== "string") {
-    throw encryptedSessionError();
-  }
 
   try {
-    const plaintext = await crypto.subtle.decrypt(
-      {
-        name: "AES-GCM",
-        iv: base64ToBytes(envelope.iv),
-        additionalData: sessionAad(tokenId)
-      },
-      await encryptionKey(env.SESSION_ENCRYPTION_KEY),
-      base64ToBytes(envelope.data)
-    );
-    return normalizeSession(normalizedSessionAsUpload(JSON.parse(decoder.decode(plaintext))));
+    return await decryptSessionEnvelope(env, tokenId, envelope, version);
   } catch (error) {
     if (error?.message === "锁座服务尚未配置加密密钥") throw error;
     // 解密得到的明文若本身不合法, 保留其可操作提示(格式错误/不完整), 不要笼统归因为"会话不可用"
@@ -156,14 +217,16 @@ function publicStatus(envelope) {
 
 export async function getLockSessionStatus(env, tokenId) {
   let envelope;
+  let version;
   try {
-    envelope = await env.MAOYAN_KV.get(sessionKey(tokenId), "json");
+    ({ envelope, version } = await readEnvelope(env, tokenId));
   } catch {
     throw encryptedSessionError();
   }
   if (!envelope) return { uploaded: false };
   if (
-    envelope.v !== 1 ||
+    envelope.v !== (version == null ? 1 : 2) ||
+    (version != null && Number(envelope.sessionVersion) !== version) ||
     typeof envelope.uploadedAt !== "string" ||
     typeof envelope.uidMasked !== "string" ||
     typeof envelope.sourceSavedAt !== "string"
@@ -174,5 +237,15 @@ export async function getLockSessionStatus(env, tokenId) {
 }
 
 export async function removeLockSession(env, tokenId) {
-  await env.MAOYAN_KV.delete(sessionKey(tokenId));
+  if (!env.DB) {
+    await env.MAOYAN_KV.delete(legacySessionKey(tokenId));
+    return;
+  }
+  const current = await getSessionVersion(env.DB, tokenId);
+  if (!current) {
+    await env.MAOYAN_KV.delete(legacySessionKey(tokenId));
+    return;
+  }
+  await env.MAOYAN_KV.delete(versionedSessionKey(tokenId, current.activeVersion));
+  await deleteSessionVersion(env.DB, tokenId, current.activeVersion);
 }

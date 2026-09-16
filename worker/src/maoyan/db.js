@@ -51,6 +51,11 @@ export async function getConfig(db, tokenId) {
   return row ? JSON.parse(row.data) : null;
 }
 
+export async function getConfigRecord(db, tokenId) {
+  const row = await db.prepare("SELECT data FROM user_config WHERE token_id = ?").bind(tokenId).first();
+  return row ? { raw: row.data, config: JSON.parse(row.data) } : null;
+}
+
 export async function putConfig(db, tokenId, config) {
   await db.prepare(
     "INSERT INTO user_config (token_id, data, updated_at) VALUES (?, ?, ?) " +
@@ -58,8 +63,42 @@ export async function putConfig(db, tokenId, config) {
   ).bind(tokenId, JSON.stringify(config), nowIso()).run();
 }
 
+export async function replaceConfigIfUnchanged(db, tokenId, expectedRaw, config) {
+  return await db.prepare(
+    "UPDATE user_config SET data=?,updated_at=? WHERE token_id=? AND data=?"
+  ).bind(JSON.stringify(config), nowIso(), tokenId, expectedRaw).run();
+}
+
 export async function deleteConfig(db, tokenId) {
   await db.prepare("DELETE FROM user_config WHERE token_id = ?").bind(tokenId).run();
+}
+
+// ---------- encrypted session version pointer (payload remains in KV) ----------
+
+export async function getSessionVersion(db, tokenId) {
+  const row = await db.prepare(
+    "SELECT active_version,updated_at FROM session_versions WHERE user_id=? AND active=1"
+  ).bind(tokenId).first();
+  return row ? { activeVersion: Number(row.active_version), updatedAt: Number(row.updated_at) } : null;
+}
+
+export async function activateSessionVersion(db, tokenId, version, previousVersion, nowMs = Date.now()) {
+  if (previousVersion == null) {
+    return await db.prepare(
+      "INSERT INTO session_versions(user_id,active_version,active,updated_at) VALUES (?,?,1,?) " +
+      "ON CONFLICT(user_id) DO UPDATE SET active_version=excluded.active_version,active=1,updated_at=excluded.updated_at " +
+      "WHERE session_versions.active=0"
+    ).bind(tokenId, version, nowMs).run();
+  }
+  return await db.prepare(
+    "UPDATE session_versions SET active_version=?,active=1,updated_at=? WHERE user_id=? AND active_version=? AND active=1"
+  ).bind(version, nowMs, tokenId, previousVersion).run();
+}
+
+export async function deleteSessionVersion(db, tokenId, expectedVersion) {
+  return await db.prepare(
+    "DELETE FROM session_versions WHERE user_id=? AND active_version=? AND active=1"
+  ).bind(tokenId, expectedVersion).run();
 }
 
 // ---------- status(每令牌一行 JSON, 字段与 KV 版一致) ----------
@@ -205,4 +244,5 @@ export async function deleteUserData(db, tokenId) {
   await db.prepare("DELETE FROM monitor_snapshot WHERE token_id = ?").bind(tokenId).run();
   await db.prepare("DELETE FROM change_log WHERE token_id = ?").bind(tokenId).run();
   await db.prepare("DELETE FROM lock_rule WHERE token_id = ?").bind(tokenId).run();
+  await db.prepare("DELETE FROM session_versions WHERE user_id = ?").bind(tokenId).run();
 }

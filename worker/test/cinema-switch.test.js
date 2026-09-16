@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import worker from "../src/index.js";
 import { runCheck } from "../src/maoyan/check.js";
-import { createDB } from "./helpers.js";
+import { createDB, testEncryptionKey } from "./helpers.js";
 import * as db from "../src/maoyan/db.js";
 
 const tokenId = "22222222-2222-4222-8222-222222222222";
@@ -37,7 +37,8 @@ async function verifiedEnv(snapshot = null) {
     DB: await createDB({
       tokens: [{ id: tokenId, token: "access-token" }],
       ...(snapshot ? { snapshots: { [tokenId]: snapshot } } : {})
-    })
+    }),
+    SESSION_ENCRYPTION_KEY: testEncryptionKey()
   };
   // 与 config.test.js 同路径: 先保存推送密钥 → 测试推送验证 → 才能开启监控
   const keySaved = await worker.fetch(request("/api/config", { barkKey: "test-key" }), env);

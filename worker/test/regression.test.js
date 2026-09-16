@@ -4,7 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import worker from "../src/index.js";
-import { createDB } from "./helpers.js";
+import { createDB, testEncryptionKey } from "./helpers.js";
 import { getConfig, listChanges } from "../src/maoyan/db.js";
 import { isExpired } from "../src/maoyan/ddl.js";
 import { runScheduledChecks } from "../src/maoyan/tokens.js";
@@ -18,7 +18,8 @@ async function runtime(config = {}) {
     DB: await createDB({
       tokens: [{ id: tokenId, token: ACCESS }],
       configs: { [tokenId]: config }
-    })
+    }),
+    SESSION_ENCRYPTION_KEY: testEncryptionKey()
   };
 }
 

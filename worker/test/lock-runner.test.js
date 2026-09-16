@@ -546,6 +546,33 @@ test("concurrency session removal prevents a delayed run from creating an order 
   assert.equal(sessionPresent, false);
 });
 
+test("concurrency session upload waits for a running rule before replacing credentials", async () => {
+  let release;
+  let started;
+  const delayed = new Promise((resolve) => { release = resolve; });
+  const begun = new Promise((resolve) => { started = resolve; });
+  let savedInput = null;
+  let orderCalls = 0;
+  const stored = rule();
+  const coordinator = new LockCoordinator(coordinatorState(), await runtime(), deps(stored, {
+    fetchCinema: async () => { started(); await delayed; return { showData: { movies: [] } }; },
+    createOrder: async () => { orderCalls++; return { orderId: "must-not-order" }; },
+    saveSession: async (_env, _token, input) => {
+      savedInput = input;
+      return { uploaded: true, uidMasked: "UID ***" };
+    }
+  }));
+  const run = coordinator.fetch(coordinatorRequest({ action: "run", tokenId }));
+  await begun;
+  const upload = coordinator.fetch(coordinatorRequest({ action: "save-session", tokenId, input: { marker: "new" } }));
+  assert.equal(savedInput, null);
+  release();
+  assert.equal((await upload).status, 200);
+  await run;
+  assert.deepEqual(savedInput, { marker: "new" });
+  assert.equal(orderCalls, 0);
+});
+
 test("concurrency cancellation after matching persistence prevents an order and removes both resources", async () => {
   let release;
   let matchingStarted;

@@ -1,6 +1,6 @@
 import { publicCinemaShows } from "./api.js";
 import { findExactShows, findCompatibleShows, fetchSeatMap, createUnpaidOrder, OrderAttemptError } from "./lock-client.js";
-import { getLockSessionStatus, loadLockSession, removeLockSession } from "./lock-session.js";
+import { getLockSessionStatus, loadLockSession, removeLockSession, saveLockSession } from "./lock-session.js";
 import {
   createLockRule, getLockRule, isLockRuleTerminal, putLockRule, removeLockRule,
   RULE_KNOWN_ERRORS
@@ -197,7 +197,7 @@ export class LockCoordinator {
   async fetch(request) {
     if (request.method !== "POST") return Response.json({ error: "Method Not Allowed" }, { status: 405 });
     if (this.running) {
-      if (["cancel", "remove-session"].includes(request.headers.get("X-Lock-Action"))) {
+      if (["cancel", "remove-session", "save-session", "prepare-cleanup"].includes(request.headers.get("X-Lock-Action"))) {
         this.cancelRequested = true;
         await this.current;
         return await this.fetch(request);
@@ -240,6 +240,13 @@ export class LockCoordinator {
         await (this.deps.removeSession || removeLockSession)(this.env, tokenId);
         await (this.deps.removeRule || removeLockRule)(this.env, tokenId);
         return Response.json({ ok: true, removed: true });
+      }
+      if (action === "save-session") {
+        const session = await (this.deps.saveSession || saveLockSession)(this.env, tokenId, input);
+        return Response.json({ ok: true, session });
+      }
+      if (action === "prepare-cleanup") {
+        return Response.json({ ok: true, ready: true });
       }
       if (action !== "run") return Response.json({ error: "Bad Request" }, { status: 400 });
       const getRule = this.deps.getRule || getLockRule;
@@ -311,6 +318,24 @@ export async function cancelLockRuleThroughCoordinator(env, tokenId) {
 
 export async function removeLockSessionThroughCoordinator(env, tokenId) {
   return await removeThroughCoordinator(env, tokenId, "remove-session", "未找到锁座资源");
+}
+
+export async function saveLockSessionThroughCoordinator(env, tokenId, input) {
+  checkedTokenId(tokenId);
+  const stub = env.LOCK_COORDINATOR.get(env.LOCK_COORDINATOR.idFromName(tokenId));
+  const response = await stub.fetch(lockRequest("save-session", tokenId, input));
+  const body = await response.json().catch(() => ({}));
+  if (response.status === 200 && body?.ok === true && body.session) return body.session;
+  throw new Error("锁座服务暂时不可用");
+}
+
+export async function prepareAccountCleanupThroughCoordinator(env, tokenId) {
+  checkedTokenId(tokenId);
+  const stub = env.LOCK_COORDINATOR.get(env.LOCK_COORDINATOR.idFromName(tokenId));
+  const response = await stub.fetch(lockRequest("prepare-cleanup", tokenId));
+  const body = await response.json().catch(() => ({}));
+  if (response.status === 200 && body?.ok === true && body.ready === true) return true;
+  throw new Error("锁座协调器清理准备失败");
 }
 
 export async function runScheduledLockAfterMonitor(env, tokenId, cinemaData) {

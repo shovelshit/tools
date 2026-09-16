@@ -2,6 +2,7 @@ import { json } from "../common/http.js";
 import { getAccount } from "./accounts.js";
 import { exchangeSession, publicAccount, serviceNow } from "./auth.js";
 import { renewAccount } from "./enrollment-store.js";
+import { resumeAfterRenewal } from "./account-lifecycle.js";
 
 export async function handlePublicAccountApi(request, env, url) {
   if (url.pathname === "/api/capabilities" && request.method === "GET") {
@@ -27,7 +28,8 @@ export async function handleAccountApi(request, env, url, principal) {
       expectedVersion: body.expectedVersion,
       nowMs
     });
-    return json({ ok: true, account: publicAccount(result.account, nowMs), replayed: result.replayed === true });
+    const resume = await resumeAfterRenewal(env, principal.userId, result.account.version, nowMs);
+    return json({ ok: true, account: publicAccount(result.account, nowMs), replayed: result.replayed === true, resume });
   }
   return null;
 }

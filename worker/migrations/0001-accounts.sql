@@ -32,6 +32,13 @@ CREATE TABLE IF NOT EXISTS admin_monitor_sessions (
 CREATE INDEX IF NOT EXISTS idx_admin_monitor_sessions_expiry
   ON admin_monitor_sessions(expires_at);
 
+CREATE TABLE IF NOT EXISTS session_versions (
+  user_id TEXT PRIMARY KEY REFERENCES users(id),
+  active_version INTEGER NOT NULL CHECK (active_version > 0),
+  active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+  updated_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS enrollment_claims (
   user_id TEXT NOT NULL REFERENCES users(id),
   fingerprint_digest TEXT,

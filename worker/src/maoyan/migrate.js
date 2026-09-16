@@ -6,6 +6,7 @@
 
 import * as db from "./db.js";
 import { importLegacyAccount } from "./account-migration.js";
+import { putUserConfig } from "./user.js";
 
 const USER_KEY = /^u:([^:]+):(.+)$/;
 
@@ -17,7 +18,7 @@ async function migrateUserKey(env, summary, key, value) {
   const parsed = JSON.parse(value);
   switch (name) {
     case "config":
-      await db.putConfig(env.DB, tokenId, parsed);
+      await putUserConfig(env, tokenId, parsed);
       summary.configs += 1;
       break;
     case "status":

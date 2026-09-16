@@ -10,7 +10,10 @@ const secretValues = ["cookie-secret", "signature-secret", "csrf-value", "123456
 
 async function env() {
   return {
-    DB: await createDB({ configs: { "token-a": { cinemaId: "25428", selectedMovieIds: ["7"] } } }),
+    DB: await createDB({
+      tokens: [{ id: "token-a", token: "access-token" }],
+      configs: { "token-a": { cinemaId: "25428", selectedMovieIds: ["7"] } }
+    }),
     MAOYAN_KV: new MemoryKV(),
     SESSION_ENCRYPTION_KEY: testEncryptionKey(),
     LOCK_SERVICE_ENABLED: "true"
@@ -72,9 +75,11 @@ test("API response secrecy: session routes expose only masked session status", a
 
   const status = await handleLockApi(request("/api/lock/session/status"), runtime, new URL("https://worker.example/api/lock/session/status"), "token-a");
   assert.equal(status.status, 200);
+  const pointer = await runtime.DB.prepare("SELECT active_version FROM session_versions WHERE user_id=?").bind("token-a").first();
+  const envelope = await runtime.MAOYAN_KV.get(userKey("token-a", `maoyan-session:v${pointer.active_version}`), "json");
   assert.deepEqual((await body(status)).session, {
     uploaded: true,
-    uploadedAt: (await runtime.MAOYAN_KV.get(userKey("token-a", "maoyan-session"), "json")).uploadedAt,
+    uploadedAt: envelope.uploadedAt,
     uidMasked: "UID 123***789",
     sourceSavedAt: "2026-09-11T00:00:00.000Z"
   });

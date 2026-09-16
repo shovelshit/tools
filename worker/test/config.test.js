@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import worker from "../src/index.js";
-import { createDB } from "./helpers.js";
+import { createDB, testEncryptionKey } from "./helpers.js";
 import { getConfig } from "../src/maoyan/db.js";
 
 const tokenId = "11111111-1111-4111-8111-111111111111";
@@ -11,7 +11,8 @@ async function runtime(config = {}) {
     DB: await createDB({
       tokens: [{ id: tokenId, token: "access-token" }],
       configs: { [tokenId]: config }
-    })
+    }),
+    SESSION_ENCRYPTION_KEY: testEncryptionKey()
   };
 }
 
@@ -68,6 +69,9 @@ test("a successful test verifies only the current channel and credential", async
   const verifiedConfig = await getConfig(env.DB, tokenId);
   assert.match(verifiedConfig.notifyVerification.fingerprint, /^[0-9a-f]{64}$/);
   assert.equal(JSON.stringify(verifiedConfig.notifyVerification).includes("test-key"), false);
+  assert.equal(Object.hasOwn(verifiedConfig, "barkKey"), false);
+  assert.equal(verifiedConfig.notifyCredentials.bark.v, 1);
+  assert.equal(JSON.stringify(verifiedConfig.notifyCredentials).includes("test-key"), false);
 
   const getResponse = await worker.fetch(request("/api/config"), env);
   const getBody = await getResponse.json();
