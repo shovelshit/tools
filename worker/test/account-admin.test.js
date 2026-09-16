@@ -74,7 +74,7 @@ test("admin updates use optimistic account versions and reject arbitrary fields"
 test("capacity settings use CAS and cannot drop below current occupancy", async () => {
   const env = await createAccountEnv({ nowMs: NOW, maxUsers: 2 });
   env.NOW_MS = String(NOW);
-  await seedAccount(env, { expiresAt: NOW + 10_000 });
+  await seedAccount(env, { expiresAt: NOW + 365 * 86_400_000 });
   const read = await worker.fetch(request("/api/admin/settings"), env);
   assert.equal(read.status, 200);
   const settings = (await read.json()).settings;

@@ -111,6 +111,16 @@ async function claimByRequest(DB, requestId) {
   ).bind(requestId).first();
 }
 
+export async function readEnrollmentStatus(DB, requestId, nowMs = Date.now()) {
+  const claim = await claimByRequest(DB, requestId);
+  if (claim) return { status: "confirmed" };
+  const reservation = await reservationByRequest(DB, requestId);
+  if (!reservation) return { status: "missing" };
+  return Number(reservation.expires_at) > nowMs
+    ? { status: "reserved", expiresAt: Number(reservation.expires_at) }
+    : { status: "expired" };
+}
+
 export async function reserveEnrollment(env, input) {
   const requestId = required(input?.requestId);
   const fingerprintDigest = required(input?.fingerprintDigest);

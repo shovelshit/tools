@@ -18,6 +18,7 @@ import { dispatchMonitorBatch } from "./maoyan/monitor-dispatcher.js";
 import { handleStatusApi } from "./maoyan/status-api.js";
 import { checkManualOperationThroughCoordinator } from "./maoyan/lock-runner.js";
 import { fetchManualCinemaThroughCoordinator } from "./maoyan/monitor-coordinator.js";
+import { handleEnrollmentApi } from "./maoyan/enrollment-api.js";
 
 const DECIMAL = /^\d+$/;
 
@@ -40,6 +41,8 @@ async function publicConfig(config) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    const enrollmentResponse = await handleEnrollmentApi(request, env, url);
+    if (enrollmentResponse) return enrollmentResponse;
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
 
     // ---- store 工具页(无需登录) ----

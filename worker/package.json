@@ -3,5 +3,8 @@
   "type": "module",
   "scripts": {
     "test": "node --experimental-sqlite --test test/*.test.js"
+  },
+  "devDependencies": {
+    "@thumbmarkjs/thumbmarkjs": "1.11.0"
   }
 }
