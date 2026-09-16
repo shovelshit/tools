@@ -147,7 +147,7 @@ function normalizeWorkerProfile(value) {
 }
 
 function webTokenKey(profileKey) {
-  return `token:${encodeURIComponent(profileKey)}`;
+  return window.webTokenKey ? window.webTokenKey(profileKey) : `token:${encodeURIComponent(profileKey)}`;
 }
 
 async function restoreWebToken(savedWorker, requestedWorker) {

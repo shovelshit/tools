@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
+  <title>领取访问密钥 - 猫眼场次监控</title>
+  <link rel="stylesheet" href="style.css?v=20260916b" />
+  <link rel="stylesheet" href="claim.css?v=20260916a" />
+</head>
+<body class="claim-page">
+  <div class="ambient-background" aria-hidden="true">
+    <span class="ambient-plate plate-one"></span><span class="ambient-plate plate-two"></span>
+    <span class="ambient-plate plate-three"></span><span class="ambient-plate plate-four"></span>
+  </div>
+  <main class="claim-shell">
+    <nav class="claim-progress" aria-label="领取进度">
+      <span class="active">1 验证</span><i></i><span>2 领取</span><i></i><span>3 使用</span>
+    </nav>
+    <section class="claim-panel glass-panel" aria-live="polite">
+      <header>
+        <span class="claim-mark">M</span>
+        <div><h1 class="claim-title">领取访问密钥</h1><p id="claim-subtitle">15 天有效，名额有限</p></div>
+      </header>
+
+      <div id="claim-loading" class="claim-state"><span class="claim-spinner"></span><p>正在读取服务状态...</p></div>
+
+      <div id="claim-idle" class="claim-state hidden">
+        <div id="turnstile-slot" class="turnstile-slot"></div>
+        <button id="btn-claim" class="btn primary claim-control" type="button" disabled>领取密钥</button>
+        <p id="claim-capacity" class="claim-meta"></p>
+      </div>
+
+      <div id="claim-working" class="claim-state hidden"><span class="claim-spinner"></span><p id="claim-working-text">正在验证...</p></div>
+
+      <div id="claim-active" class="claim-state hidden">
+        <div class="claim-result"><span>访问密钥</span><code id="claim-key"></code></div>
+        <p id="claim-expiry" class="claim-meta"></p>
+        <p id="claim-storage-warning" class="claim-warning hidden"></p>
+        <div class="claim-actions">
+          <button id="btn-copy-key" class="btn ghost claim-control" type="button">复制密钥</button>
+          <button id="btn-enter-web" class="btn primary claim-control" type="button">进入 Web 版</button>
+        </div>
+      </div>
+
+      <div id="claim-full" class="claim-state hidden">
+        <h2>当前资源已用尽</h2>
+        <p>已有密钥仍可继续使用。也可以部署自己的独立实例。</p>
+        <div class="claim-actions">
+          <a id="claim-source" class="btn ghost claim-control" target="_blank" rel="noopener noreferrer">查看源码</a>
+          <a id="claim-deploy" class="btn primary claim-control" target="_blank" rel="noopener noreferrer">部署到 Cloudflare</a>
+        </div>
+      </div>
+
+      <div id="claim-error" class="claim-state hidden">
+        <h2>暂时无法领取</h2><p id="claim-error-text"></p>
+        <button id="btn-claim-retry" class="btn ghost claim-control" type="button">重试</button>
+      </div>
+
+      <footer class="claim-existing">
+        <label for="existing-key">已有访问密钥</label>
+        <div><input id="existing-key" type="password" autocomplete="off" placeholder="输入后直接进入" /><button id="btn-use-existing" class="btn ghost claim-control" type="button">使用</button></div>
+      </footer>
+    </section>
+  </main>
+  <script src="vendor/thumbmark.umd.js?v=1.11.0"></script>
+  <script src="secure-store.js?v=20260912b"></script>
+  <script src="connection-profile.js?v=20260916a"></script>
+  <script src="fingerprint.js?v=20260916a"></script>
+  <script src="claim.js?v=20260916a"></script>
+  <script src="claim-page.js?v=20260916a"></script>
+</body>
+</html>
