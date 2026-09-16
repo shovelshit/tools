@@ -33,7 +33,7 @@ function usageItem(input) {
 export async function readResourceSummary(env, nowMs = Date.now()) {
   const [capacity, cinemas, outbox, failed] = await Promise.all([
     env.DB.prepare(
-      "SELECT s.max_users,(SELECT COUNT(*) FROM users u WHERE u.role='user' AND u.state!='revoked' AND u.expires_at>?) + " +
+      "SELECT s.max_users,(SELECT COUNT(*) FROM users u WHERE u.business_line='maoyan' AND u.role='user' AND u.state!='revoked' AND u.expires_at>?) + " +
       "(SELECT COUNT(*) FROM enrollment_reservations r WHERE r.expires_at>?) AS used FROM service_settings s WHERE s.id=1"
     ).bind(nowMs, nowMs).first(),
     env.DB.prepare(

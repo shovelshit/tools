@@ -69,4 +69,12 @@ npx wrangler deploy --config wrangler.local.toml
 
 ## 更新与回滚
 
-更新时重新执行 `npm ci`、D1 schema（迁移是幂等的）、`npm run build:assets`、测试和部署。回滚使用上一提交重新构建并部署；不要删除 D1、KV 或 Durable Object 数据。访问密钥无法找回，遗失后只能等待账号自然到期并重新申请。
+新建 D1 继续执行第 4 节的 `schema.sql`。已有 D1 更新到带业务线的版本时，必须先执行一次业务线迁移，再执行 `schema.sql` 和部署：
+
+```bash
+cd worker
+npx wrangler d1 execute my-maoyan-db --remote --file migrations/0002-business-lines.sql --config wrangler.local.toml
+npx wrangler d1 execute my-maoyan-db --remote --file schema.sql --config wrangler.local.toml
+```
+
+`0002-business-lines.sql` 为既有数据迁移，不可重复执行；它会为已有账号写入 `maoyan` 业务线并保留现有设置。其余更新重新执行 `npm ci`、`npm run build:assets`、测试和部署。回滚使用上一提交重新构建并部署；不要删除 D1、KV 或 Durable Object 数据。访问密钥无法找回，遗失后只能等待账号自然到期并重新申请。

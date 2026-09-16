@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import worker from "../src/index.js";
-import { evaluateBudget } from "../src/maoyan/resource-budget.js";
+import { evaluateBudget, readResourceSummary } from "../src/maoyan/resource-budget.js";
 import { createAccountEnv, seedAccount } from "./account-fixtures.js";
 import { syncSubscription } from "../src/maoyan/monitor-store.js";
 
@@ -28,4 +28,13 @@ test("admin resources returns aggregate measured and estimated fields only", asy
   assert.equal(payload.resources.activeCinemas, 1);
   assert.equal(JSON.stringify(payload).includes(account.id), false);
   assert.equal(JSON.stringify(payload).includes("token"), false);
+});
+
+test("Maoyan resource capacity excludes active Store accounts", async () => {
+  const env = await createAccountEnv({ nowMs: NOW, maxUsers: 20 });
+  await seedAccount(env, { businessLine: "maoyan", expiresAt: NOW + 86_400_000 });
+  await seedAccount(env, { businessLine: "store", expiresAt: NOW + 86_400_000 });
+  await seedAccount(env, { businessLine: "store", expiresAt: NOW + 86_400_000 });
+
+  assert.deepEqual((await readResourceSummary(env, NOW)).capacity, { used: 1, maxUsers: 20 });
 });
