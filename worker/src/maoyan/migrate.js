@@ -5,6 +5,7 @@
 //   - maoyan-session 加密信封与 cache:cinemas:* 缓存不迁移(继续留在 KV)。
 
 import * as db from "./db.js";
+import { importLegacyAccount } from "./account-migration.js";
 
 const USER_KEY = /^u:([^:]+):(.+)$/;
 
@@ -48,8 +49,13 @@ export async function migrateKvToD1(env) {
   const tokens = await env.MAOYAN_KV.get("meta:tokens", "json");
   for (const token of Array.isArray(tokens) ? tokens : []) {
     if (!token || !token.id || !token.token) continue;
-    await db.upsertToken(env.DB, token);
-    summary.tokens += 1;
+    const accountImport = await importLegacyAccount(env, token);
+    if (accountImport.accountMigrationApplied) {
+      if (accountImport.imported) summary.tokens += 1;
+    } else {
+      await db.upsertToken(env.DB, token);
+      summary.tokens += 1;
+    }
   }
 
   // 2) 用户状态(u:{tokenId}:{name})

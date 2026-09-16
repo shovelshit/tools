@@ -62,6 +62,12 @@ export class MemoryD1 {
     const shim = this;
     const make = (params) => ({
       bind: (...next) => make(next),
+      _execute() {
+        shim.record(sql);
+        const stmt = shim.sqlite.prepare(sql);
+        const result = params.length ? stmt.run(...params) : stmt.run();
+        return { success: true, meta: { changes: Number(result.changes || 0) } };
+      },
       async first() {
         const stmt = shim.sqlite.prepare(sql);
         const row = params.length ? stmt.get(...params) : stmt.get();
@@ -73,14 +79,22 @@ export class MemoryD1 {
         return { results };
       },
       async run() {
-        shim.record(sql);
-        const stmt = shim.sqlite.prepare(sql);
-        if (params.length) stmt.run(...params);
-        else stmt.run();
-        return { success: true };
+        return this._execute();
       }
     });
     return make([]);
+  }
+
+  async batch(statements) {
+    this.sqlite.exec("BEGIN IMMEDIATE");
+    try {
+      const results = statements.map((statement) => statement._execute());
+      this.sqlite.exec("COMMIT");
+      return results;
+    } catch (error) {
+      this.sqlite.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   record(sql) {

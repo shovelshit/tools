@@ -39,6 +39,11 @@ export async function findTokenByToken(db, token) {
   return await db.prepare("SELECT id, token, remark, created_at FROM tokens WHERE token = ?").bind(String(token)).first();
 }
 
+export async function getAccountMigration(db, name = "accounts-v1") {
+  return await db.prepare("SELECT name, activated_at FROM account_migrations WHERE name=?")
+    .bind(name).first();
+}
+
 // ---------- config(每令牌一行 JSON) ----------
 
 export async function getConfig(db, tokenId) {

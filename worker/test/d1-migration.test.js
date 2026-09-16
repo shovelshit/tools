@@ -6,6 +6,8 @@ import assert from "node:assert/strict";
 import { MemoryD1, MemoryKV, createDB } from "./helpers.js";
 import * as db from "../src/maoyan/db.js";
 import { migrateKvToD1 } from "../src/maoyan/migrate.js";
+import { migrateAccounts } from "../src/maoyan/account-migration.js";
+import { getAccountByKey } from "../src/maoyan/accounts.js";
 import { checkAuthFull } from "../src/maoyan/tokens.js";
 import { userKey, cleanupUserData } from "../src/maoyan/user.js";
 
@@ -146,4 +148,32 @@ test("saveTokens 整表替换保留传入顺序(管理端语义)", async () => {
   assert.equal(await db.findTokenByToken(DB, "tok-a"), null); // 旧 token 已随整表替换失效
   const c = await db.findTokenByToken(DB, "tok-c");
   assert.equal(c.id, "c");
+});
+
+test("账号迁移后 KV 导入只写摘要账号且不重建明文 tokens", async () => {
+  const env = { MAOYAN_KV: new MemoryKV(kvFixture()), DB: new MemoryD1() };
+  const activatedAt = Date.UTC(2026, 8, 16);
+  await migrateAccounts(env, { nowMs: activatedAt });
+
+  const summary = await migrateKvToD1(env);
+  const account = await getAccountByKey(env.DB, "tok-123");
+
+  assert.equal(summary.tokens, 1);
+  assert.equal(account.id, tokenId);
+  assert.equal(account.expiresAt, activatedAt + 15 * 86400000);
+  assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM tokens").first()).n, 0);
+});
+
+test("账号迁移后 KV 导入不会复活已撤销账号", async () => {
+  const env = { MAOYAN_KV: new MemoryKV(kvFixture()), DB: new MemoryD1() };
+  await migrateAccounts(env, { nowMs: Date.UTC(2026, 8, 16) });
+  await env.DB.prepare(
+    "INSERT INTO users(id,role,state,created_at,expires_at,revoked_at,source,version) VALUES (?,?,?,?,?,?,?,?)"
+  ).bind(tokenId, "user", "revoked", 1, 2, 2, "test", 1).run();
+
+  const summary = await migrateKvToD1(env);
+
+  assert.equal(summary.tokens, 0);
+  assert.equal(await getAccountByKey(env.DB, "tok-123"), null);
+  assert.equal((await env.DB.prepare("SELECT state FROM users WHERE id=?").bind(tokenId).first()).state, "revoked");
 });
