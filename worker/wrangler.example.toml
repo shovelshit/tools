@@ -20,6 +20,9 @@ routes = [
   { pattern = "www.your-domain.example/store/file*", zone_name = "your-domain.example" }
 ]
 
+[build]
+command = "npm run build:assets"
+
 [assets]
 directory = "./public"
 binding = "ASSETS"

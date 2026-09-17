@@ -22,6 +22,9 @@ routes = [
   { pattern = "www.ltools.asia/store/file*", zone_name = "ltools.asia" }
 ]
 
+[build]
+command = "npm run build:assets"
+
 [assets]
 directory = "./public"
 binding = "ASSETS"

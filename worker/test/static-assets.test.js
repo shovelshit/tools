@@ -82,3 +82,15 @@ test("parsed Worker configurations keep custom routes at the top level", async (
     assert.equal(config.assets.run_worker_first.includes("/maoyan/*"), false);
   }
 });
+
+test("Wrangler configurations build ignored static assets before deployment", async () => {
+  const [configText, exampleText] = await Promise.all([
+    readFile(new URL("../wrangler.toml", import.meta.url), "utf8"),
+    readFile(new URL("../wrangler.example.toml", import.meta.url), "utf8")
+  ]);
+
+  for (const text of [configText, exampleText]) {
+    const config = parseToml(text);
+    assert.equal(config.build?.command, "npm run build:assets");
+  }
+});
