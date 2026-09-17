@@ -1,5 +1,7 @@
 import { accountStatus, getAccount, hashAccessKey } from "./accounts.js";
 import { assertEnrollmentDeploymentReady } from "./enrollment-readiness.js";
+import { deleteUserDataStatements, getSessionVersion } from "./db.js";
+import { cleanupUserKvSessions } from "./user.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const RESERVATION_MS = 5 * 60 * 1000;
@@ -374,6 +376,8 @@ export async function updateManagedAccount(env, input) {
   const remark = patch.remark === undefined ? account.remark : String(patch.remark).trim();
   const expiresAt = patch.expiresAt === undefined ? account.expiresAt : Number(patch.expiresAt);
   const revokedAt = state === "revoked" ? (account.revokedAt || nowMs) : null;
+  const revoking = account.state !== "revoked" && state === "revoked";
+  const session = revoking ? await getSessionVersion(env.DB, userId) : null;
   const requestId = `manage:${userId}:${expectedVersion}`;
   const claim = account.role === "user" ? await env.DB.prepare(
     "SELECT fingerprint_digest,fingerprint_version FROM enrollment_claims WHERE user_id=? " +
@@ -407,6 +411,7 @@ export async function updateManagedAccount(env, input) {
       "UPDATE users SET remark=?,state=?,expires_at=?,revoked_at=?,version=version+1 WHERE id=? AND version=?"
     ).bind(remark, state, expiresAt, revokedAt, userId, expectedVersion)
   );
+  if (revoking) statements.push(...deleteUserDataStatements(env.DB, userId));
   if (needsBinding) {
     statements.push(env.DB.prepare(
       "INSERT INTO fingerprint_bindings(fingerprint_digest,fingerprint_version,user_id,bound_until,version) VALUES (?,?,?,?,1)"
@@ -429,5 +434,6 @@ export async function updateManagedAccount(env, input) {
     }
     throw translateDatabaseError(error);
   }
+  if (revoking) await cleanupUserKvSessions(env, userId, session);
   return await getAccount(env.DB, userId);
 }

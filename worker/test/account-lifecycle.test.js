@@ -6,6 +6,7 @@ import { createAccountEnv, seedAccount } from "./account-fixtures.js";
 import { saveLockSession } from "../src/maoyan/lock-session.js";
 import { validSession } from "./helpers.js";
 import * as db from "../src/maoyan/db.js";
+import { cleanupUserData, userKey } from "../src/maoyan/user.js";
 
 test("renewal never revives manually stopped or uncertain work", () => {
   const nowMs = Date.parse("2026-09-16T04:00:00.000Z");
@@ -126,4 +127,26 @@ test("Maoyan expiry cleanup does not mutate Store account state", async () => {
   }), { cleaned: false });
   assert.deepEqual(await db.getStatus(env.DB, account.id), { enabled: true });
   assert.equal((await env.DB.prepare("SELECT archived_at FROM users WHERE id=?").bind(account.id).first()).archived_at, null);
+});
+
+test("runtime cleanup removes Store sessions and session pointers but preserves lifecycle records", async () => {
+  const nowMs = Date.parse("2026-09-16T04:00:00.000Z");
+  const env = await createAccountEnv({ nowMs });
+  const { account } = await seedAccount(env, { expiresAt: nowMs + 60_000 });
+  await saveLockSession(env, account.id, validSession());
+  await env.DB.prepare(
+    "INSERT INTO store_sessions(token_hash,business_line,user_id,expires_at,created_at) VALUES (?,?,?,?,?)"
+  ).bind("b".repeat(64), "store", account.id, nowMs + 60_000, nowMs).run();
+  await env.DB.prepare(
+    "INSERT INTO audit_events(event_type,subject_user_id,data,created_at) VALUES ('test',?,?,?)"
+  ).bind(account.id, "{}", nowMs).run();
+
+  await cleanupUserData(env, account.id);
+
+  assert.equal(await env.DB.prepare("SELECT 1 AS ok FROM store_sessions WHERE user_id=?").bind(account.id).first(), null);
+  assert.equal(await db.getSessionVersion(env.DB, account.id), null);
+  assert.equal((await env.MAOYAN_KV.list({ prefix: userKey(account.id, "maoyan-session:v") })).keys.length, 0);
+  assert.notEqual(await env.DB.prepare("SELECT 1 AS ok FROM users WHERE id=?").bind(account.id).first(), null);
+  assert.notEqual(await env.DB.prepare("SELECT 1 AS ok FROM access_keys WHERE user_id=?").bind(account.id).first(), null);
+  assert.notEqual(await env.DB.prepare("SELECT 1 AS ok FROM audit_events WHERE subject_user_id=?").bind(account.id).first(), null);
 });

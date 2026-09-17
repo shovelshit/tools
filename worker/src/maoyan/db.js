@@ -290,16 +290,23 @@ export async function deleteLockRuleRow(db, tokenId) {
   await db.prepare("DELETE FROM lock_rule WHERE token_id = ?").bind(tokenId).run();
 }
 
-// ---------- 令牌注销: 清空该令牌全部 D1 行 ----------
-// KV 侧的 maoyan-session 清理由调用方(user.js cleanupUserData)负责
+// ---------- 令牌注销: 清空该令牌全部 D1 运行时行 ----------
+// users/access_keys/audit_events 是生命周期记录，明确保留。KV 会话由 user.js 负责。
+
+export function deleteUserDataStatements(db, tokenId) {
+  return [
+    db.prepare("DELETE FROM notification_outbox WHERE user_id = ?").bind(tokenId),
+    db.prepare("DELETE FROM monitor_subscriptions WHERE user_id = ?").bind(tokenId),
+    db.prepare("DELETE FROM user_config WHERE token_id = ?").bind(tokenId),
+    db.prepare("DELETE FROM monitor_status WHERE token_id = ?").bind(tokenId),
+    db.prepare("DELETE FROM monitor_snapshot WHERE token_id = ?").bind(tokenId),
+    db.prepare("DELETE FROM change_log WHERE token_id = ?").bind(tokenId),
+    db.prepare("DELETE FROM lock_rule WHERE token_id = ?").bind(tokenId),
+    db.prepare("DELETE FROM session_versions WHERE user_id = ?").bind(tokenId),
+    db.prepare("DELETE FROM store_sessions WHERE user_id = ?").bind(tokenId)
+  ];
+}
 
 export async function deleteUserData(db, tokenId) {
-  await db.prepare("DELETE FROM notification_outbox WHERE user_id = ?").bind(tokenId).run();
-  await db.prepare("DELETE FROM monitor_subscriptions WHERE user_id = ?").bind(tokenId).run();
-  await db.prepare("DELETE FROM user_config WHERE token_id = ?").bind(tokenId).run();
-  await db.prepare("DELETE FROM monitor_status WHERE token_id = ?").bind(tokenId).run();
-  await db.prepare("DELETE FROM monitor_snapshot WHERE token_id = ?").bind(tokenId).run();
-  await db.prepare("DELETE FROM change_log WHERE token_id = ?").bind(tokenId).run();
-  await db.prepare("DELETE FROM lock_rule WHERE token_id = ?").bind(tokenId).run();
-  await db.prepare("DELETE FROM session_versions WHERE user_id = ?").bind(tokenId).run();
+  await db.batch(deleteUserDataStatements(db, tokenId));
 }

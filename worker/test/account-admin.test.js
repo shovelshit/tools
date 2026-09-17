@@ -2,6 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import worker from "../src/index.js";
 import { createAccountEnv, seedAccount } from "./account-fixtures.js";
+import { saveLockSession } from "../src/maoyan/lock-session.js";
+import { userKey } from "../src/maoyan/user.js";
+import { validSession } from "./helpers.js";
+import * as db from "../src/maoyan/db.js";
 
 const NOW = Date.parse("2026-09-16T04:00:00.000Z");
 
@@ -14,6 +18,33 @@ function request(path, { method = "GET", body, adminToken = "test-admin-token" }
     },
     body: body === undefined ? undefined : JSON.stringify(body)
   });
+}
+
+async function seedRuntime(env, account, nowMs) {
+  await db.putStatus(env.DB, account.id, { enabled: true });
+  await db.saveSnapshot(env.DB, account.id, { movie: ["seat"] });
+  await db.appendChange(env.DB, account.id, { time: new Date(nowMs).toISOString(), type: "ok", text: "change" });
+  await db.putLockRuleRow(env.DB, account.id, { state: "waiting_schedule" });
+  await env.DB.prepare(
+    "INSERT INTO monitor_subscriptions(user_id,cinema_id,enabled,config_version,next_due_at,updated_at) VALUES (?,?,1,1,?,?)"
+  ).bind(account.id, "cinema", nowMs, nowMs).run();
+  await env.DB.prepare(
+    "INSERT INTO notification_outbox(event_key,user_id,kind,payload,credential_version,created_at,updated_at) VALUES (?,?,?,?,?,?,?)"
+  ).bind(`runtime:${account.id}`, account.id, "test", "{}", 1, nowMs, nowMs).run();
+  await saveLockSession(env, account.id, validSession());
+}
+
+async function assertRuntimeCleared(env, account) {
+  assert.equal(await db.getConfig(env.DB, account.id), null);
+  assert.equal(await db.getStatus(env.DB, account.id), null);
+  assert.deepEqual(await db.getSnapshot(env.DB, account.id), {});
+  assert.deepEqual(await db.listChanges(env.DB, account.id), []);
+  assert.equal(await db.getLockRuleRow(env.DB, account.id), null);
+  assert.equal(await db.getSessionVersion(env.DB, account.id), null);
+  assert.equal(await env.DB.prepare("SELECT 1 AS ok FROM monitor_subscriptions WHERE user_id=?").bind(account.id).first(), null);
+  assert.equal(await env.DB.prepare("SELECT 1 AS ok FROM notification_outbox WHERE user_id=?").bind(account.id).first(), null);
+  assert.equal(await env.MAOYAN_KV.get(userKey(account.id, "maoyan-session")), null);
+  assert.equal((await env.MAOYAN_KV.list({ prefix: userKey(account.id, "maoyan-session:v") })).keys.length, 0);
 }
 
 test("admin account list is paged, filterable and credential-safe", async () => {
@@ -69,6 +100,52 @@ test("admin updates use optimistic account versions and reject arbitrary fields"
     method: "POST", body: { id: account.id, expectedVersion: account.version, patch: { remark: "stale" } }
   }), env);
   assert.equal(stale.status, 409);
+});
+
+test("account revocation clears Maoyan runtime only after the state transition", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  env.NOW_MS = String(NOW);
+  const { account } = await seedAccount(env, { expiresAt: NOW + 60_000 });
+  await seedRuntime(env, account, NOW);
+
+  const staleRevoke = await worker.fetch(request("/api/admin/accounts/update", {
+    method: "POST", body: { id: account.id, expectedVersion: account.version + 1, patch: { state: "revoked" } }
+  }), env);
+  assert.equal(staleRevoke.status, 409);
+  assert.notEqual(await db.getConfig(env.DB, account.id), null);
+
+  const suspended = await worker.fetch(request("/api/admin/accounts/update", {
+    method: "POST", body: { id: account.id, expectedVersion: account.version, patch: { state: "suspended" } }
+  }), env);
+  assert.equal(suspended.status, 200);
+  assert.notEqual(await db.getConfig(env.DB, account.id), null);
+
+  const revoke = await worker.fetch(request("/api/admin/accounts/update", {
+    method: "POST", body: { id: account.id, expectedVersion: account.version + 1, patch: { state: "revoked" } }
+  }), env);
+  assert.equal(revoke.status, 200);
+  await assertRuntimeCleared(env, account);
+  assert.equal((await env.DB.prepare("SELECT state FROM users WHERE id=?").bind(account.id).first()).state, "revoked");
+  assert.notEqual(await env.DB.prepare("SELECT 1 AS ok FROM access_keys WHERE user_id=?").bind(account.id).first(), null);
+  assert.notEqual(await env.DB.prepare("SELECT 1 AS ok FROM audit_events WHERE subject_user_id=? AND event_type='account_updated'").bind(account.id).first(), null);
+});
+
+test("legacy token revocation clears Store browser sessions while preserving the Store account", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  env.NOW_MS = String(NOW);
+  const { account } = await seedAccount(env, { businessLine: "store", expiresAt: NOW + 60_000 });
+  await env.DB.prepare(
+    "INSERT INTO store_sessions(token_hash,business_line,user_id,expires_at,created_at) VALUES (?,?,?,?,?)"
+  ).bind("a".repeat(64), "store", account.id, NOW + 60_000, NOW).run();
+
+  const response = await worker.fetch(request("/api/admin/tokens/revoke", {
+    method: "POST", body: { id: account.id, expectedVersion: account.version }
+  }), env);
+  assert.equal(response.status, 200);
+  assert.equal(await env.DB.prepare("SELECT 1 AS ok FROM store_sessions WHERE user_id=?").bind(account.id).first(), null);
+  assert.equal((await env.DB.prepare("SELECT state FROM users WHERE id=?").bind(account.id).first()).state, "revoked");
+  assert.notEqual(await env.DB.prepare("SELECT 1 AS ok FROM access_keys WHERE user_id=?").bind(account.id).first(), null);
+  assert.notEqual(await env.DB.prepare("SELECT 1 AS ok FROM audit_events WHERE subject_user_id=? AND event_type='account_updated'").bind(account.id).first(), null);
 });
 
 test("capacity settings use CAS and cannot drop below current occupancy", async () => {

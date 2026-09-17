@@ -90,13 +90,38 @@ export async function saveUserConfig(env, tokenId, config, expectedVersion = con
   return config;
 }
 
-// 令牌注销: 清 D1 全部用户状态行 + KV 加密会话
+async function deleteKvSession(env, key) {
+  try {
+    await env.MAOYAN_KV.delete(key);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// 撤销后的 KV 残留不再可被使用：账号状态和 D1 会话指针已先持久化失效。
+// 这里保留尽力删除语义，避免 KV 瞬时故障回滚已经成功的账号撤销。
+export async function cleanupUserKvSessions(env, tokenId, session = null) {
+  const keys = new Set([userKey(tokenId, "maoyan-session")]);
+  if (session) keys.add(userKey(tokenId, `maoyan-session:v${session.activeVersion}`));
+  try {
+    let cursor;
+    do {
+      const page = await env.MAOYAN_KV.list({ prefix: userKey(tokenId, "maoyan-session:v"), cursor });
+      for (const entry of page.keys || []) keys.add(entry.name);
+      cursor = page.cursor;
+      if (page.list_complete) break;
+    } while (cursor);
+  } catch {
+    // The known active and legacy keys below are still deleted individually.
+  }
+  const results = await Promise.all([...keys].map((key) => deleteKvSession(env, key)));
+  if (results.some((deleted) => !deleted)) console.error("[maoyan] revoked session cleanup incomplete");
+}
+
+// 令牌注销: 清 D1 全部运行时状态行 + KV 加密会话
 export async function cleanupUserData(env, tokenId) {
   const session = await getSessionVersion(env.DB, tokenId);
   await deleteUserData(env.DB, tokenId);
-  try {
-    if (session) await env.MAOYAN_KV.delete(userKey(tokenId, `maoyan-session:v${session.activeVersion}`));
-    await env.MAOYAN_KV.delete(userKey(tokenId, "maoyan-session"));
-  } catch (e) {
-  }
+  await cleanupUserKvSessions(env, tokenId, session);
 }
