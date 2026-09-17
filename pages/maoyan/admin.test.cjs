@@ -89,9 +89,14 @@ test("account operation cells preserve table layout and render an empty-state pl
 });
 
 test("mobile action cells provide enough room and wrap buttons without clipping", () => {
-  assert.match(style, /@media \(max-width: 640px\)[\s\S]*?\.admin-page \.token-table th:nth-child\(6\),[\s\S]*?\.admin-page \.token-table td:nth-child\(6\) \{ width: 30%; \}/);
-  assert.match(style, /@media \(max-width: 640px\)[\s\S]*?\.admin-page \.token-table td:last-child \{ overflow: visible;/);
-  assert.match(style, /@media \(max-width: 640px\)[\s\S]*?\.admin-page \.account-actions-inner \{[\s\S]*?flex-wrap: wrap;/);
+  assert.match(style, /@media \(max-width: 760px\)[\s\S]*?\.admin-page \.token-table th:nth-child\(1\),[\s\S]*?\.admin-page \.token-table td:nth-child\(1\) \{ width: 34%; \}/);
+  assert.match(style, /@media \(max-width: 760px\)[\s\S]*?\.admin-page \.token-table th:nth-child\(2\),[\s\S]*?\.admin-page \.token-table td:nth-child\(2\) \{ width: 19%; \}/);
+  assert.match(style, /@media \(max-width: 760px\)[\s\S]*?\.admin-page \.token-table th:nth-child\(4\),[\s\S]*?\.admin-page \.token-table td:nth-child\(4\) \{ width: 25%; \}/);
+  assert.match(style, /@media \(max-width: 760px\)[\s\S]*?\.admin-page \.token-table th:nth-child\(6\),[\s\S]*?\.admin-page \.token-table td:nth-child\(6\) \{ width: 22%; \}/);
+  const narrowRules = style.slice(style.indexOf("@media (max-width: 640px)"), style.indexOf("@media (max-width: 430px)"));
+  assert.doesNotMatch(narrowRules, /\.admin-page \.token-table (?:th|td):nth-child\((?:1|2|4)\)/);
+  assert.match(narrowRules, /\.admin-page \.account-actions-inner \{[\s\S]*?display: grid;[\s\S]*?grid-template-columns: minmax\(0, 1fr\);/);
+  assert.match(narrowRules, /\.admin-page \.account-actions-inner \.link-btn \{[\s\S]*?min-width: 0;[\s\S]*?width: 100%;/);
 });
 
 function deferred() {
