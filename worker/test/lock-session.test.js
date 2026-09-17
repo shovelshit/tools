@@ -172,10 +172,10 @@ test("a failed revoke-race KV compensation retains a durable cleanup retry", asy
   env.MAOYAN_KV.put = async (key, value) => {
     await put(key, value);
     versionedKey = key;
+    failCompensation = true;
     await updateManagedAccount(env, {
       userId: account.id, expectedVersion: account.version, patch: { state: "revoked" }, nowMs
     });
-    failCompensation = true;
   };
 
   await assert.rejects(() => saveLockSession(env, account.id, validSession()), { code: "ACCOUNT_REVOKED" });
@@ -193,6 +193,176 @@ test("a failed revoke-race KV compensation retains a durable cleanup retry", asy
   assert.equal(await env.DB.prepare(
     "SELECT 1 AS ok FROM revocation_cleanup_keys WHERE user_id=? AND session_key=?"
   ).bind(account.id, versionedKey).first(), null);
+  assert.equal(await env.DB.prepare("SELECT 1 AS ok FROM revocation_cleanup WHERE user_id=?").bind(account.id).first(), null);
+});
+
+test("a zero-change session update crossed by revocation retains its invisible KV key for retry", async () => {
+  const nowMs = Date.parse("2026-09-16T04:00:00.000Z");
+  const env = await createAccountEnv({ nowMs });
+  const { account } = await seedAccount(env, { expiresAt: nowMs + 60_000 });
+  await saveLockSession(env, account.id, validSession());
+  const list = env.MAOYAN_KV.list.bind(env.MAOYAN_KV);
+  const put = env.MAOYAN_KV.put.bind(env.MAOYAN_KV);
+  const remove = env.MAOYAN_KV.delete.bind(env.MAOYAN_KV);
+  let newKey = "";
+  let revoked = false;
+  let failCompensation = false;
+
+  env.MAOYAN_KV.list = async (options) => newKey
+    ? { keys: [], list_complete: true }
+    : await list(options);
+  env.MAOYAN_KV.put = async (key, value) => {
+    await put(key, value);
+    if (!revoked) {
+      revoked = true;
+      newKey = key;
+      failCompensation = true;
+      await updateManagedAccount(env, {
+        userId: account.id, expectedVersion: account.version, patch: { state: "revoked" }, nowMs
+      });
+    }
+  };
+  env.MAOYAN_KV.delete = async (key) => {
+    if (key === newKey && failCompensation) throw new Error("delete unavailable");
+    return await remove(key);
+  };
+
+  await assert.rejects(() => saveLockSession(env, account.id, validSession()), { code: "ACCOUNT_REVOKED" });
+
+  assert.notEqual(await env.MAOYAN_KV.get(newKey), null);
+  assert.notEqual(await env.DB.prepare(
+    "SELECT 1 AS ok FROM revocation_cleanup WHERE user_id=?"
+  ).bind(account.id).first(), null);
+  assert.notEqual(await env.DB.prepare(
+    "SELECT 1 AS ok FROM revocation_cleanup_keys WHERE user_id=? AND session_key=?"
+  ).bind(account.id, newKey).first(), null);
+
+  failCompensation = false;
+  await retryPendingRevocationCleanups(env, { nowMs: nowMs + 1 });
+  assert.equal(await env.MAOYAN_KV.get(newKey), null);
+  assert.equal(await env.DB.prepare(
+    "SELECT 1 AS ok FROM revocation_cleanup_keys WHERE user_id=? AND session_key=?"
+  ).bind(account.id, newKey).first(), null);
+  assert.equal(await env.DB.prepare("SELECT 1 AS ok FROM revocation_cleanup WHERE user_id=?").bind(account.id).first(), null);
+});
+
+test("a zero-change session update from a normal CAS conflict is retried without a revoke cleanup", async () => {
+  const env = await createAccountEnv();
+  const { account } = await seedAccount(env);
+  await saveLockSession(env, account.id, validSession());
+  const put = env.MAOYAN_KV.put.bind(env.MAOYAN_KV);
+  let puts = 0;
+  env.MAOYAN_KV.put = async (key, value) => {
+    await put(key, value);
+    puts += 1;
+    if (puts === 1) {
+      await env.DB.prepare(
+        "UPDATE session_versions SET active_version=active_version+1 WHERE user_id=?"
+      ).bind(account.id).run();
+    }
+  };
+
+  assert.equal((await saveLockSession(env, account.id, validSession())).uploaded, true);
+  assert.equal((await env.DB.prepare("SELECT state FROM users WHERE id=?").bind(account.id).first()).state, "active");
+  assert.equal(await env.DB.prepare("SELECT 1 AS ok FROM revocation_cleanup WHERE user_id=?").bind(account.id).first(), null);
+  assert.equal(await env.DB.prepare("SELECT 1 AS ok FROM pending_session_saves WHERE user_id=?").bind(account.id).first(), null);
+});
+
+test("a failed normal conflict compensation is captured when revocation follows the last state check", async () => {
+  const nowMs = Date.parse("2026-09-16T04:00:00.000Z");
+  const env = await createAccountEnv({ nowMs });
+  const { account } = await seedAccount(env, { expiresAt: nowMs + 60_000 });
+  await saveLockSession(env, account.id, validSession());
+  const list = env.MAOYAN_KV.list.bind(env.MAOYAN_KV);
+  const put = env.MAOYAN_KV.put.bind(env.MAOYAN_KV);
+  const remove = env.MAOYAN_KV.delete.bind(env.MAOYAN_KV);
+  let newKey = "";
+  let conflictInjected = false;
+  let failDelete = true;
+
+  env.MAOYAN_KV.list = async (options) => newKey
+    ? { keys: [], list_complete: true }
+    : await list(options);
+  env.MAOYAN_KV.put = async (key, value) => {
+    await put(key, value);
+    if (!conflictInjected) {
+      conflictInjected = true;
+      newKey = key;
+      await env.DB.prepare(
+        "UPDATE session_versions SET active_version=active_version+1 WHERE user_id=?"
+      ).bind(account.id).run();
+    }
+  };
+  env.MAOYAN_KV.delete = async (key) => {
+    if (key === newKey && failDelete) throw new Error("delete unavailable");
+    return await remove(key);
+  };
+
+  await assert.rejects(() => saveLockSession(env, account.id, validSession()), /delete unavailable/);
+  await updateManagedAccount(env, {
+    userId: account.id, expectedVersion: account.version, patch: { state: "revoked" }, nowMs
+  });
+
+  assert.notEqual(await env.DB.prepare(
+    "SELECT 1 AS ok FROM revocation_cleanup_keys WHERE user_id=? AND session_key=?"
+  ).bind(account.id, newKey).first(), null);
+
+  failDelete = false;
+  await retryPendingRevocationCleanups(env, { nowMs: nowMs + 1 });
+  assert.equal(await env.MAOYAN_KV.get(newKey), null);
+  assert.equal(await env.DB.prepare("SELECT 1 AS ok FROM revocation_cleanup WHERE user_id=?").bind(account.id).first(), null);
+});
+
+test("revocation captures a successfully activated session that replaced its stale pointer", async () => {
+  const nowMs = Date.parse("2026-09-16T04:00:00.000Z");
+  const env = await createAccountEnv({ nowMs });
+  const { account } = await seedAccount(env, { expiresAt: nowMs + 60_000 });
+  await saveLockSession(env, account.id, validSession());
+  const batch = env.DB.batch.bind(env.DB);
+  const list = env.MAOYAN_KV.list.bind(env.MAOYAN_KV);
+  const put = env.MAOYAN_KV.put.bind(env.MAOYAN_KV);
+  const remove = env.MAOYAN_KV.delete.bind(env.MAOYAN_KV);
+  let releaseRevocation;
+  let startedRevocation;
+  let newKey = "";
+  let failDelete = false;
+
+  env.DB.batch = async (statements) => {
+    if (!startedRevocation) {
+      startedRevocation = true;
+      await new Promise((resolve) => { releaseRevocation = resolve; });
+    }
+    return await batch(statements);
+  };
+  env.MAOYAN_KV.list = async (options) => newKey
+    ? { keys: [], list_complete: true }
+    : await list(options);
+  env.MAOYAN_KV.put = async (key, value) => {
+    newKey = key;
+    return await put(key, value);
+  };
+  env.MAOYAN_KV.delete = async (key) => {
+    if (key === newKey && failDelete) throw new Error("delete unavailable");
+    return await remove(key);
+  };
+
+  const revoking = updateManagedAccount(env, {
+    userId: account.id, expectedVersion: account.version, patch: { state: "revoked" }, nowMs
+  });
+  while (!startedRevocation) await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal((await saveLockSession(env, account.id, validSession())).uploaded, true);
+  failDelete = true;
+  releaseRevocation();
+  await revoking;
+
+  assert.notEqual(await env.MAOYAN_KV.get(newKey), null);
+  assert.notEqual(await env.DB.prepare(
+    "SELECT 1 AS ok FROM revocation_cleanup_keys WHERE user_id=? AND session_key=?"
+  ).bind(account.id, newKey).first(), null);
+
+  failDelete = false;
+  await retryPendingRevocationCleanups(env, { nowMs: nowMs + 1 });
+  assert.equal(await env.MAOYAN_KV.get(newKey), null);
   assert.equal(await env.DB.prepare("SELECT 1 AS ok FROM revocation_cleanup WHERE user_id=?").bind(account.id).first(), null);
 });
 

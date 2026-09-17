@@ -139,6 +139,12 @@ CREATE TABLE IF NOT EXISTS revocation_cleanup_keys (
   PRIMARY KEY (user_id, session_key)
 );
 
+CREATE TABLE IF NOT EXISTS pending_session_saves (
+  user_id TEXT NOT NULL REFERENCES users(id),
+  session_key TEXT NOT NULL,
+  PRIMARY KEY (user_id, session_key)
+);
+
 CREATE TABLE IF NOT EXISTS mutation_guards (
   request_id TEXT PRIMARY KEY,
   ok INTEGER NOT NULL CHECK (ok = 1)

@@ -104,6 +104,48 @@ export async function enqueueRevocationCleanupKey(db, userId, sessionKey, nowMs)
   ]);
 }
 
+// Revocation is terminal, so a pointer CAS miss can safely classify it here.
+export async function isAccountRevoked(db, userId) {
+  const account = await db.prepare("SELECT state FROM users WHERE id=?").bind(userId).first();
+  return account?.state === "revoked";
+}
+
+// Reserve the exact KV key before it is written. A revocation transaction
+// promotes reservations to durable cleanup children before clearing pointers.
+export async function reservePendingSessionSave(db, userId, sessionKey) {
+  return await db.prepare(
+    "INSERT INTO pending_session_saves(user_id,session_key) SELECT ?,? " +
+    "WHERE NOT EXISTS (SELECT 1 FROM users WHERE id=? AND state='revoked') " +
+    "ON CONFLICT(user_id,session_key) DO NOTHING"
+  ).bind(userId, sessionKey, userId).run();
+}
+
+export async function completePendingSessionSave(db, userId, sessionKey) {
+  await db.prepare(
+    "DELETE FROM pending_session_saves WHERE user_id=? AND session_key=?"
+  ).bind(userId, sessionKey).run();
+}
+
+export function promotePendingSessionSavesStatements(db, userId) {
+  return [
+    db.prepare(
+      "INSERT INTO revocation_cleanup_keys(user_id,session_key) " +
+      "SELECT user_id,session_key FROM pending_session_saves WHERE user_id=? " +
+      "ON CONFLICT(user_id,session_key) DO NOTHING"
+    ).bind(userId),
+    db.prepare("DELETE FROM pending_session_saves WHERE user_id=?").bind(userId)
+  ];
+}
+
+export function captureActiveSessionForRevocationStatement(db, userId) {
+  return db.prepare(
+    "INSERT INTO revocation_cleanup_keys(user_id,session_key) " +
+    "SELECT user_id,'u:' || user_id || ':maoyan-session:v' || active_version " +
+    "FROM session_versions WHERE user_id=? AND active=1 " +
+    "ON CONFLICT(user_id,session_key) DO NOTHING"
+  ).bind(userId);
+}
+
 export async function listRevocationCleanups(db, limit = 100) {
   const { results } = await db.prepare(
     "SELECT user_id FROM revocation_cleanup ORDER BY created_at ASC LIMIT ?"

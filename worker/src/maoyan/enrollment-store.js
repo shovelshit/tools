@@ -1,6 +1,10 @@
 import { accountStatus, getAccount, hashAccessKey } from "./accounts.js";
 import { assertEnrollmentDeploymentReady } from "./enrollment-readiness.js";
-import { deleteUserDataStatements, enqueueRevocationCleanupStatement, getSessionVersion } from "./db.js";
+import {
+  captureActiveSessionForRevocationStatement, deleteUserDataStatements,
+  enqueueRevocationCleanupStatement, getSessionVersion,
+  promotePendingSessionSavesStatements
+} from "./db.js";
 import { retryRevocationCleanup } from "./user.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -412,8 +416,10 @@ export async function updateManagedAccount(env, input) {
     ).bind(remark, state, expiresAt, revokedAt, userId, expectedVersion)
   );
   if (revoking) {
-    statements.push(...deleteUserDataStatements(env.DB, userId));
     statements.push(enqueueRevocationCleanupStatement(env.DB, userId, nowMs));
+    statements.push(...promotePendingSessionSavesStatements(env.DB, userId));
+    statements.push(captureActiveSessionForRevocationStatement(env.DB, userId));
+    statements.push(...deleteUserDataStatements(env.DB, userId));
   }
   if (needsBinding) {
     statements.push(env.DB.prepare(

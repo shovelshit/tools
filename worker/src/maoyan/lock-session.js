@@ -1,6 +1,7 @@
 import { userKey } from "./user.js";
 import {
-  activateSessionVersion, deleteSessionVersion, enqueueRevocationCleanupKey, getSessionVersion
+  activateSessionVersion, completePendingSessionSave, deleteSessionVersion,
+  enqueueRevocationCleanupKey, getSessionVersion, isAccountRevoked, reservePendingSessionSave
 } from "./db.js";
 
 const QUERY_KEYS = ["yodaReady", "csecplatform", "csecversion"];
@@ -115,6 +116,11 @@ export async function saveLockSession(env, tokenId, raw) {
     } while (version === current?.activeVersion);
     const envelope = await encryptSessionEnvelope(env, tokenId, session, version);
     const key = versionedSessionKey(tokenId, version);
+    const reservation = await reservePendingSessionSave(env.DB, tokenId, key);
+    if (Number(reservation?.meta?.changes || 0) !== 1) {
+      if (await isAccountRevoked(env.DB, tokenId)) throw revokedSessionError();
+      throw new Error("猫眼会话保存冲突，请重试");
+    }
     await env.MAOYAN_KV.put(key, JSON.stringify(envelope));
     let result;
     try {
@@ -122,12 +128,8 @@ export async function saveLockSession(env, tokenId, raw) {
     } catch (error) {
       const isRevoked = String(error?.message || "").includes("ACCOUNT_REVOKED");
       if (isRevoked) {
-        try {
-          // Persist before compensation: a delete failure must leave a retryable key.
-          await enqueueRevocationCleanupKey(env.DB, tokenId, key, Date.now());
-        } catch {
-          console.error("[maoyan] revoked session cleanup marker unavailable");
-        }
+        await compensateRevokedSessionKey(env, tokenId, key);
+        throw revokedSessionError();
       }
       let deleted = false;
       try {
@@ -138,21 +140,52 @@ export async function saveLockSession(env, tokenId, raw) {
         console.error(isRevoked
           ? "[maoyan] revoked session cleanup incomplete"
           : "[maoyan] lock session compensation incomplete");
-      }
-      if (isRevoked) {
-        const revokedError = new Error("账号已撤销");
-        revokedError.code = "ACCOUNT_REVOKED";
-        throw revokedError;
+      } else {
+        await completePendingSessionSave(env.DB, tokenId, key);
       }
       throw error;
     }
     if (Number(result?.meta?.changes ?? 1) > 0) {
       if (current) await env.MAOYAN_KV.delete(versionedSessionKey(tokenId, current.activeVersion));
+      await completePendingSessionSave(env.DB, tokenId, key);
       return publicStatus(envelope);
     }
-    await env.MAOYAN_KV.delete(key);
+    if (await isAccountRevoked(env.DB, tokenId)) {
+      await compensateRevokedSessionKey(env, tokenId, key);
+      throw revokedSessionError();
+    }
+    try {
+      await env.MAOYAN_KV.delete(key);
+      await completePendingSessionSave(env.DB, tokenId, key);
+    } catch (error) {
+      if (await isAccountRevoked(env.DB, tokenId)) {
+        await compensateRevokedSessionKey(env, tokenId, key);
+        throw revokedSessionError();
+      }
+      throw error;
+    }
   }
   throw new Error("猫眼会话保存冲突，请重试");
+}
+
+function revokedSessionError() {
+  const error = new Error("账号已撤销");
+  error.code = "ACCOUNT_REVOKED";
+  return error;
+}
+
+async function compensateRevokedSessionKey(env, tokenId, key) {
+  try {
+    // Persist before compensation: a delete failure must leave a retryable key.
+    await enqueueRevocationCleanupKey(env.DB, tokenId, key, Date.now());
+  } catch {
+    console.error("[maoyan] revoked session cleanup marker unavailable");
+  }
+  try {
+    await env.MAOYAN_KV.delete(key);
+  } catch {
+    console.error("[maoyan] revoked session cleanup incomplete");
+  }
 }
 
 async function encryptSessionEnvelope(env, tokenId, session, version = null) {
