@@ -122,6 +122,21 @@ async function assertStatusVisibleAndUnclipped(page) {
 }
 
 async function assertSeatViewportFit(page, name) {
+  try {
+    await page.waitForFunction(() => {
+      const stage = document.querySelector(".lock-seat-scroll");
+      const seats = [...document.querySelectorAll("#lock-seat-grid [data-availability]")];
+      const box = stage?.getBoundingClientRect();
+      if (!box || seats.length === 0) return false;
+      return seats.every((seat) => {
+        const rect = seat.getBoundingClientRect();
+        return rect.left >= box.left - 1 && rect.top >= box.top - 1
+          && rect.right <= box.right + 1 && rect.bottom <= box.bottom + 1;
+      });
+    }, null, { timeout: 1_000 });
+  } catch {
+    // Preserve the detailed assertion below when fitting never settles.
+  }
   const layout = await page.evaluate(() => {
     const stage = document.querySelector(".lock-seat-scroll");
     const grid = document.querySelector("#lock-seat-grid");
