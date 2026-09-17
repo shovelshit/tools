@@ -5,16 +5,9 @@
 -- 说明: config/status/lock-rule 按令牌一行(JSON blob), snapshot 按 (token_id, movie_id) 一行,
 --       change_log 追加式全量历史(读取时 LIMIT 100 与旧 KV 上限语义一致), seatfb 用原 KV key 作主键。
 
-CREATE TABLE IF NOT EXISTS tokens (
-  id TEXT PRIMARY KEY,
-  token TEXT NOT NULL UNIQUE,
-  remark TEXT NOT NULL DEFAULT '',
-  created_at TEXT
-);
-
 -- ============ account lifecycle v1 ============
--- tokens is retained only as a migration source. Runtime authentication uses
--- access_keys and never needs the original credential after migration.
+-- Runtime authentication uses hashed access_keys; the retired plaintext
+-- tokens migration source is intentionally absent from fresh databases.
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   role TEXT NOT NULL CHECK (role IN ('user', 'admin')),

@@ -49,7 +49,19 @@ export class MemoryKV {
 // 用真实 SQLite 执行 schema.sql + db.js 的全部语句, 保证测试对 SQL 本身有覆盖。
 // 记录写语句供断言「哪些表被写过/写过几次」(对应 KV 版 MemoryKV.ops)。
 
-const SCHEMA_SQL = readFileSync(new URL("../schema.sql", import.meta.url), "utf8");
+const PRODUCTION_SCHEMA_SQL = readFileSync(new URL("../schema.sql", import.meta.url), "utf8");
+const LEGACY_TOKENS_SCHEMA_SQL = `
+CREATE TABLE tokens (
+  id TEXT PRIMARY KEY,
+  token TEXT NOT NULL UNIQUE,
+  remark TEXT NOT NULL DEFAULT '',
+  created_at TEXT
+);
+`;
+// Most historical migration tests still need the retired plaintext source
+// table. Production schema coverage reads schema.sql directly and verifies
+// that fresh databases no longer create it.
+const SCHEMA_SQL = `${LEGACY_TOKENS_SCHEMA_SQL}\n${PRODUCTION_SCHEMA_SQL}`;
 const PRE_ACCOUNT_SCHEMA_SQL = `
 CREATE TABLE user_config (
   token_id TEXT PRIMARY KEY,

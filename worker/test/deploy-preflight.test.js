@@ -37,3 +37,8 @@ test("Turnstile is optional for private deployments and required when enrollment
   assert.equal(publicResult.errors.some((error) => /ENROLLMENT_ORIGIN/.test(error)), true);
   assert.equal(publicResult.errors.some((error) => /ENROLLMENT_HOSTNAME/.test(error)), true);
 });
+
+test("fresh production schema does not recreate the retired plaintext token table", async () => {
+  const schema = await readFile(new URL("../schema.sql", import.meta.url), "utf8");
+  assert.doesNotMatch(schema, /CREATE TABLE IF NOT EXISTS tokens\s*\(/);
+});
