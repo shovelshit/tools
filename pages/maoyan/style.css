@@ -827,6 +827,8 @@ summary:focus-visible {
 
 .channel-opts {
   display: flex;
+  width: fit-content;
+  max-width: 100%;
   padding: 2px;
   border: 1px solid var(--border-subtle);
   border-radius: 4px;
@@ -873,6 +875,7 @@ summary:focus-visible {
 }
 
 .row-span-all .push-hint { grid-column: 2; }
+.row-span-all > input { width: min(100%, 560px); }
 .push-hint { margin-top: 1px; font-size: 10px; }
 .push-hint a { color: var(--success-dark); text-decoration: none; }
 .push-hint a:hover { text-decoration: underline; }
@@ -1213,7 +1216,7 @@ summary:focus-visible {
 .lock-seat[data-availability="unknown"] { border-color: #a8afb7; background: repeating-linear-gradient(135deg, #e9ecef 0 4px, #c2c8ce 4px 6px); color: #59636c; cursor: not-allowed; }
 .lock-seat.is-selected { border-color: #578c00; background: #73b800; color: #fff; }
 .lock-seat.lover-left { z-index: 1; width: 32px; margin-right: -4px; border-right: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; }
-.lock-seat.lover-right { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.lock-seat.lover-right { border-left: 0; border-top-left-radius: 0; border-bottom-left-radius: 0; }
 .lock-seat.lover-left.is-selected,
 .lock-seat.lover-right.is-selected { border-color: #578c00; background: #73b800; color: #fff; }
 .lock-col-label { width: 28px; color: var(--muted); font-size: 9px; text-align: center; }

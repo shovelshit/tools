@@ -78,6 +78,8 @@ test("a successful test verifies only the current channel and credential", async
   const getResponse = await worker.fetch(request("/api/config"), env);
   const getBody = await getResponse.json();
   assert.equal(getBody.config.notifyVerified, true);
+  assert.equal(getBody.config.barkKeyHint, "t••••••y");
+  assert.equal(Object.values(getBody.config).includes("test-key"), false);
   assert.equal(Object.hasOwn(getBody.config, "notifyVerification"), false);
 
   const startResponse = await worker.fetch(request("/api/config", { enabled: true }), env);
@@ -103,6 +105,25 @@ test("a successful test verifies only the current channel and credential", async
   const restartResponse = await worker.fetch(request("/api/config", { enabled: true }), env);
   assert.equal(restartResponse.status, 400);
   assert.match((await restartResponse.json()).error, /测试推送/);
+});
+
+test("test-push returns the updated public config version so the next write does not conflict", async () => {
+  const env = await runtime({ notifyChannel: "bark", barkKey: "1234567890abcdef", enabled: false });
+  let response;
+  await withMockFetch(async () => Response.json({ code: 200 }), async () => {
+    response = await worker.fetch(request("/api/test-push", {}), env);
+  });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.config.notifyVerified, true);
+  assert.equal(body.config.barkKeyHint, "1234••••••cdef");
+  assert.ok(Number.isInteger(body.config.version));
+
+  const start = await worker.fetch(request("/api/config", {
+    enabled: true,
+    expectedVersion: body.config.version
+  }), env);
+  assert.equal(start.status, 200);
 });
 
 test("the removed Bark-specific test route is unsupported", async () => {

@@ -134,20 +134,19 @@
     return position ? `${position.rowNumber}排${position.seatNumber}座` : String(source || "");
   }
 
-  // 情侣座配对以 data-st 的 L/R 属性为准: L 是双座左半、R 是右半, 同排内 L 的另一半
-  // 在 columnId+1、R 的另一半在 columnId-1(方向配对)。不能用「相邻就配」: 该影厅
-  // L/R 严格交替, L 座两侧都是 R 座, 取第一个相邻会把 (21,22)、(23,24) 两对拆散
-  // (真实缺陷: 点 24 连 23 正确, 再点 23 会误连 22, 选出 22+23+24 的非法组合)。
-  // 真实数据锚定: 万达影城天和广场 2号杜比巨幕厅 19:35 场 11排 (1,2),(3,4)...(23,24)...
+  // 情侣座按排内物理位置配对。columnId/票面座号在不同影院既可能递增也可能递减，
+  // orderIndex 才是猫眼 DOM 中包含过道后的真实左右顺序。
   function couplePartnerOf(seats, seat) {
-    if (!seat || (seat.type !== "L" && seat.type !== "R")) return null;
-    const expected = seat.type === "L"
-      ? Number(seat.columnId) + 1
-      : Number(seat.columnId) - 1;
+    if (!seat || (seat.type !== "L" && seat.type !== "R") || !Array.isArray(seats)) return null;
+    const orderIndex = Number(seat.orderIndex);
+    if (!Number.isInteger(orderIndex) || orderIndex <= 0) return null;
+    const expected = seat.type === "L" ? orderIndex + 1 : orderIndex - 1;
     const opposite = seat.type === "L" ? "R" : "L";
-    return (seats || []).find((candidate) =>
-      candidate.type === opposite && String(candidate.rowId) === String(seat.rowId) &&
-      Number(candidate.columnId) === expected) || null;
+    const atPosition = (position) => seats.filter((candidate) =>
+      String(candidate.rowId) === String(seat.rowId) && Number(candidate.orderIndex) === position);
+    const partners = atPosition(expected);
+    return atPosition(orderIndex).length === 1 && partners.length === 1 && partners[0].type === opposite
+      ? partners[0] : null;
   }
 
   function seatVisualState(seat, { selected = false, isTemplate = false } = {}) {
@@ -211,12 +210,7 @@
 
   function detailOpenState(session, rule) {
     const uploaded = session?.uploaded === true;
-    const ruleState = String(rule?.state || "");
-    const ruleNeedsAttention = Boolean(rule) && (
-      ["failed", "unknown", "expired"].includes(ruleState)
-      || !Object.prototype.hasOwnProperty.call(RULE_LABELS, ruleState)
-    );
-    return { session: !uploaded, rule: ruleNeedsAttention };
+    return { session: !uploaded, rule: Boolean(rule) };
   }
 
   function createMaoyanLockController({
@@ -679,7 +673,7 @@
           button.type = "button";
           const partner = couplePartner(seat);
           const isLover = seat.type === "L" || seat.type === "R";
-          const loverClass = seat.type === "L" ? " lover-left" : seat.type === "R" ? " lover-right" : "";
+          const loverClass = partner ? (seat.type === "L" ? " lover-left" : " lover-right") : "";
           // 情侣座另一半不可用(或缺失)时整格置灰: 半对无法单独下单
           const seatState = seatVisualState(seat, { isTemplate: state.seatMapIsTemplate });
           const partnerState = partner ? seatVisualState(partner, { isTemplate: state.seatMapIsTemplate }) : "unknown";

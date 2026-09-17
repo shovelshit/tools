@@ -3,10 +3,12 @@ const http = require("node:http");
 async function startMockWorker({ rejectUpload = false } = {}) {
   const requests = [];
   const uploads = [];
+  const rules = new Map();
   const sessions = new Map(["one", "two"].map((key) => [key, { uploaded: true, uidMasked: "UID 987***321", sourceSavedAt: "2026-01-01T00:00:00.000Z" }]));
   const cron = { cronMinutes: 5, cronExprs: ["*/5 * * * *"], cronText: "Every 5 minutes", cronMinuteStep: true };
   const configs = new Map(["one", "two"].map((key) => [key, {
     enabled: false,
+    version: 1,
     cinemaId: "",
     selectedMovieIds: [],
     monitorDdl: null,
@@ -142,13 +144,16 @@ async function startMockWorker({ rejectUpload = false } = {}) {
       sourceUrl: "https://github.com/shovelshit/tools",
       turnstileSiteKey: "mock-site-key",
     });
-    if (request.headers["x-token"] !== `${profile}-token`) return reply({ error: "Invalid token" }, 401);
+    const admin = request.headers["x-token"] === `${profile}-admin`;
+    const adminSession = request.headers["x-token"] === `${profile}-monitor-session`;
+    if (request.headers["x-token"] !== `${profile}-token` && !admin && !adminSession) return reply({ error: "Invalid token" }, 401);
     if (route === "/api/capabilities") return reply({ ok: true, accountLifecycle: true, adminMonitorSession: true });
     if (route === "/api/auth/session" && request.method === "POST") return reply({
       ok: true,
-      account: { id: `${profile}-user`, role: "user", state: "active", accountStatus: "active", expiresAt: Date.now() + 86400000, version: 1 },
+      account: { id: `${profile}-user`, role: admin || adminSession ? "admin" : "user", state: "active", accountStatus: "active", expiresAt: Date.now() + 86400000, version: 1 },
+      ...(admin ? { monitorSession: `${profile}-monitor-session` } : {}),
     });
-    if (route === "/api/status") return reply({ ok: true, authMode: "token", lockServiceEnabled: true, status: { lastCheckTs: 0, lastCheck: null, lastError: null, cinemaName: "", newTotal: 0, enabled: false, monitorDdl: null }, changes: [], ...cron });
+    if (route === "/api/status") return reply({ ok: true, authMode: "token", lockServiceEnabled: true, status: { lastCheckTs: 0, lastCheck: null, lastError: null, cinemaName: "", newTotal: 0, enabled: configs.get(profile)?.enabled === true, monitorDdl: null }, changes: [], ...cron });
     if (route === "/api/changes") return reply({ ok: true, items: [], nextAfterId: null });
     if (route === "/api/config") {
       if (request.method === "POST") {
@@ -156,9 +161,15 @@ async function startMockWorker({ rejectUpload = false } = {}) {
         for await (const chunk of request) text += chunk;
         const input = JSON.parse(text || "{}");
         const previous = configs.get(profile);
-        const next = { ...previous, ...input };
+        if (input.expectedVersion && input.expectedVersion !== previous.version) return reply({ error: "配置已在其他设备更新" }, 409);
+        const next = { ...previous, ...input, version: previous.version + 1 };
         if (input.barkKey) next.hasBark = true;
         if (input.serverChanKey) next.hasServerChan = true;
+        for (const field of ["barkKey", "serverChanKey"]) {
+          if (input[field]) next[`${field}Hint`] = input[field].slice(0, 4) + "••••••" + input[field].slice(-4);
+          delete next[field];
+        }
+        delete next.expectedVersion;
         configs.set(profile, next);
       }
       return reply({ ok: true, config: configs.get(profile) });
@@ -172,16 +183,25 @@ async function startMockWorker({ rejectUpload = false } = {}) {
       movies: [{ id: "100", nm: "奥德赛", showCount: 3, shows: [{ showDate: "2026-09-19", plist: [
         { seqNo: "900", tm: "18:40", lang: "英语", tp: "IMAX2D", th: "宽幅测试厅", ticketStatus: 0 },
         { seqNo: "901", tm: "19:10", lang: "英语", tp: "IMAX2D", th: "高排测试厅", ticketStatus: 0 },
-        { seqNo: "902", tm: "19:40", lang: "英语", tp: "IMAX2D", th: "稀疏测试厅", ticketStatus: 0 }
+        { seqNo: "902", tm: "19:40", lang: "英语", tp: "IMAX2D", th: "稀疏测试厅", ticketStatus: 0 },
+        { seqNo: "903", tm: "09:40", lang: "英语", tp: "IMAX2D", th: "倒序情侣座测试厅", ticketStatus: 0 }
       ] }] }],
     });
     if (route === "/api/test-push" && request.method === "POST") {
-      const next = { ...configs.get(profile), notifyVerified: true };
+      const next = { ...configs.get(profile), notifyVerified: true, version: configs.get(profile).version + 1 };
       configs.set(profile, next);
-      return reply({ ok: true, label: next.notifyChannel === "serverchan" ? "Server酱" : "Bark" });
+      return reply({ ok: true, label: next.notifyChannel === "serverchan" ? "Server酱" : "Bark", config: next });
     }
     if (route === "/api/check" && request.method === "POST") return reply({ ok: true, cinemaName: "寰映影城（大融城激光IMAX店）", newTotal: 0 });
-    if (route === "/api/lock/rule" && request.method === "GET") return reply({ ok: true, rule: null });
+    if (route === "/api/lock/rule" && request.method === "GET") return reply({ ok: true, rule: rules.get(profile) || null });
+    if (route === "/api/lock/rule" && request.method === "POST") {
+      let text = "";
+      for await (const chunk of request) text += chunk;
+      const input = JSON.parse(text);
+      const rule = { ...input, state: "waiting_schedule", automationEnabled: true, movieName: "奥德赛", hall: "倒序情侣座测试厅", templateTime: "09:40", seats: input.seatNos.map((seatNo) => ({seatNo, label: `3排${seatNo.split("-")[2]}座`})) };
+      rules.set(profile, rule);
+      return reply({ ok: true, rule });
+    }
     if (route === "/api/lock/session/status") return reply({ session: sessions.get(profile) });
     if (route === "/api/lock/template-seats" && request.method === "GET") {
       const seqNo = url.searchParams.get("seqNo") || "900";
@@ -202,7 +222,11 @@ async function startMockWorker({ rejectUpload = false } = {}) {
       const maps = {
         "900": { sectionName: "宽幅测试厅", cols: 90, seats: wideSeats },
         "901": { sectionName: "高排测试厅", cols: 5, seats: tallSeats },
-        "902": { sectionName: "稀疏测试厅", cols: 30, seats: sparseSeats }
+        "902": { sectionName: "稀疏测试厅", cols: 30, seats: sparseSeats },
+        "903": { sectionName: "倒序情侣座测试厅", cols: 35, seats: Array.from({ length: 11 }, (_, r) => Array.from({ length: 29 }, (_, c) => ({
+          ...seat(r + 1, 29 - c), seatNo: `1-${r + 1}-${29 - c}`, orderIndex: c + 5,
+          type: r === 2 && c === 15 ? "L" : r === 2 && c === 16 ? "R" : "N"
+        }))).flat() }
       };
       return reply({ seatMap: { seqNo, sectionId: "1", ...maps[seqNo] || maps["900"] } });
     }

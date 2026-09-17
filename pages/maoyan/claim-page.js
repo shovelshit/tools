@@ -60,7 +60,7 @@
     }
     if (state.name === "error") {
       show("error");
-      $("claim-error-text").textContent = state.message || "服务暂时不可用";
+      $("claim-error-text").textContent = "当前暂不可领取，请稍后重试";
     }
   }
 
@@ -135,7 +135,7 @@
       await loadTurnstile(config.turnstileSiteKey);
     } catch (error) {
       show("error");
-      $("claim-error-text").textContent = error.message || "服务暂时不可用";
+      $("claim-error-text").textContent = "当前暂不可领取，请稍后重试";
     }
   }
 

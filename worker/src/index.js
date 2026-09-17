@@ -28,7 +28,7 @@ const MAOYAN_CSP = [
   "script-src 'self' https://challenges.cloudflare.com",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
-  "connect-src 'self' https://challenges.cloudflare.com",
+  "connect-src 'self' https: http:",
   "frame-src 'self' https://challenges.cloudflare.com",
   "object-src 'none'",
   "base-uri 'self'",
@@ -71,6 +71,16 @@ export async function serveMaoyanAsset(request, env, url = new URL(request.url))
   return staticAssetResponse(response, url, MAOYAN_CSP);
 }
 
+export async function serveMaoyanApiAsset(request, env, url = new URL(request.url)) {
+  if (request.method !== "GET" || url.pathname !== "/api/assets/thumbmark.umd.js" || !env.ASSETS) return null;
+  const assetUrl = new URL("/maoyan/vendor/thumbmark.umd.js", url.origin);
+  const response = await env.ASSETS.fetch(new Request(assetUrl, { headers: request.headers }));
+  if (!response.ok || !/javascript/.test(response.headers.get("Content-Type") || "")) {
+    return new Response("Asset unavailable", { status: 503, headers: { "Cache-Control": "no-store" } });
+  }
+  return staticAssetResponse(response, url, MAOYAN_CSP);
+}
+
 export async function serveStoreAsset(request, env, url = new URL(request.url)) {
   if (url.pathname === "/store") return Response.redirect(`${url.origin}/store/`, 308);
   if (!url.pathname.startsWith("/store/") || !env.ASSETS) return null;
@@ -85,11 +95,19 @@ function upstreamStatus(message) {
 
 async function publicConfig(config) {
   const { barkKey, serverChanKey, notifyVerification, monitorDdl, ...safeConfig } = config || {};
+  const maskCredential = (value) => {
+    const text = String(value || "").trim();
+    if (!text) return "";
+    if (text.length <= 8) return text.slice(0, 1) + "•".repeat(Math.max(text.length - 2, 3)) + text.slice(-1);
+    return text.slice(0, 4) + "•".repeat(6) + text.slice(-4);
+  };
   return {
     ...safeConfig,
     enabled: config?.enabled === true,
     hasBark: Boolean(barkKey),
     hasServerChan: Boolean(serverChanKey),
+    barkKeyHint: maskCredential(barkKey),
+    serverChanKeyHint: maskCredential(serverChanKey),
     notifyVerified: await isNotificationVerified(config),
   };
 }
@@ -114,6 +132,9 @@ export default {
       return storeErrorResponse(error);
     }
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+
+    const maoyanApiAsset = await serveMaoyanApiAsset(request, env, url);
+    if (maoyanApiAsset) return maoyanApiAsset;
 
     if (!url.pathname.startsWith("/api/")) {
       const storeAssetResponse = await serveStoreAsset(request, env, url);
@@ -306,7 +327,7 @@ export default {
         }
         cfg.notifyVerification = await notificationVerification(cfg);
         await saveUserConfig(env, token, cfg);
-        return json({ ok: true, channel: currentChannel(cfg), label });
+        return json({ ok: true, channel: currentChannel(cfg), label, config: await publicConfig(cfg) });
       }
       if (url.pathname === "/api/status" && request.method === "GET") {
         const cfg = await getUserConfig(env, token);

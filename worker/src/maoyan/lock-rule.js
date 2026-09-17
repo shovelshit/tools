@@ -125,17 +125,19 @@ function scheduleForTemplate(data, movieId, seqNo) {
 function selectedSeats(seatMap, seatNos, { ignoreAvailability = false } = {}) {
   const byNumber = new Map((seatMap?.seats || []).map((seat) => [String(seat.seatNo), seat]));
   const isCouple = (seat) => seat && (seat.type === "L" || seat.type === "R");
-  // 方向配对: L 是双座左半(另一半在 columnId+1), R 是右半(另一半在 columnId-1)。
-  // 不能用「相邻即配」: 该影厅 L/R 严格交替, L 座两侧都是 R 座, 取第一个相邻会把
-  // (21,22)、(23,24) 两对拆散, 导致合法的 {23,24} 被误判「情侣座需成对选择」。
-  // 真实数据锚定: 万达影城天和广场 2号杜比巨幕厅 19:35 场 11排。
+  // 情侣座按排内物理位置配对。columnId/票面座号在不同影院既可能递增也可能递减，
+  // orderIndex 才是猫眼 DOM 中包含过道后的真实左右顺序。
   const partnerOf = (seat) => {
     if (!isCouple(seat)) return null;
-    const expected = seat.type === "L" ? Number(seat.columnId) + 1 : Number(seat.columnId) - 1;
+    const orderIndex = Number(seat.orderIndex);
+    if (!Number.isInteger(orderIndex) || orderIndex <= 0) return null;
+    const expected = seat.type === "L" ? orderIndex + 1 : orderIndex - 1;
     const opposite = seat.type === "L" ? "R" : "L";
-    return (seatMap?.seats || []).find((candidate) => candidate !== seat && candidate.type === opposite &&
-      String(candidate.rowId) === String(seat.rowId) &&
-      Number(candidate.columnId) === expected) || null;
+    const atPosition = (position) => (seatMap?.seats || []).filter((candidate) =>
+      String(candidate.rowId) === String(seat.rowId) && Number(candidate.orderIndex) === position);
+    const partners = atPosition(expected);
+    return atPosition(orderIndex).length === 1 && partners.length === 1 && partners[0].type === opposite
+      ? partners[0] : null;
   };
   const selected = seatNos.map((number) => byNumber.get(number));
   if (selected.some((seat) => !seat || (!seat.available && !ignoreAvailability))) throw new Error("所选座位不可用");

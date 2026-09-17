@@ -60,7 +60,14 @@
           const effectiveToken = auth.monitorSession || token;
           const status = await requestWorker("/api/status", {}, { workerUrl: normalizedWorkerUrl, token: effectiveToken });
           connectedTokens.set(normalizedWorkerUrl, effectiveToken);
-          return { status, profile: auth.account || null, account: auth.account || null, capabilities, httpRisk, persistInputToken: !auth.monitorSession };
+          return {
+            status,
+            profile: auth.account || null,
+            account: auth.account || null,
+            capabilities,
+            httpRisk,
+            credentialToPersist: effectiveToken
+          };
         } catch (error) {
           if (Number.isInteger(error?.status)) throw error;
           throw new Error("无法连接服务，请检查服务地址和网络");

@@ -20,7 +20,7 @@ function fakeElement() {
   };
 }
 
-async function loadClaimPage(config, { restorePending = async () => false } = {}) {
+async function loadClaimPage(config, { restorePending = async () => false, fetchError = null } = {}) {
   const elements = new Map();
   const turnstileScripts = [];
   const document = {
@@ -44,7 +44,10 @@ async function loadClaimPage(config, { restorePending = async () => false } = {}
   const context = {
     window, document,
     location: { origin: "https://worker.test", href: "https://worker.test/maoyan/claim.html", reload() {} },
-    fetch: async () => ({ ok: true, json: async () => config }),
+    fetch: async () => {
+      if (fetchError) throw fetchError;
+      return { ok: true, json: async () => config };
+    },
     localStorage: { setItem() {} },
     URL, navigator: { clipboard: { writeText: async () => {} } }
   };
@@ -172,7 +175,8 @@ test("generic unavailable reserve responses stay in the unavailable state withou
 test("claim page stays compact and loads fingerprint code locally", () => {
   const html = fs.readFileSync(path.join(__dirname, "claim.html"), "utf8");
   const css = fs.readFileSync(path.join(__dirname, "claim.css"), "utf8");
-  assert.match(html, /vendor\/thumbmark\.umd\.js/);
+  assert.match(html, /\/api\/assets\/thumbmark\.umd\.js\?v=1\.11\.0/);
+  assert.doesNotMatch(html, /src="vendor\/thumbmark\.umd\.js/);
   assert.doesNotMatch(html, /cdn\.jsdelivr|unpkg/);
   assert.match(css, /width:\s*min\(520px, calc\(100% - 32px\)\)/);
   assert.match(css, /@media \(pointer:\s*coarse\)[\s\S]*min-height:\s*44px/);
@@ -201,4 +205,9 @@ test("a pending reservation is not restored while pending confirmation is unavai
   assert.equal(restoreCalls, 0);
   assert.equal(page.turnstileScripts.length, 0);
   assert.equal(page.elements.get("claim-unavailable").classList.contains("hidden"), false);
+});
+
+test("claim failures never show database or component diagnostics to visitors", async () => {
+  const page = await loadClaimPage(null, { fetchError: new Error("D1_ERROR: no such table: service_settings") });
+  assert.equal(page.elements.get("claim-error-text").textContent, "当前暂不可领取，请稍后重试");
 });

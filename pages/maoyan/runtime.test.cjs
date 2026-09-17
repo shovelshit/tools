@@ -74,8 +74,26 @@ test("web runtime connects with the supplied worker credentials", async () => {
     account: { userId: "user-a", role: "user", accountStatus: "active" },
     capabilities: { accountLifecycle: true },
     httpRisk: false,
-    persistInputToken: true
+    credentialToPersist: "token-a"
   });
+});
+
+test("web runtime persists only the exchanged admin monitor session", async () => {
+  const runtime = loadRuntime().createWebRuntime({
+    fetchImpl: async (url) => {
+      if (url.endsWith("/api/capabilities")) return { ok: true, status: 200, json: async () => ({ accountLifecycle: true }) };
+      if (url.endsWith("/api/auth/session")) return { ok: true, status: 200, json: async () => ({
+        monitorSession: "short-monitor-session",
+        account: { userId: "admin", role: "admin", accountStatus: "active" }
+      }) };
+      return { ok: true, status: 200, json: async () => ({ ok: true, status: {} }) };
+    },
+    getWorkerUrl: () => "https://worker.example",
+    getToken: () => ""
+  });
+  const result = await runtime.connectWorker({ workerUrl: "https://worker.example", token: "permanent-admin-secret" });
+  assert.equal(result.credentialToPersist, "short-monitor-session");
+  assert.notEqual(result.credentialToPersist, "permanent-admin-secret");
 });
 
 test("web runtime preserves capabilities HTTP errors without falling back to status", async () => {

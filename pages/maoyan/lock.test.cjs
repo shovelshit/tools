@@ -11,11 +11,11 @@ function loadLockModule() {
   return context.module.exports;
 }
 
-test("lock shell keeps healthy details collapsed and opens actionable states", () => {
+test("lock shell displays every saved rule while keeping an uploaded session compact", () => {
   const { lockUtils } = loadLockModule();
   const state = (session, rule) => JSON.parse(JSON.stringify(lockUtils.detailOpenState(session, rule)));
   assert.deepEqual(state({ uploaded: false }, null), { session: true, rule: false });
-  assert.deepEqual(state({ uploaded: true }, { state: "waiting_schedule" }), { session: false, rule: false });
+  assert.deepEqual(state({ uploaded: true }, { state: "waiting_schedule" }), { session: false, rule: true });
   assert.deepEqual(state({ uploaded: true }, { state: "unknown" }), { session: false, rule: true });
   assert.deepEqual(state({ uploaded: true }, { state: "failed" }), { session: false, rule: true });
   assert.deepEqual(state({ uploaded: true }, { state: "provider_reconciled_v2" }), { session: false, rule: true });
@@ -632,7 +632,7 @@ test("couple seats pair directionally by data-st L/R: 24 chains 23, 23 chains 24
   for (let columnId = 1; columnId <= 30; columnId++) {
     seats.push({
       rowId: "11", columnId: String(columnId), seatNo: `1-${columnId}-12`,
-      type: columnId % 2 === 1 ? "L" : "R", available: true
+      type: columnId % 2 === 1 ? "L" : "R", orderIndex: columnId, available: true
     });
   }
   const bySeatNo = (no) => seats.find((seat) => seat.seatNo === no);
@@ -645,13 +645,27 @@ test("couple seats pair directionally by data-st L/R: 24 chains 23, 23 chains 24
   assert.equal(lockUtils.couplePartnerOf(seats, { ...bySeatNo("1-24-12"), type: "N" }), null);
   assert.equal(lockUtils.couplePartnerOf(seats, { ...bySeatNo("1-24-12"), type: "LK" }), null);
   // 同排方向位置上缺另一半返回 null(渲染层据此置灰): L 的右侧无 R、R 的左侧无 L
-  const isolatedL = { rowId: "11", columnId: "31", seatNo: "1-31-12", type: "L", available: true };
+  const isolatedL = { rowId: "11", columnId: "31", seatNo: "1-31-12", type: "L", orderIndex: 31, available: true };
   assert.equal(lockUtils.couplePartnerOf(seats, isolatedL), null);
-  const isolatedR = { rowId: "11", columnId: "0", seatNo: "1-0-12", type: "R", available: true };
+  const isolatedR = { rowId: "11", columnId: "0", seatNo: "1-0-12", type: "R", orderIndex: 0, available: true };
   assert.equal(lockUtils.couplePartnerOf(seats, isolatedR), null);
   assert.equal(lockUtils.couplePartnerOf([], bySeatNo("1-24-12")), null);
   assert.equal(lockUtils.couplePartnerOf(null, bySeatNo("1-24-12")), null);
   // 跨排不配对: 即使同列位置存在 L/R
-  const otherRow = { rowId: "10", columnId: "24", seatNo: "1-24-11", type: "R", available: true };
+  const otherRow = { rowId: "10", columnId: "24", seatNo: "1-24-11", type: "R", orderIndex: 24, available: true };
   assert.equal(lockUtils.couplePartnerOf([...seats, otherRow], otherRow), null);
+});
+
+test("couple seats pair by physical order when visible numbering descends", () => {
+  const { lockUtils } = loadLockModule();
+  const seats = [
+    { rowId: "3", columnId: "15", seatNo: "1-3-15", type: "N", orderIndex: 19, available: true },
+    { rowId: "3", columnId: "14", seatNo: "1-3-14", type: "L", orderIndex: 20, available: true },
+    { rowId: "3", columnId: "13", seatNo: "1-3-13", type: "R", orderIndex: 21, available: true },
+    { rowId: "3", columnId: "12", seatNo: "1-3-12", type: "N", orderIndex: 22, available: true }
+  ];
+  assert.equal(lockUtils.couplePartnerOf(seats, seats[1]).seatNo, "1-3-13");
+  assert.equal(lockUtils.couplePartnerOf(seats, seats[2]).seatNo, "1-3-14");
+  assert.equal(lockUtils.couplePartnerOf([...seats, { ...seats[2], seatNo: "duplicate" }], seats[1]), null);
+  assert.equal(lockUtils.couplePartnerOf(seats, { ...seats[1], orderIndex: undefined }), null);
 });

@@ -348,6 +348,8 @@ function resetProfileUi(nextProfileKey) {
   realKeys.serverchan = "";
   keyStored.bark = false;
   keyStored.serverchan = false;
+  keyHints.bark = "";
+  keyHints.serverchan = "";
   cinemaSelected = false;
   selectedCity = null;
   selectedCinema = null;
@@ -362,6 +364,7 @@ function resetProfileUi(nextProfileKey) {
   lastSavedSig = "";
   saving = false;
   savePending = false;
+  settleAutoSaveWaiters();
   restoring = false;
   workflowStep = 1;
   allCities = [];
@@ -466,8 +469,8 @@ async function connect() {
         tokenProfileKey = workerUrl;
         localStorage.setItem("workerUrl", els.workerUrl.value.trim());
         if (runtimeInfo.kind === "web") {
-          await secureSet(profileTokenStorageKey(workerUrl), connectionResult.persistInputToken === false ? "" : typedToken);
-          if (connectionResult.persistInputToken === false) els.token.value = "";
+          await secureSet(profileTokenStorageKey(workerUrl), connectionResult.credentialToPersist || "");
+          els.token.value = "";
         }
         else els.token.value = "";
         setConnectionState({ profileKey: profile?.id || profile?.baseUrl || workerUrl, workerUrl });
@@ -648,9 +651,10 @@ function currentKeyField() {
 
 // 推送密钥: 真实值只存内存, 输入框在保存后显示掩码(后端本就不回显, 避免旁观/截屏泄露)
 const realKeys = { bark: "", serverchan: "" };
-// 云端已存密钥但本会话无明文(如刷新后): 用固定掩码占位标识"已保存", 明文只在云端
+// 刷新后仅恢复云端返回的脱敏提示，不恢复明文。
 const KEY_STORED_MASK = "••••••••";
 const keyStored = { bark: false, serverchan: false };
+const keyHints = { bark: "", serverchan: "" };
 const KEY_PLACEHOLDERS = {
   bark: "Bark Key 或 URL，如 https://api.day.app/xxxxx",
   serverchan: "SCT 开头的 SendKey"
@@ -667,6 +671,10 @@ function currentRealKey() {
   return realKeys[getChannel()] || "";
 }
 
+function currentStoredMask() {
+  return keyHints[getChannel()] || KEY_STORED_MASK;
+}
+
 // 按内存真实值渲染输入框: 有密钥显掩码, 云端已存显固定占位掩码, 都没有显占位提示
 function renderKeyInput() {
   const input = currentKeyInput();
@@ -676,7 +684,7 @@ function renderKeyInput() {
     input.value = maskKey(real);
     input.placeholder = "已配置（不回显，点此可更换）";
   } else if (keyStored[getChannel()]) {
-    input.value = KEY_STORED_MASK;
+    input.value = currentStoredMask();
     input.placeholder = "已在云端保存（不回显），输入新值可更换";
   } else {
     input.value = "";
@@ -688,6 +696,8 @@ function applyPushConfig(config) {
   setChannel(config.notifyChannel || (clientPlatform.os === "android" ? "serverchan" : "bark"));
   keyStored.bark = config.hasBark === true;
   keyStored.serverchan = config.hasServerChan === true;
+  keyHints.bark = keyStored.bark ? String(config.barkKeyHint || KEY_STORED_MASK) : "";
+  keyHints.serverchan = keyStored.serverchan ? String(config.serverChanKeyHint || KEY_STORED_MASK) : "";
   pushSaved = keyStored.bark || keyStored.serverchan;
   pushVerified = config.notifyVerified === true;
   renderKeyInput();
@@ -713,6 +723,31 @@ let movieSaveTimer = null;
 let saving = false;
 let savePending = false;
 let restoring = false;
+const saveIdleWaiters = [];
+
+function waitForAutoSave() {
+  if (movieSaveTimer !== null) {
+    clearTimeout(movieSaveTimer);
+    movieSaveTimer = null;
+    void autoSaveConfig({ selectedMovieIds: getSelectedIds(), cinemaId: selectedCinemaId }, { silent: true });
+  }
+  if (!saving && !savePending) return Promise.resolve();
+  return new Promise((resolve) => saveIdleWaiters.push(resolve));
+}
+
+function settleAutoSaveWaiters() {
+  if (saving || savePending) return;
+  while (saveIdleWaiters.length) saveIdleWaiters.shift()();
+}
+
+function finishConfigSave() {
+  saving = false;
+  if (savePending) {
+    savePending = false;
+    void autoSaveConfig({ selectedMovieIds: getSelectedIds(), cinemaId: selectedCinemaId }, { silent: true });
+  }
+  settleAutoSaveWaiters();
+}
 
 async function autoSaveConfig(extra = {}, { msg = "配置已自动保存", silent = false } = {}) {
   const generation = profileGeneration.current();
@@ -749,14 +784,7 @@ async function autoSaveConfig(extra = {}, { msg = "配置已自动保存", silen
     showToast("自动保存失败：" + e.message, "error");
   } finally {
     if (!profileGeneration.isCurrent(generation)) return;
-    saving = false;
-    if (savePending) {
-      savePending = false;
-      autoSaveConfig(
-        { selectedMovieIds: getSelectedIds(), cinemaId: selectedCinemaId },
-        { silent: true }
-      );
-    }
+    finishConfigSave();
   }
 }
 
@@ -764,6 +792,7 @@ async function autoSaveConfig(extra = {}, { msg = "配置已自动保存", silen
 function scheduleMovieSave() {
   clearTimeout(movieSaveTimer);
   movieSaveTimer = setTimeout(() => {
+    movieSaveTimer = null;
     autoSaveConfig(
       { selectedMovieIds: getSelectedIds(), cinemaId: selectedCinemaId },
       { msg: "影片勾选已自动保存", silent: true }
@@ -799,7 +828,7 @@ function keyInputFocused() {
   const real = currentRealKey();
   if (real && input.value === maskKey(real)) input.value = real;
   // 云端已存但本会话无明文: 全选占位掩码, 直接输入即可整体替换
-  else if (!real && input.value === KEY_STORED_MASK) input.select();
+  else if (!real && input.value === currentStoredMask()) input.select();
 }
 
 function keyInputBlurred() {
@@ -807,7 +836,7 @@ function keyInputBlurred() {
   const real = currentRealKey();
   const typed = input.value.trim();
   // 占位掩码视为"未改动"(不代表云端密钥, 不回传不覆盖); 输入新值才保存
-  if (typed && typed !== real && typed !== maskKey(real) && typed !== KEY_STORED_MASK) {
+  if (typed && typed !== real && typed !== maskKey(real) && typed !== currentStoredMask()) {
     realKeys[getChannel()] = typed;
     pushVerified = false;
     updateMonitorBtn();
@@ -838,6 +867,8 @@ els.btnToggleMonitor.addEventListener("click", async () => {
   const generation = profileGeneration.current();
   await withButtonLoading(els.btnToggleMonitor, "处理中...", async () => {
     try {
+      await waitForAutoSave();
+      if (!profileGeneration.isCurrent(generation)) return;
       const target = !monitorEnabled;
       const res = await api("/api/config", {
         method: "POST",
@@ -1263,20 +1294,23 @@ els.btnCheck.addEventListener("click", async () => {
 els.btnTestPush.addEventListener("click", async () => {
   if (!connected) return showToast("请先连接云端", "warn");
   const generation = profileGeneration.current();
+  let ownsSave = false;
   await withButtonLoading(els.btnTestPush, "发送中...", async () => {
     try {
-      // 先保存当前渠道的推送配置再测试(密钥从内存取, 输入框里是掩码)
-      const key = currentRealKey();
-      if (key) {
-        const saved = await api("/api/config", {
-          method: "POST",
-          body: JSON.stringify({ ...pushConfigBody(), ...(configVersion ? { expectedVersion: configVersion } : {}) })
-        });
-        configVersion = Number(saved.config?.version) || configVersion;
-        pushSaved = true;
-      }
+      // 点击会先触发输入框 blur 自动保存；测试必须等待保存完成，避免并发版本冲突。
+      await waitForAutoSave();
+      if (!profileGeneration.isCurrent(generation)) return;
+      saving = true;
+      ownsSave = true;
+      const saved = await api("/api/config", {
+        method: "POST",
+        body: JSON.stringify({ ...pushConfigBody(), ...(configVersion ? { expectedVersion: configVersion } : {}) })
+      });
+      configVersion = Number(saved.config?.version) || configVersion;
       const res = await api("/api/test-push", { method: "POST" });
       if (!profileGeneration.isCurrent(generation)) return;
+      configVersion = Number(res.config?.version) || configVersion;
+      if (res.config) applyPushConfig(res.config);
       const label = res.label || CHANNEL_LABELS[getChannel()];
       pushVerified = true;
       updateMonitorBtn();
@@ -1285,6 +1319,8 @@ els.btnTestPush.addEventListener("click", async () => {
     } catch (e) {
       if (!profileGeneration.isCurrent(generation) || isStaleProfileError(e)) return;
       showToast("测试失败：" + e.message, "error");
+    } finally {
+      if (ownsSave && profileGeneration.isCurrent(generation)) finishConfigSave();
     }
   });
 });

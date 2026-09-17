@@ -293,19 +293,86 @@ test("push key is masked after save and read from memory, not the masked input",
   assert.match(source, /const key = currentRealKey\(\);/);
 });
 
-test("stored key shows placeholder mask after refresh (cloud hasBark, no plaintext in memory)", () => {
+test("stored key keeps the server-provided partial mask after refresh without exposing plaintext", () => {
   const source = readSource("app.js");
-  // 刷新后内存无明文但云端已存: 输入框回显固定占位掩码, 不再一片空白
+  // 刷新后内存无明文但云端已存: 优先回显服务端安全提示, 旧 Worker 才退回固定占位掩码
   assert.match(source, /const KEY_STORED_MASK = "••••••••";/);
   assert.match(source, /const keyStored = \{ bark: false, serverchan: false \};/);
+  assert.match(source, /const keyHints = \{ bark: "", serverchan: "" \};/);
   assert.match(source, /keyStored\.bark = config\.hasBark === true;/);
   assert.match(source, /keyStored\.serverchan = config\.hasServerChan === true;/);
-  assert.match(source, /else if \(keyStored\[getChannel\(\)\]\) \{\s*\n\s*input\.value = KEY_STORED_MASK;/);
-  // 占位掩码不当作密钥提交: 失焦保存与聚焦还原都跳过它
-  assert.match(source, /typed !== KEY_STORED_MASK/);
-  assert.match(source, /input\.value === KEY_STORED_MASK\) input\.select\(\);/);
-  // 按渠道独立记录, 只配置过 Bark 时切到 Server酱 不应显示已存掩码
-  assert.doesNotMatch(source, /pushSaved = keyStored\.bark \|\| keyStored\.serverchan;\s*\n\s*keyStored/);
+  assert.match(source, /keyHints\.bark = keyStored\.bark \? String\(config\.barkKeyHint \|\| KEY_STORED_MASK\) : "";/);
+  assert.match(source, /input\.value = currentStoredMask\(\);/);
+  // 服务端提示值与固定回退掩码都只用于展示，永远不作为新密钥提交
+  assert.match(source, /typed !== currentStoredMask\(\)/);
+  assert.match(source, /input\.value === currentStoredMask\(\)\) input\.select\(\);/);
+});
+
+test("notification controls stay compact on desktop and use the full width on mobile", () => {
+  const css = readSource("style.css");
+  assert.match(css, /\.channel-opts\s*\{[^}]*width:\s*fit-content/);
+  assert.match(css, /\.row-span-all\s*>\s*input\s*\{\s*width:\s*min\(100%,\s*560px\)/);
+  assert.match(css, /@media \(max-width:\s*640px\)[\s\S]*\.row-span-all,[\s\S]*grid-template-columns:\s*1fr/);
+});
+
+test("save-and-test waits for blur autosave and adopts the verification version", async () => {
+  const vm = require("node:vm");
+  const source = readSource("app.js");
+  const firstSave = deferred();
+  const calls = [];
+  const errors = [];
+  let handler;
+  let version = 1;
+  const context = {
+    connected: true, configVersion: 1, pushVerified: false, monitorEnabled: false,
+    selectedCinemaId: "25428", getSelectedIds: () => ["100"],
+    profileGeneration: { current: () => 1, isCurrent: () => true },
+    pushConfigBody: (extra = {}) => ({ notifyChannel: "bark", barkKey: "test-credential", ...extra }),
+    api: async (route, options) => {
+      calls.push(route);
+      if (calls.length === 1) await firstSave.promise;
+      if (route === "/api/config") assert.equal(JSON.parse(options.body).expectedVersion, version);
+      version += 1;
+      return { config: { version, notifyVerified: route === "/api/test-push" } };
+    },
+    els: { btnTestPush: { addEventListener: (_event, callback) => { handler = callback; } } },
+    withButtonLoading: async (_button, _label, action) => action(),
+    updateMonitorBtn() {}, log() {}, applyPushConfig() {},
+    showToast: (message, type) => { if (type === "error") errors.push(message); },
+    getChannel: () => "bark", CHANNEL_LABELS: { bark: "Bark" },
+    isStaleProfileError: () => false
+  };
+  vm.createContext(context);
+  vm.runInContext(source.slice(source.indexOf('let lastSavedSig = "";'), source.indexOf("// 影片勾选变化较密集")), context);
+  const start = source.indexOf('els.btnTestPush.addEventListener("click"');
+  vm.runInContext(source.slice(start, source.indexOf("// ---------------- 变化记录", start)), context);
+  const autoSave = context.autoSaveConfig();
+  const explicit = handler();
+  assert.deepEqual(calls, ["/api/config"]);
+  firstSave.resolve();
+  await Promise.all([autoSave, explicit]);
+  assert.deepEqual(calls, ["/api/config", "/api/config", "/api/test-push"]);
+  assert.equal(context.configVersion, 4);
+  assert.equal(context.pushVerified, true);
+  assert.deepEqual(errors, []);
+  await context.waitForAutoSave();
+});
+
+test("critical actions flush pending movie selection before waiting for saves", async () => {
+  const vm = require("node:vm");
+  const source = readSource("app.js");
+  const calls = [];
+  const context = {
+    movieSaveTimer: 42, saving: false, savePending: false, saveIdleWaiters: [],
+    selectedCinemaId: "25428", getSelectedIds: () => ["100"],
+    clearTimeout: (timer) => calls.push(timer),
+    autoSaveConfig: async (body) => calls.push(JSON.parse(JSON.stringify(body)))
+  };
+  vm.createContext(context);
+  vm.runInContext(source.slice(source.indexOf("function waitForAutoSave()"), source.indexOf("function settleAutoSaveWaiters()")), context);
+  await context.waitForAutoSave();
+  assert.deepEqual(calls, [42, { selectedMovieIds: ["100"], cinemaId: "25428" }]);
+  assert.equal(context.movieSaveTimer, null);
 });
 
 test("lock dialog gates everything behind maoyan session upload", () => {

@@ -101,10 +101,11 @@ export async function exchangeSession(request, env, nowMs = Date.now(), business
     ]);
     return { account: publicAccount(account, nowMs), monitorSession };
   }
-  const account = await getAccountByKey(env.DB, raw);
-  if (!account || accountStatus(account, nowMs) === "revoked") {
+  const existingPrincipal = await authenticate(request, env, nowMs);
+  if (!existingPrincipal) {
     throw new AccountAuthError("UNAUTHORIZED", "访问密钥无效");
   }
-  requireBusinessAccess(accountPrincipal(account, "access_key", nowMs), businessLine);
+  requireBusinessAccess(existingPrincipal, businessLine);
+  const account = await getAccount(env.DB, existingPrincipal.userId);
   return { account: publicAccount(account, nowMs) };
 }

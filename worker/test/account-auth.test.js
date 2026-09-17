@@ -142,6 +142,21 @@ test("ADMIN_TOKEN exchanges for a short monitor session with a stable admin UUID
     await authenticate(request("/api/account", { token: first.monitorSession }), env, NOW + 24 * 60 * 60 * 1000),
     null
   );
+
+  const restoredResponse = await worker.fetch(request("/api/auth/session", {
+    method: "POST",
+    token: first.monitorSession
+  }), env);
+  assert.equal(restoredResponse.status, 200);
+  const restored = await restoredResponse.json();
+  assert.equal(restored.account.role, "admin");
+  assert.equal(restored.account.userId, first.account.userId);
+  assert.equal(Object.hasOwn(restored, "monitorSession"), false);
+  env.NOW_MS = String(NOW + 24 * 60 * 60 * 1000);
+  const expired = await worker.fetch(request("/api/auth/session", {
+    method: "POST", token: first.monitorSession
+  }), env);
+  assert.equal(expired.status, 401);
 });
 
 test("rotating ADMIN_TOKEN invalidates monitor sessions without changing admin UUID", async () => {

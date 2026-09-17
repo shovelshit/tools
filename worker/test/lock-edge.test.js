@@ -55,8 +55,8 @@ function validInput(overrides = {}) {
 
 function coupleSeats(extra = []) {
   return [
-    { seatNo: "1-6-18", rowId: "6", columnId: "18", type: "L", available: true },
-    { seatNo: "1-6-19", rowId: "6", columnId: "19", type: "R", available: true },
+    { seatNo: "1-6-18", rowId: "6", columnId: "18", orderIndex: 18, type: "L", available: true },
+    { seatNo: "1-6-19", rowId: "6", columnId: "19", orderIndex: 19, type: "R", available: true },
     ...extra
   ];
 }
@@ -82,6 +82,20 @@ test("情侣座成对选择时规则同时记录两个座位", async () => {
   assert.equal(rule.state, "waiting_schedule");
 });
 
+test("倒序座号的情侣座按物理 orderIndex 成对", async () => {
+  const seats = [
+    { seatNo: "1-3-14", rowId: "3", columnId: "14", orderIndex: 20, type: "L", available: true },
+    { seatNo: "1-3-13", rowId: "3", columnId: "13", orderIndex: 21, type: "R", available: true }
+  ];
+  const rule = await createLockRule(
+    await envWithConfig(),
+    "token-a",
+    validInput({ seatNos: ["1-3-14", "1-3-13"] }),
+    dependencies({ fetchSeats: async () => ({ sectionId: "1", sectionName: "1号厅", seqNo: "100", seats }) })
+  );
+  assert.deepEqual(rule.seats.map((seat) => seat.seatNo), ["1-3-14", "1-3-13"]);
+});
+
 test("情侣座的另一半不相邻时仍视为未成对", async () => {
   const env = await envWithConfig();
   await assert.rejects(
@@ -102,7 +116,8 @@ test("L/R 严格交替的情侣排: 合法对 (23,24) 不被误拆成 (21,22)", 
   for (let columnId = 1; columnId <= 30; columnId++) {
     seats.push({
       seatNo: `1-${columnId}-12`, rowId: "11", columnId: String(columnId),
-      type: columnId % 2 === 1 ? "L" : "R", available: true
+      type: columnId % 2 === 1 ? "L" : "R", orderIndex: columnId,
+      available: true
     });
   }
   const env = await envWithConfig();
