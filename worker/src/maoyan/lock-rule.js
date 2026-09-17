@@ -23,7 +23,7 @@ export const RULE_KNOWN_ERRORS = [
   "目标日期存在多个相同时间场次", "所选未来座位不可用或影厅布局已变化", "锁座服务尚未配置加密密钥",
   "请选择目标日期的实际场次", "所选目标场次不可售"
 ];
-export const LOCK_RULE_TERMINAL_STATES = new Set(["locked", "expired", "failed", "completed", "cancelled"]);
+export const LOCK_RULE_TERMINAL_STATES = new Set(["locked", "expired", "failed", "completed", "cancelled", "unknown"]);
 const PUBLIC_FIELDS = [
   "id", "cinemaId", "cinemaName", "movieId", "movieName", "hall", "targetDate",
   "templateDate", "templateTime", "targetTime", "matchMode", "timeDeltaMinutes", "templateSeqNo", "targetSeqNo", "seats", "state",
@@ -182,7 +182,7 @@ export async function removeLockRule(env, tokenId) {
 export function publicLockRule(rule, automationEnabled) {
   if (!rule || typeof rule !== "object") return null;
   const result = Object.fromEntries(PUBLIC_FIELDS.filter((field) => Object.hasOwn(rule, field)).map((field) => [field, rule[field]]));
-  return { ...result, automationEnabled: Boolean(automationEnabled) };
+  return { ...result, ...(result.state === "unknown" ? { state: "failed", lastError: "锁座失败，未获得有效订单" } : {}), automationEnabled: Boolean(automationEnabled) };
 }
 
 export async function createLockRule(env, tokenId, input, options = {}) {
@@ -253,25 +253,9 @@ export async function createLockRule(env, tokenId, input, options = {}) {
   if (targetShow) {
     // 目标场次真实存在: 跳过等待, 立即尝试锁座下单
     await (options.requireActive || requireActiveAccount)(env, tokenId);
+    let order;
     try {
-      const order = await placeOrder(session, seatMap, seats.map((seat) => seat.seatNo));
-      lockLog("rule_create", { phase: "complete", state: "locked" });
-      const rule = buildRule("locked", {
-        orderId: String(order.orderId),
-        payLeftSecond: order.payLeftSecond ?? null,
-        lockedAt: timestamp
-      });
-      await putLockRule(env, tokenId, rule);
-      try {
-        await notifyLockedRule(config, rule, options.notify);
-      } catch {
-        rule.notifyError = "通知发送失败";
-        try {
-          await putLockRule(env, tokenId, rule);
-        } catch {
-        }
-      }
-      return publicLockRule(rule, String(env.LOCK_SERVICE_ENABLED) === "true");
+      order = await placeOrder(session, seatMap, seats.map((seat) => seat.seatNo));
     } catch (error) {
       if (error instanceof OrderAttemptError && !error.uncertain) {
         lockError("rule_create", { phase: "complete", state: "failed", reason: "provider_rejected" });
@@ -282,12 +266,28 @@ export async function createLockRule(env, tokenId, input, options = {}) {
         rejected.kind = "upstream";
         throw rejected;
       }
-      // 结果不确定(网络异常等): 保存为待人工确认, 避免重复下单
-      lockError("rule_create", { phase: "complete", state: "unknown", reason: "ambiguous_result" });
-      const rule = buildRule("unknown", { lastError: "创建订单结果不确定，请到猫眼订单中确认" });
-      await putLockRule(env, tokenId, rule);
-      return publicLockRule(rule, String(env.LOCK_SERVICE_ENABLED) === "true");
+      lockError("rule_create", { phase: "complete", state: "failed", reason: "order_failed" });
+      const failure = new Error("锁座失败，未获得有效订单");
+      failure.kind = "upstream";
+      throw failure;
     }
+    lockLog("rule_create", { phase: "complete", state: "locked" });
+    const rule = buildRule("locked", {
+      orderId: String(order.orderId),
+      payLeftSecond: order.payLeftSecond ?? null,
+      lockedAt: timestamp
+    });
+    await putLockRule(env, tokenId, rule);
+    try {
+      await notifyLockedRule(config, rule, options.notify);
+    } catch {
+      rule.notifyError = "通知发送失败";
+      try {
+        await putLockRule(env, tokenId, rule);
+      } catch {
+      }
+    }
+    return publicLockRule(rule, String(env.LOCK_SERVICE_ENABLED) === "true");
   }
   lockLog("rule_create", { phase: "complete", state: "waiting_schedule" });
   const rule = buildRule("waiting_schedule", { lotteryKey: drawLottery() });

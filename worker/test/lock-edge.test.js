@@ -307,8 +307,10 @@ test("缺少监控数据的定时锁座直接跳过而不是报错", async () =>
 test("座位仍可售但排号变化时按影厅布局变化失败且不下单", async () => {
   const stored = storedRule();
   let orderCalls = 0;
-  await runOneLockRule(await runtime(), tokenId, {
+  let removed = false;
+  const result = await runOneLockRule(await runtime(), tokenId, {
     now: () => now,
+    removeRule: async () => { removed = true; },
     getRule: async () => stored,
     putRule: async (_env, _token, value) => { Object.assign(stored, value); },
     fetchCinema: async () => ({ showData: { movies: [{ id: "7", shows: [{ showDate: "2026-09-12", plist: [{ seqNo: "200", tm: "20:00" }] }] }] } }),
@@ -318,8 +320,8 @@ test("座位仍可售但排号变化时按影厅布局变化失败且不下单",
     createOrder: async () => { orderCalls++; return { orderId: "should-not-happen" }; },
     notify: async () => {}
   });
-  assert.equal(stored.state, "failed");
-  assert.match(stored.lastError, /影厅布局已变化/);
+  assert.equal(result.state, "failed");
+  assert.equal(removed, true);
   assert.equal(orderCalls, 0);
 });
 

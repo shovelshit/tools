@@ -124,12 +124,22 @@ function mountLock({
   });
   return {
     controller,
+    elements,
     messages,
     loginButton: elements["btn-lock-login"],
     uploadButton: elements["btn-lock-upload"],
     fileInput: elements["lock-session-file"]
   };
 }
+
+test("refreshing an uploaded session does not expose inference risk for a real seat map", async () => {
+  const f = mountLock({ api: { "/api/lock/session/status": { session: { uploaded: true } } } });
+  await f.controller.refreshRemoteState();
+  assert.equal(f.elements["lock-section-risk"].classList.contains("hidden"), true);
+  assert.equal(f.elements["lock-section-seats"].classList.contains("hidden"), false);
+  await f.controller.refreshRemoteState();
+  assert.equal(f.elements["lock-section-risk"].classList.contains("hidden"), true);
+});
 
 function loadRuntime() {
   const source = fs.readFileSync(path.join(__dirname, "runtime.js"), "utf8");
@@ -561,7 +571,7 @@ test("lock utilities block duplicate submission for an active rule", () => {
   };
   assert.equal(lockUtils.isReadyToSubmit({ ...base, rule: { state: "waiting_schedule" } }), false);
   assert.equal(lockUtils.isReadyToSubmit({ ...base, rule: { state: "matching" } }), false);
-  assert.equal(lockUtils.isReadyToSubmit({ ...base, rule: { state: "unknown" } }), false);
+  assert.equal(lockUtils.isReadyToSubmit({ ...base, rule: { state: "unknown" } }), true);
   assert.equal(lockUtils.isReadyToSubmit({ ...base, rule: { state: "failed" } }), true);
 });
 

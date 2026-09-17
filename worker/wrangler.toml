@@ -8,6 +8,10 @@ keep_vars = true
 # ============ 自定义域名路由 (zone: ltools.asia) ============
 # 注意: routes 必须在第一个 [table] 之前，否则会被解析为前一个 table 的子字段
 routes = [
+  { pattern = "ltools.asia/maoyan", zone_name = "ltools.asia" },
+  { pattern = "ltools.asia/maoyan/*", zone_name = "ltools.asia" },
+  { pattern = "www.ltools.asia/maoyan", zone_name = "ltools.asia" },
+  { pattern = "www.ltools.asia/maoyan/*", zone_name = "ltools.asia" },
   { pattern = "ltools.asia/api/*", zone_name = "ltools.asia" },
   { pattern = "www.ltools.asia/api/*", zone_name = "ltools.asia" },
   { pattern = "ltools.asia/store", zone_name = "ltools.asia" },

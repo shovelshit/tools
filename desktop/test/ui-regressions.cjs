@@ -87,6 +87,13 @@ async function main() {
     await page.locator("#lock-rule-details").scrollIntoViewIfNeeded();
     await page.screenshot({ path: path.join(output, "couple-rule-mobile.png"), fullPage: true });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.fill("#lock-target-date", "2026-09-19");
+    await page.waitForFunction(() => document.querySelector("#lock-section-risk").classList.contains("hidden"));
+    await page.waitForResponse((response) => response.url().endsWith("/api/lock/rule") && response.request().method() === "GET", { timeout: 25000 });
+    await page.waitForFunction(() => !document.querySelector("#lock-session-status .spinner"));
+    assert.equal(await page.locator("#lock-section-risk").isVisible(), false);
+    console.log("PASS real-seat risk remains hidden after the scheduled lock-state refresh");
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();

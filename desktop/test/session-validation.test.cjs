@@ -9,6 +9,14 @@ const input = () => ({
   userAgent: "Mozilla/5.0"
 });
 
+test("capture and manual import preserve uid.sig", () => {
+  const raw = input();
+  raw.cookies.push({ domain: "www.maoyan.com", name: "uid.sig", value: "signed-uid" });
+  const captured = captureSession(raw);
+  assert.equal(captured.cookies.find(c => c.name === "uid.sig")?.value, "signed-uid");
+  assert.equal(normalizeUploadedSession(captured).cookies.find(c => c.name === "uid.sig")?.value, "signed-uid");
+});
+
 test("capture retains only Worker-compatible fields and safe query values", () => {
   const result = captureSession(input());
   assert.deepEqual(Object.keys(result).sort(), ["cookies", "create_order_query", "csrf", "mtgsig", "saved_at", "user_agent"]);

@@ -314,15 +314,15 @@ test("allows only one non-terminal rule for a token", async () => {
   assert.notEqual(rule.id, "finished");
 });
 
-test("replaces safe terminal lock rules but retains active and uncertain rules", async () => {
-  for (const state of ["locked", "expired", "failed"]) {
+test("replaces terminal rules including legacy unknown but retains active rules", async () => {
+  for (const state of ["locked", "expired", "failed", "unknown"]) {
     const env = await envWithConfig();
     await putLockRule(env, "token-a", { id: `old-${state}`, state });
     const replacement = await createLockRule(env, "token-a", validInput(), dependencies());
     assert.notEqual(replacement.id, `old-${state}`);
     assert.equal(replacement.state, "waiting_schedule");
   }
-  for (const state of ["waiting_schedule", "matching", "unknown"]) {
+  for (const state of ["waiting_schedule", "matching"]) {
     const env = await envWithConfig();
     await putLockRule(env, "token-a", { id: `active-${state}`, state });
     await reject(env, validInput(), /进行中/);

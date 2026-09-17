@@ -25,7 +25,7 @@ export function chinaDate(now) {
 }
 
 function messageFor(error) {
-  if (error instanceof OrderAttemptError) return error.uncertain ? "创建订单结果不确定" : "猫眼拒绝创建订单";
+  if (error instanceof OrderAttemptError) return "锁座失败，未获得有效订单";
   return "猫眼场次或座位信息暂时不可用";
 }
 
@@ -81,7 +81,7 @@ async function notifyTerminal(env, tokenId, rule, deps) {
   try {
     await (deps.notify || pushNotify)(config, notification.title, notification.content);
   } catch {
-    await saveRule(env, tokenId, rule, { notifyError: "通知发送失败" }, deps);
+    if (rule.state === "locked") await saveRule(env, tokenId, rule, { notifyError: "通知发送失败" }, deps);
   }
 }
 
@@ -103,7 +103,10 @@ async function terminal(env, tokenId, rule, state, changes, deps) {
     lockLog("scheduled_rule", { phase: "complete", state });
     return { ok: true, state };
   }
-  const next = await saveRule(env, tokenId, rule, { ...changes, state }, deps);
+  const next = state === "locked"
+    ? await saveRule(env, tokenId, rule, { ...changes, state }, deps)
+    : { ...rule, ...changes, state };
+  if (state !== "locked") await (deps.removeRule || removeLockRule)(env, tokenId);
   lockLog("scheduled_rule", { phase: "complete", state });
   await notifyTerminal(env, tokenId, next, deps);
   return { ok: true, state };
@@ -198,15 +201,15 @@ export async function runOneLockRule(env, tokenId, deps = {}) {
   }
 
   await (deps.requireActive || requireActiveAccount)(env, tokenId);
+  let order;
   try {
-    const order = await createOrder(session, seatMap, matching.seats.map((seat) => seat.seatNo));
-    return await terminal(env, tokenId, matching, "locked", {
-      orderId: String(order.orderId), payLeftSecond: order.payLeftSecond ?? null, lockedAt: new Date(now).toISOString(), lastError: null
-    }, deps);
+    order = await createOrder(session, seatMap, matching.seats.map((seat) => seat.seatNo));
   } catch (error) {
-    const uncertain = !(error instanceof OrderAttemptError) || error.uncertain === true;
-    return await terminal(env, tokenId, matching, uncertain ? "unknown" : "failed", { lastError: messageFor(error) }, deps);
+    return await terminal(env, tokenId, matching, "failed", { lastError: "锁座失败，未获得有效订单" }, deps);
   }
+  return await terminal(env, tokenId, matching, "locked", {
+    orderId: String(order.orderId), payLeftSecond: order.payLeftSecond ?? null, lockedAt: new Date(now).toISOString(), lastError: null
+  }, deps);
 }
 
 function checkedTokenId(tokenId) {

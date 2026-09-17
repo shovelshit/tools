@@ -6,7 +6,7 @@
     locked: "已锁座，等待支付",
     failed: "锁座失败",
     expired: "目标日期已过期",
-    unknown: "订单结果待人工确认"
+    unknown: "锁座失败"
   };
 
   function chinaDate(value) {
@@ -158,7 +158,7 @@
   }
 
   function isActiveLockRule(rule) {
-    return rule?.state === "waiting_schedule" || rule?.state === "matching" || rule?.state === "unknown";
+    return rule?.state === "waiting_schedule" || rule?.state === "matching";
   }
 
   function isReadyToSubmit({ session, templateSeqNo, selectedSeatNos, targetDate, riskAccepted, dateBounds, rule }) {
@@ -415,9 +415,10 @@
     // 上传成功(或本来就有会话)才展示完整界面
     function renderGate(gated) {
       setHidden(els.gateHint, !gated);
-      for (const el of [els.sectionSchedule, els.sectionSeats, els.sectionRisk, els.sectionRules]) {
+      for (const el of [els.sectionSchedule, els.sectionSeats, els.sectionRules]) {
         setHidden(el, gated);
       }
+      renderRiskSection();
     }
 
     function renderSession() {
@@ -459,9 +460,7 @@
         .map((seat) => seat?.label || labels.get(String(seat?.seatNo ?? seat)) || seatDisplayLabel(seat, state.seatSeg))
         .join("、");
       const status = RULE_LABELS[rule.state] || "规则状态未知";
-      const suffix = rule.state === "unknown"
-        ? " · 可能已经创建订单，请先检查猫眼订单，确认前不可再次提交"
-        : rule.state === "waiting_schedule" && !rule.automationEnabled
+      const suffix = rule.state === "waiting_schedule" && !rule.automationEnabled
           ? " · 锁座服务当前已停用"
           : "";
       const hall = rule.hall ? ` · ${rule.hall}` : "";
@@ -1264,12 +1263,13 @@
             state.rule = rule || null;
             state.automationEnabled = Boolean(rule?.automationEnabled);
             renderRule();
-            if (rule?.state === "unknown") {
-              show("订单结果不确定，请先检查猫眼订单，确认前不可再次提交", "warn");
+            if (rule?.state === "unknown" || rule?.state === "failed") {
+              show("锁座失败，未获得有效订单", "error");
+              onLog?.("error", "锁座失败");
             } else {
               show(action.successText, "success");
+              onLog?.("ok", state.showMode === "target" ? "锁座（Beta）已提交" : "锁座（Beta）规则已保存");
             }
-            onLog?.("ok", state.showMode === "target" ? "锁座（Beta）已提交" : "锁座（Beta）规则已保存");
           } catch (error) {
             if (!isCurrentProfileGeneration(generation)) return;
             show(error.message || "保存锁座规则失败", "error");

@@ -1,7 +1,7 @@
 const QUERY_KEYS = ["yodaReady", "csecplatform", "csecversion"];
 const SAFE_QUERY_VALUE = /^[A-Za-z0-9._:-]{1,64}$/;
 const MAOYAN_COOKIE_DOMAIN = /^\.?([a-z0-9-]+\.)*maoyan\.com$/i;
-const COOKIE_NAME = /^[A-Za-z0-9_-]{1,128}$/;
+const COOKIE_NAME = /^[A-Za-z0-9_.-]{1,128}$/;
 const HEADER_CONTROL = /[\r\n\0]/;
 const MAX_COOKIE_VALUE_LENGTH = 4096;
 const MAX_CSRF_LENGTH = 4096;

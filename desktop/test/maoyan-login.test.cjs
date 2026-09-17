@@ -175,6 +175,30 @@ test("a delayed signature keeps the login window usable until capture succeeds",
   assertClean(f);
 });
 
+test("captured credentials close the popup without waiting for page load or probe response", async () => {
+  for (const blocked of ["load", "probe"]) {
+    const f = fixture({ deferredUpload: true });
+    let settled = false;
+    const pending = f.login.start("25428").then((result) => { settled = true; return result; });
+    await tick();
+    const window = f.state.windows[0];
+    if (blocked === "load") window.loadURL = () => new Promise(() => {});
+    else window.webContents.executeJavaScript = () => new Promise(() => {});
+    await f.authenticate();
+    f.state.requestListener({ url: "https://www.maoyan.com/ajax/cinemaDetail?cinemaId=25428", requestHeaders: { mtgsig: "captured-signature" } }, () => {});
+    const [timerId, timer] = [...f.state.timers.entries()].find(([, timer]) => timer.ms === 500);
+    f.state.timers.delete(timerId);
+    timer.fn();
+    await tick();
+    assert.equal(window.destroyed, true, `${blocked}: captured login popup remains open`);
+    assert.equal(f.state.uploads.length, 1);
+    assert.equal(settled, false, "popup close must not claim upload success");
+    f.state.accept();
+    assert.equal((await pending).session.uploaded, true);
+    assertClean(f);
+  }
+});
+
 test("waiting for a missing signature still supports cancel and the ten-minute deadline", async () => {
   for (const action of ["cancel", "timeout"]) {
     const f = fixture({ missingSignature: true }); const original = f.state.session;

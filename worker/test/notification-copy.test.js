@@ -74,7 +74,7 @@ test("failed notification gives a retry action without payment wording", () => {
   assert.doesNotMatch(message.content, /支付/);
 });
 
-test("unknown notification asks for manual order confirmation and never says failed", () => {
+test("legacy unknown notification is a failure without manual confirmation", () => {
   const message = lockNotification({
     state: "unknown",
     cinemaName: "测试影院",
@@ -85,10 +85,9 @@ test("unknown notification asks for manual order confirmation and never says fai
     lastError: "创建订单结果不确定，请到猫眼订单中确认"
   });
 
-  assert.equal(message.title, "⚠️ 订单结果待确认｜奥德赛");
-  assert.match(message.content, /📡 请求已发出，但未收到明确结果/);
-  assert.match(message.content, /🛑 请先查看猫眼订单，避免重复下单$/);
-  assert.doesNotMatch(message.title + message.content, /锁座失败/);
+  assert.equal(message.title, "❌ 锁座失败｜奥德赛");
+  assert.match(message.content, /锁座失败，未获得有效订单/);
+  assert.doesNotMatch(message.content, /确认|不确定/);
 });
 
 test("expired and sparse lock notifications omit unavailable detail lines", () => {

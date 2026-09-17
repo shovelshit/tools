@@ -42,6 +42,30 @@ function jsonResponse(body, status = 200) {
   });
 }
 
+test("order request preserves uid.sig in the cookie header", async () => {
+  const signedSession = {
+    ...session,
+    cookies: [...session.cookies, { name: "uid.sig", value: "test-uid-signature" }]
+  };
+  await withMockFetch(async (_url, init) => {
+    assert.match(init.headers.Cookie, /(?:^|; )uid\.sig=test-uid-signature(?:;|$)/);
+    return jsonResponse({ data: { data: { id: "order-signed", payLeftSecond: 600 } } });
+  }, async () => {
+    assert.equal((await createUnpaidOrder(signedSession, parseSeatPage(seatHtml), ["1-6-18"])).orderId, "order-signed");
+  });
+});
+
+test("empty order IDs and unsuccessful HTTP responses are not successful orders", async () => {
+  for (const [id, status] of [["", 200], ["   ", 200], [0, 200], ["order-1", 502]]) {
+    await withMockFetch(async () => jsonResponse({ data: { data: { id } } }, status), async () => {
+      await assert.rejects(
+        () => createUnpaidOrder(session, parseSeatPage(seatHtml), ["1-6-18"]),
+        /锁座失败/
+      );
+    });
+  }
+});
+
 async function withMockFetch(mock, callback) {
   const original = globalThis.fetch;
   globalThis.fetch = mock;
@@ -478,6 +502,34 @@ test("does not write provider credentials or internal URLs to order logs", async
   assert.match(logs, /"errorName":"NetError"/);
   assert.match(logs, /"errorMessage":"Bad Request"/);
   assert.doesNotMatch(logs, /provider-key-secret|provider-token-secret|provider-query-secret|internal\.example/);
+});
+
+test("logs sanitized diagnostics for a non-JSON order rejection", async () => {
+  const privateBody = `<!doctype html><title>Access Denied</title>
+    <p>Forbidden cf-chl-captcha private-provider-detail</p>`;
+  const { text: logs } = await captureConsole(async () => {
+    await withMockFetch(async () => new Response(privateBody, {
+      status: 403,
+      headers: {
+        "content-type": "text/html; charset=UTF-8",
+        server: "cloudflare",
+        "cf-mitigated": "challenge"
+      }
+    }), async () => {
+      await assert.rejects(
+        () => createUnpaidOrder(session, parseSeatPage(seatHtml), ["1-6-18"]),
+        /锁座失败/
+      );
+    });
+  });
+
+  assert.match(logs, /"httpStatus":403/);
+  assert.match(logs, /"contentType":"text\/html; charset=UTF-8"/);
+  assert.match(logs, /"server":"cloudflare"/);
+  assert.match(logs, /"mitigation":"challenge"/);
+  assert.match(logs, /"bodyLength":\d+/);
+  assert.match(logs, /"responseHint":"页面 Access Denied; 标记 challenge,forbidden"/);
+  assert.doesNotMatch(logs, /private-provider-detail|cf-chl-captcha/);
 });
 
 test("classifies ambiguous post-order failures as uncertain", async () => {

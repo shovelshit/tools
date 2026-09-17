@@ -105,6 +105,21 @@ function providerErrorSummary(error) {
   return { errorName, errorMessage };
 }
 
+function nonJsonResponseDiagnostics(response, text) {
+  const title = snippet((String(text).match(/<title[^>]*>([^<]*)<\/title>/i) || [])[1] || "", 80);
+  const markers = [];
+  if (/cf-chl|captcha|challenge|验证/i.test(text)) markers.push("challenge");
+  if (/forbidden|access denied|\b403\b/i.test(text)) markers.push("forbidden");
+  if (/\blogin\b|登录/i.test(text)) markers.push("login");
+  return {
+    contentType: response.headers.get("content-type") || undefined,
+    server: response.headers.get("server") || undefined,
+    mitigation: response.headers.get("cf-mitigated") || undefined,
+    bodyLength: String(text).length,
+    responseHint: `页面 ${title || "无标题"}; 标记 ${markers.length ? markers.join(",") : "none"}`
+  };
+}
+
 export async function requestMaoyan(session, value, options = {}) {
   const url = trustedUrl(value);
   const { allowHttpError = false, ...requestOptions } = options;
@@ -448,8 +463,8 @@ export async function createUnpaidOrder(session, seatMap, seats) {
       body
     });
   } catch (error) {
-    lockError("order_attempt", { phase: "request", state: "unknown", reason: "network_error" });
-    throw new OrderAttemptError("创建订单结果不确定，请在猫眼订单中确认", true);
+    lockError("order_attempt", { phase: "request", state: "failed", reason: "network_error" });
+    throw new OrderAttemptError("锁座失败，未获得有效订单", true);
   }
   const text = await response.text();
   lockLog("order_attempt", { phase: "response", httpStatus: response.status });
@@ -457,11 +472,18 @@ export async function createUnpaidOrder(session, seatMap, seats) {
   try {
     payload = JSON.parse(text);
   } catch {
-    lockError("order_attempt", { phase: "response", state: "unknown", reason: "invalid_json" });
-    throw new OrderAttemptError("创建订单结果不确定，请在猫眼订单中确认", true);
+    lockError("order_attempt", {
+      phase: "response",
+      state: "failed",
+      reason: "invalid_json",
+      ...nonJsonResponseDiagnostics(response, text)
+    });
+    throw new OrderAttemptError("锁座失败，未获得有效订单", true);
   }
   const order = payload?.data?.data;
-  if (order && (typeof order.id === "string" || typeof order.id === "number")) {
+  if (response.ok && !payload?.error && order &&
+      ((typeof order.id === "string" && order.id.trim().length > 0) ||
+       (typeof order.id === "number" && Number.isFinite(order.id) && order.id > 0))) {
     const payLeftSecond = Number(order.payLeftSecond);
     lockLog("order_attempt", { phase: "complete", state: "locked" });
     return {
@@ -482,6 +504,6 @@ export async function createUnpaidOrder(session, seatMap, seats) {
     lockError("order_attempt", { phase: "response", state: "failed", reason: "provider_rejected" });
     throw new OrderAttemptError(ORDER_REJECTED_SEATS, false);
   }
-  lockError("order_attempt", { phase: "response", state: "unknown", reason: "unrecognized_response" });
-  throw new OrderAttemptError("创建订单结果不确定，请在猫眼订单中确认", true);
+  lockError("order_attempt", { phase: "response", state: "failed", reason: "unrecognized_response" });
+  throw new OrderAttemptError("锁座失败，未获得有效订单", true);
 }

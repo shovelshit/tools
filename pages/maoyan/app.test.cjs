@@ -379,7 +379,7 @@ test("lock dialog gates everything behind maoyan session upload", () => {
   const source = readSource("lock.js");
   const html = readSource("index.html");
   assert.match(source, /function renderGate/);
-  assert.match(source, /els\.sectionSchedule, els\.sectionSeats, els\.sectionRisk, els\.sectionRules/);
+  assert.match(source, /els\.sectionSchedule, els\.sectionSeats, els\.sectionRules/);
   assert.match(source, /await loadSeats\(\); \/\/ 门控解除后立即加载座位表/);
   assert.match(html, /id="lock-section-session"/);
   assert.match(html, /id="lock-gate-hint"/);

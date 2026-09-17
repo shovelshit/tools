@@ -26,7 +26,9 @@ export async function persistTerminalNotification(env, {
   userId, rule, title, content, credentialVersion, nowMs = Date.now()
 }) {
   const result = await env.DB.batch([
-    env.DB.prepare(
+    rule.state === "failed" || rule.state === "expired" ? env.DB.prepare(
+      "DELETE FROM lock_rule WHERE token_id=? AND json_extract(data,'$.id')=?"
+    ).bind(userId, rule.id) : env.DB.prepare(
       "INSERT INTO lock_rule(token_id,data,updated_at) VALUES (?,?,?) " +
       "ON CONFLICT(token_id) DO UPDATE SET data=excluded.data,updated_at=excluded.updated_at"
     ).bind(userId, JSON.stringify(rule), new Date(nowMs).toISOString()),

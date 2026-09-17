@@ -34,7 +34,8 @@ function deps(stored, overrides = {}) {
   return {
     now: () => now,
     requireActive: async () => ({}),
-    getRule: async () => stored,
+    getRule: async () => stored.deleted ? null : stored,
+    removeRule: async () => { stored.deleted = true; },
     putRule: async (_env, _token, value) => { Object.assign(stored, value); saved.push(structuredClone(value)); },
     fetchCinema: async () => ({ showData: { movies: [{ id: "7", shows: [{ showDate: "2026-09-12", plist: [{ seqNo: "200", tm: "20:00" }] }] }] } }),
     findShows: (cinema, input) => cinema.showData.movies[0].shows[0].plist
@@ -300,21 +301,21 @@ test("scheduled lock failure push keeps the readable seat label", async () => {
     notify: async (_config, title, content) => { notification = { title, content }; }
   }));
 
-  assert.equal(stored.state, "failed");
+  assert.equal(stored.deleted, true);
   assert.equal(notification.title, "❌ 锁座失败｜测试电影");
   // 失败通知没有支付倒计时
-  assert.equal(notification.content, "🏢 测试影院\n📅 2026-09-12 20:00\n💺 1排12座\n📌 原因：猫眼拒绝创建订单\n\n👉 请查看当前座位，重新选择");
+  assert.equal(notification.content, "🏢 测试影院\n📅 2026-09-12 20:00\n💺 1排12座\n📌 原因：锁座失败，未获得有效订单\n\n👉 请查看当前座位，重新选择");
 });
 
 test("automation marks a past China target date expired before provider calls", async () => {
   const stored = rule({ targetDate: "2026-09-10" });
   let cinemaCalls = 0;
   await runOneLockRule(await runtime(), tokenId, deps(stored, { fetchCinema: async () => { cinemaCalls++; return {}; } }));
-  assert.equal(stored.state, "expired");
+  assert.equal(stored.deleted, true);
   assert.equal(cinemaCalls, 0);
 });
 
-test("production terminal transition persists the rule and outbox event atomically", async () => {
+test("production expiration removes the rule and queues its notification atomically", async () => {
   const DB = await createDB({
     tokens: [{ id: tokenId, token: "access-token" }],
     configs: { [tokenId]: { enabled: true, cinemaId: "25428" } },
@@ -333,9 +334,52 @@ test("production terminal transition persists the rule and outbox event atomical
     getConfig: async () => ({ version: 1 })
   });
   assert.deepEqual(result, { ok: true, state: "expired" });
-  assert.equal((await db.getLockRuleRow(DB, tokenId)).state, "expired");
+  assert.equal(await db.getLockRuleRow(DB, tokenId), null);
   assert.equal((await DB.prepare("SELECT COUNT(*) AS n FROM notification_outbox").first()).n, 1);
   assert.equal(wakes, 1);
+});
+
+test("production order failure deletes the rule, queues failure once, and never retries", async () => {
+  const stored = rule();
+  const DB = await createDB({
+    tokens: [{ id: tokenId, token: "access-token" }],
+    configs: { [tokenId]: { enabled: true, cinemaId: "25428" } },
+    lockRules: { [tokenId]: stored }
+  });
+  const env = await runtime({
+    DB,
+    NOTIFICATION_DISPATCHER: {
+      idFromName: (id) => id,
+      get: () => ({ fetch: async () => Response.json({ ok: true }) })
+    }
+  });
+  let attempts = 0;
+  const options = deps(stored, {
+    getConfig: async () => ({ version: 1 }),
+    createOrder: async () => { attempts++; throw new OrderAttemptError("timeout", true); }
+  });
+  for (const key of ["getRule", "putRule", "removeRule", "notify"]) delete options[key];
+  assert.equal((await runOneLockRule(env, tokenId, options)).state, "failed");
+  assert.equal(await db.getLockRuleRow(DB, tokenId), null);
+  assert.equal((await DB.prepare("SELECT COUNT(*) AS n FROM notification_outbox").first()).n, 1);
+  assert.equal((await runOneLockRule(env, tokenId, options)).skipped, true);
+  assert.equal(attempts, 1);
+});
+
+test("successful order persistence failure does not delete the rule as an order failure", async () => {
+  const stored = rule();
+  const env = await runtime();
+  let attempts = 0;
+  await assert.rejects(() => runOneLockRule(env, tokenId, deps(stored, {
+    putRule: async (_env, _id, value) => {
+      if (value.state === "locked") throw new Error("database unavailable");
+      Object.assign(stored, value);
+    },
+    createOrder: async () => { attempts++; return { orderId: "created-order" }; }
+  })), /database unavailable/);
+  assert.equal(stored.deleted, undefined);
+  assert.equal(stored.state, "matching");
+  assert.equal(attempts, 1);
 });
 
 test("automation keeps no exact HH:mm match waiting without seat request", async () => {
@@ -405,8 +449,8 @@ test("automation turns an ambiguous nearby show into a notified failure", async 
     notify: async (_config, title, content) => { notification = { title, content }; }
   }));
 
-  assert.equal(stored.state, "failed");
-  assert.match(stored.lastError, /多个同厅型/);
+  assert.equal(stored.deleted, true);
+  assert.match(notification.content, /多个同厅型/);
   assert.equal(notification.title, "❌ 锁座失败｜测试电影");
 });
 
@@ -420,7 +464,7 @@ test("automation notifies when a selected nearby show cannot load its seat map",
     notify: async (_config, title, content) => { notification = { title, content }; }
   }));
 
-  assert.equal(stored.state, "failed");
+  assert.equal(stored.deleted, true);
   assert.equal(notification.title, "❌ 锁座失败｜测试电影");
   assert.match(notification.content, /2026-09-12 18:50/);
 });
@@ -459,7 +503,7 @@ test("automation does not match a default nearby candidate beyond thirty minutes
   assert.equal(orderCalls, 0);
 });
 
-test("automation notifies when a fuzzy order result is uncertain", async () => {
+test("automation removes the rule and notifies failure when a fuzzy order has no confirmed success", async () => {
   const stored = rule({ hall: "1号激光IMAX厅", templateTime: "18:40" });
   let notification;
   await runOneLockRule(await runtime(), tokenId, deps(stored, {
@@ -473,8 +517,8 @@ test("automation notifies when a fuzzy order result is uncertain", async () => {
     notify: async (_config, title, content) => { notification = { title, content }; }
   }));
 
-  assert.equal(stored.state, "unknown");
-  assert.equal(notification.title, "⚠️ 订单结果待确认｜测试电影");
+  assert.equal(stored.deleted, true);
+  assert.equal(notification.title, "❌ 锁座失败｜测试电影");
   assert.match(notification.content, /2026-09-12 18:50/);
 });
 
@@ -485,7 +529,7 @@ test("automation fails ambiguous exact HH:mm schedules without an order", async 
     findShows: () => [{ seqNo: "200" }, { seqNo: "201" }],
     createOrder: async () => { orderCalls++; return {}; }
   }));
-  assert.equal(stored.state, "failed");
+  assert.equal(stored.deleted, true);
   assert.equal(orderCalls, 0);
 });
 
@@ -496,22 +540,22 @@ test("automation fails when a selected future seat is unavailable", async () => 
     fetchSeats: async () => ({ seqNo: "200", seats: [{ seatNo: "1-6-18", rowId: "6", columnId: "18", available: false }] }),
     createOrder: async () => { orderCalls++; return {}; }
   }));
-  assert.equal(stored.state, "failed");
+  assert.equal(stored.deleted, true);
   assert.equal(orderCalls, 0);
 });
 
-test("automation records certain provider rejection as failed and ambiguous order as unknown", async () => {
+test("automation removes both rejected and unconfirmed rules", async () => {
   const rejected = rule();
   await runOneLockRule(await runtime(), tokenId, deps(rejected, {
     createOrder: async () => { throw new OrderAttemptError("rejected", false); }
   }));
-  assert.equal(rejected.state, "failed");
+  assert.equal(rejected.deleted, true);
 
   const unknown = rule();
   await runOneLockRule(await runtime(), tokenId, deps(unknown, {
     createOrder: async () => { throw new OrderAttemptError("ambiguous", true); }
   }));
-  assert.equal(unknown.state, "unknown");
+  assert.equal(unknown.deleted, true);
 });
 
 test("automation skips terminal and matching rules forever", async () => {

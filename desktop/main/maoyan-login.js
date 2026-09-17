@@ -81,9 +81,13 @@ function createMaoyanLogin({ BrowserWindow, session, workerClient, clock = globa
         if (state.phase === "login") {
           state.phase = "capture";
           log("capture", "started", "login");
-          await state.window.loadURL(`${ORIGIN}/cinema/${cinemaId}`);
-          if (state.finished) return;
-          await state.window.webContents.executeJavaScript(`fetch("/ajax/cinemaDetail?cinemaId=${cinemaId}", { credentials: "include" }).then(() => undefined)`);
+          // Capture request headers independently of page load and response completion.
+          void state.window.loadURL(`${ORIGIN}/cinema/${cinemaId}`).then(() => {
+            if (state.finished || state.phase !== "capture") return;
+            return state.window.webContents.executeJavaScript(`void fetch("/ajax/cinemaDetail?cinemaId=${cinemaId}", { credentials: "include" }).catch(() => {})`);
+          }).catch(() => {
+            if (!state.finished && state.phase === "capture") void fail("login");
+          });
         }
         if (state.finished) return;
         const capturedCookies = await state.temporary.cookies.get({ url: ORIGIN });
@@ -91,6 +95,8 @@ function createMaoyanLogin({ BrowserWindow, session, workerClient, clock = globa
         if (!state.signature || !hasLoginCookies(capturedCookies)) return;
         let payload = captureSession({ cookies: capturedCookies, requestHeaders: { mtgsig: state.signature }, requestUrl: `${ORIGIN}/ajax/cinemaDetail?${new URLSearchParams(state.query)}`, userAgent: state.temporary.getUserAgent() });
         state.phase = "approval";
+        state.captureComplete = true;
+        if (!state.window.isDestroyed()) state.window.destroy();
         let uploaded;
         try {
           uploaded = await state.upload(payload, { signal: state.abort.signal, onSend: () => {
@@ -139,7 +145,7 @@ function createMaoyanLogin({ BrowserWindow, session, workerClient, clock = globa
       on(contents, "will-redirect", navigation);
       on(contents, "render-process-gone", () => { if (!state.uploadInFlight) void fail("login"); });
       on(contents, "did-fail-load", (_event, code, _description, _url, isMainFrame) => { if (isMainFrame && code !== -3 && !state.uploadInFlight) void fail("navigation"); });
-      on(state.window, "closed", () => { void state.cancel(); });
+      on(state.window, "closed", () => { if (!state.captureComplete) void state.cancel(); });
       on(temporary.cookies, "changed", () => { void checkLogin(); });
       state.deadline = clock.setTimeout(() => { void fail(state.uploadInFlight ? "unknown" : "timeout"); }, 10 * 60 * 1000);
       const poll = () => {

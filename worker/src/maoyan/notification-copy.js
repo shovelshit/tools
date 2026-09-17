@@ -42,7 +42,7 @@ function lockTitle(rule) {
   const prefixes = {
     locked: "✅ 锁座成功",
     failed: "❌ 锁座失败",
-    unknown: "⚠️ 订单结果待确认",
+    unknown: "❌ 锁座失败",
     expired: "⌛ 锁座任务已过期"
   };
   return titled(prefixes[rule?.state] || "🎟️ 锁座任务更新", rule?.movieName);
@@ -65,10 +65,8 @@ function lockActionLines(rule) {
     }
     return lines;
   }
-  if (rule?.state === "unknown") {
-    return ["", "📡 请求已发出，但未收到明确结果", "", "🛑 请先查看猫眼订单，避免重复下单"];
-  }
-  const reason = text(rule?.lastError) || (rule?.state === "expired" ? "目标场次已过期" : "锁座未完成");
+  const reason = rule?.state === "unknown" ? "锁座失败，未获得有效订单" :
+    text(rule?.lastError) || (rule?.state === "expired" ? "目标场次已过期" : "锁座未完成");
   return [
     `📌 原因：${reason}`,
     "",

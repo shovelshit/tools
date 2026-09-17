@@ -71,7 +71,7 @@ export function normalizeSession(raw) {
   const cookies = (Array.isArray(raw.cookies) ? raw.cookies : [])
     .filter((cookie) => cookie && /^\.?([a-z0-9-]+\.)*maoyan\.com$/i.test(String(cookie.domain || ".maoyan.com")))
     .map((cookie) => ({ name: String(cookie.name || "").trim(), value: String(cookie.value || "") }))
-    .filter((cookie) => /^[A-Za-z0-9_-]{1,128}$/.test(cookie.name) && cookie.value.length <= 4096)
+    .filter((cookie) => /^[A-Za-z0-9_.-]{1,128}$/.test(cookie.name) && cookie.value.length <= 4096 && !/[\x00-\x1f\x7f;]/.test(cookie.value))
     .slice(0, 64);
   const uid = cookies.find((cookie) => cookie.name === "uid")?.value || "";
   const csrf = String(raw.csrf || "");

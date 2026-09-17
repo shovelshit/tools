@@ -30,6 +30,18 @@ test("rejects a session without uid or mtgsig", () => {
   assert.throws(() => normalizeSession(validSession({ cookies: [] })), /会话不完整/);
 });
 
+test("preserves uid.sig through encrypted session upload and reload", async () => {
+  const env = await createAccountEnv();
+  const { account } = await seedAccount(env);
+  const raw = validSession();
+  raw.cookies.push({ name: "uid.sig", value: "uid-signature", domain: "www.maoyan.com" });
+  raw.cookies.push({ name: "bad;name", value: "invalid", domain: "www.maoyan.com" });
+  await saveLockSession(env, account.id, raw);
+  const session = await loadLockSession(env, account.id);
+  assert.deepEqual(session.cookies.find(c => c.name === "uid.sig"), { name: "uid.sig", value: "uid-signature" });
+  assert.equal(session.cookies.some(c => c.name === "bad;name"), false);
+});
+
 test("rejects camelCase upload fields", () => {
   const raw = validSession();
   raw.userAgent = raw.user_agent;

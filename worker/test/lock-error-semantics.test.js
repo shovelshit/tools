@@ -168,11 +168,17 @@ test("座位被抢占时补充为更具体的提示", async () => {
   );
 });
 
-test("下单结果不确定时不标记为上游拒绝(仍走待确认路径)", async () => {
-  const rule = await createLockRule(await envWithConfig(),"token-a", ruleInput(), orderDependencies(async () => {
-    throw new OrderAttemptError("创建订单结果不确定，请在猫眼订单中确认", true);
-  }));
-  assert.equal(rule.state, "unknown");
+test("unsuccessful immediate orders fail without persisting a rule or retrying", async () => {
+  for (const failure of [new OrderAttemptError("timeout", true), new Error("internal"), new OrderAttemptError(ORDER_REJECTED_SESSION, false)]) {
+    const env = await envWithConfig();
+    let attempts = 0;
+    await assert.rejects(createLockRule(env,"token-a", ruleInput(), orderDependencies(async () => {
+      attempts++;
+      throw failure;
+    })), error => error.kind === "upstream" && !/人工|不确定/.test(error.message));
+    assert.equal(attempts, 1);
+    assert.equal(await env.DB.prepare("SELECT data FROM lock_rule WHERE token_id=?").bind("token-a").first(), null);
+  }
 });
 
 test("协调器把上游拒绝映射为 502 并保留原文案", async () => {

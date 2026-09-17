@@ -1,10 +1,24 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createAccountEnv, seedAccount } from "./account-fixtures.js";
-import { deliverOutbox, enqueueNotification } from "../src/maoyan/notification-outbox.js";
+import { deliverOutbox, enqueueNotification, persistTerminalNotification } from "../src/maoyan/notification-outbox.js";
 import { runScheduledMaintenance } from "../src/maoyan/tokens.js";
 
 const NOW = Date.parse("2026-09-16T04:00:00.000Z");
+
+test("failed lock removes waiting rule but retains a deliverable failure notification", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  const { account } = await seedAccount(env, { expiresAt: NOW + 60_000 });
+  await env.DB.prepare("INSERT INTO lock_rule(token_id,data,updated_at) VALUES (?,?,?)")
+    .bind(account.id, JSON.stringify({ id: "r1", state: "matching" }), new Date(NOW).toISOString()).run();
+  await persistTerminalNotification(env, {
+    userId: account.id, rule: { id: "r1", state: "failed" }, title: "failure", content: "failed",
+    credentialVersion: 1, nowMs: NOW
+  });
+  assert.equal(await env.DB.prepare("SELECT data FROM lock_rule WHERE token_id=?").bind(account.id).first(), null);
+  const result = await deliverOutbox(env, { nowMs: NOW, send: async () => {} });
+  assert.equal(result.sent, 1);
+});
 
 test("duplicate notification events enqueue once", async () => {
   const env = await createAccountEnv({ nowMs: NOW });

@@ -60,6 +60,7 @@ test("parsed Worker configurations keep custom routes at the top level", async (
     readFile(new URL("../wrangler.example.toml", import.meta.url), "utf8")
   ]);
   const expectedRouteSuffixes = [
+    "/maoyan", "/maoyan/*", "/maoyan", "/maoyan/*",
     "/api/*", "/api/*",
     "/store", "/store",
     "/store/*", "/store/*",
