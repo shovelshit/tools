@@ -12,6 +12,7 @@ import {
 } from "../src/maoyan/lock-session.js";
 import { retryPendingRevocationCleanups, userKey } from "../src/maoyan/user.js";
 import { updateManagedAccount } from "../src/maoyan/enrollment-store.js";
+import { enqueueRevocationCleanupKey } from "../src/maoyan/db.js";
 
 test("normalizes a local session and masks its uid", () => {
   const session = normalizeSession(validSession());
@@ -182,11 +183,52 @@ test("a failed revoke-race KV compensation retains a durable cleanup retry", asy
   assert.equal(await env.DB.prepare("SELECT 1 AS ok FROM session_versions WHERE user_id=?").bind(account.id).first(), null);
   assert.notEqual(await env.MAOYAN_KV.get(versionedKey), null);
   assert.notEqual(await env.DB.prepare("SELECT 1 AS ok FROM revocation_cleanup WHERE user_id=?").bind(account.id).first(), null);
+  assert.notEqual(await env.DB.prepare(
+    "SELECT 1 AS ok FROM revocation_cleanup_keys WHERE user_id=? AND session_key=?"
+  ).bind(account.id, versionedKey).first(), null);
 
-  hideNewVersion = false;
   failCompensation = false;
   await retryPendingRevocationCleanups(env, { nowMs: nowMs + 1 });
   assert.equal(await env.MAOYAN_KV.get(versionedKey), null);
+  assert.equal(await env.DB.prepare(
+    "SELECT 1 AS ok FROM revocation_cleanup_keys WHERE user_id=? AND session_key=?"
+  ).bind(account.id, versionedKey).first(), null);
+  assert.equal(await env.DB.prepare("SELECT 1 AS ok FROM revocation_cleanup WHERE user_id=?").bind(account.id).first(), null);
+});
+
+test("a late exact cleanup key prevents an in-flight retry from clearing its parent", async () => {
+  const nowMs = Date.parse("2026-09-16T04:00:00.000Z");
+  const env = await createAccountEnv({ nowMs });
+  const { account } = await seedAccount(env, { expiresAt: nowMs + 60_000 });
+  await env.DB.prepare("UPDATE users SET state='revoked' WHERE id=?").bind(account.id).run();
+  const firstKey = userKey(account.id, "maoyan-session:v111");
+  const lateKey = userKey(account.id, "maoyan-session:v222");
+  await env.MAOYAN_KV.put(firstKey, "first");
+  await enqueueRevocationCleanupKey(env.DB, account.id, firstKey, nowMs);
+  const remove = env.MAOYAN_KV.delete.bind(env.MAOYAN_KV);
+  const put = env.MAOYAN_KV.put.bind(env.MAOYAN_KV);
+  let insertedLateKey = false;
+  env.MAOYAN_KV.delete = async (key) => {
+    if (key === firstKey && !insertedLateKey) {
+      insertedLateKey = true;
+      await put(lateKey, "late");
+      await enqueueRevocationCleanupKey(env.DB, account.id, lateKey, nowMs + 1);
+    }
+    return await remove(key);
+  };
+
+  await retryPendingRevocationCleanups(env, { nowMs: nowMs + 2 });
+
+  assert.equal(await env.MAOYAN_KV.get(firstKey), null);
+  assert.equal(await env.MAOYAN_KV.get(lateKey), "late");
+  assert.notEqual(await env.DB.prepare("SELECT 1 AS ok FROM revocation_cleanup WHERE user_id=?").bind(account.id).first(), null);
+  assert.notEqual(await env.DB.prepare(
+    "SELECT 1 AS ok FROM revocation_cleanup_keys WHERE user_id=? AND session_key=?"
+  ).bind(account.id, lateKey).first(), null);
+
+  await retryPendingRevocationCleanups(env, { nowMs: nowMs + 3 });
+  assert.equal(await env.MAOYAN_KV.get(lateKey), null);
+  assert.equal(await env.DB.prepare("SELECT 1 AS ok FROM revocation_cleanup_keys WHERE user_id=?").bind(account.id).first(), null);
   assert.equal(await env.DB.prepare("SELECT 1 AS ok FROM revocation_cleanup WHERE user_id=?").bind(account.id).first(), null);
 });
 
