@@ -177,18 +177,21 @@ function renderAccounts() {
     const activity = document.createElement("td");
     activity.textContent = fmtTime(account.lastActivityAt);
     const operations = document.createElement("td");
-    operations.className = "account-actions";
+    const operationsInner = document.createElement("div");
+    operationsInner.className = "account-actions-inner";
 
     if (account.accountStatus === "active") {
-      operations.appendChild(actionButton("暂停", "", () => updateAccount(account, { state: "suspended" })));
+      operationsInner.appendChild(actionButton("暂停", "", () => updateAccount(account, { state: "suspended" })));
     } else if (account.accountStatus === "suspended") {
-      operations.appendChild(actionButton("恢复", "", () => updateAccount(account, { state: "active" })));
+      operationsInner.appendChild(actionButton("恢复", "", () => updateAccount(account, { state: "active" })));
     } else if (account.accountStatus === "expired") {
-      operations.appendChild(actionButton("续 15 天", "", () => updateAccount(account, { expiresAt: Date.now() + 15 * 86400000 })));
+      operationsInner.appendChild(actionButton("续 15 天", "", () => updateAccount(account, { expiresAt: Date.now() + 15 * 86400000 })));
     }
     if (account.accountStatus !== "revoked") {
-      operations.appendChild(actionButton("撤销", "danger", () => revokeAccount(account)));
+      operationsInner.appendChild(actionButton("撤销", "danger", () => revokeAccount(account)));
     }
+    if (!operationsInner.children.length) operationsInner.textContent = "—";
+    operations.appendChild(operationsInner);
     row.append(identity, qualification, monitor, expiry, activity, operations);
     els.tbody.appendChild(row);
   }

@@ -56,6 +56,27 @@ test("admin UI scopes accounts and settings by an immutable business selection",
   assert.doesNotMatch(source, /patch[^\n]+businessLine/);
 });
 
+test("account operation cells preserve table layout and render an empty-state placeholder", () => {
+  const { context, elements } = loadAdminWithDeferredRequests();
+  vm.runInContext(`accounts = [
+    { userId: "active-1", remark: "Active", source: "manual", accountStatus: "active", accountVersion: 1, expiresAt: "2026-10-01T00:00:00Z" },
+    { userId: "revoked-1", remark: "Revoked", source: "manual", accountStatus: "revoked", accountVersion: 2, expiresAt: "2026-10-01T00:00:00Z" }
+  ]; capacity = { used: 1, maxUsers: 20 }; renderAccounts();`, context);
+
+  const rows = elements.get("account-tbody").children;
+  assert.equal(rows.length, 2);
+  const activeOperations = rows[0].children[5];
+  assert.equal(activeOperations.className, "");
+  assert.equal(activeOperations.children.length, 1);
+  assert.equal(activeOperations.children[0].className, "account-actions-inner");
+
+  const revokedOperations = rows[1].children[5];
+  assert.equal(revokedOperations.className, "");
+  assert.equal(revokedOperations.children.length, 1);
+  assert.equal(revokedOperations.children[0].className, "account-actions-inner");
+  assert.equal(revokedOperations.children[0].textContent, "—");
+});
+
 function deferred() {
   let resolve;
   const promise = new Promise((done) => { resolve = done; });

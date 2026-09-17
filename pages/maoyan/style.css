@@ -1325,7 +1325,7 @@ summary:focus-visible {
 .admin-page .admin-filters select { min-height: 30px; }
 .admin-page .admin-table-panel { overflow: hidden; }
 .admin-page .account-hint { display: block; margin-top: 2px; font-size: 10px; }
-.admin-page .account-actions { display: flex; gap: 2px; }
+.admin-page .account-actions-inner { display: flex; align-items: center; gap: 2px; min-height: 18px; }
 .admin-page .admin-pagination { display: flex; justify-content: center; padding-top: 8px; }
 .badge.account-active,
 .badge.account-monitoring { border-color: rgba(8, 127, 122, 0.32); color: var(--success); }
