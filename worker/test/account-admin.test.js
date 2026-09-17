@@ -130,7 +130,7 @@ test("account revocation clears Maoyan runtime only after the state transition",
   assert.notEqual(await env.DB.prepare("SELECT 1 AS ok FROM audit_events WHERE subject_user_id=? AND event_type='account_updated'").bind(account.id).first(), null);
 });
 
-test("legacy token revocation clears Store browser sessions while preserving the Store account", async () => {
+test("account revocation clears Store browser sessions while preserving the Store account", async () => {
   const env = await createAccountEnv({ nowMs: NOW });
   env.NOW_MS = String(NOW);
   const { account } = await seedAccount(env, { businessLine: "store", expiresAt: NOW + 60_000 });
@@ -138,8 +138,8 @@ test("legacy token revocation clears Store browser sessions while preserving the
     "INSERT INTO store_sessions(token_hash,business_line,user_id,expires_at,created_at) VALUES (?,?,?,?,?)"
   ).bind("a".repeat(64), "store", account.id, NOW + 60_000, NOW).run();
 
-  const response = await worker.fetch(request("/api/admin/tokens/revoke", {
-    method: "POST", body: { id: account.id, expectedVersion: account.version }
+  const response = await worker.fetch(request("/api/admin/accounts/update", {
+    method: "POST", body: { id: account.id, expectedVersion: account.version, patch: { state: "revoked" } }
   }), env);
   assert.equal(response.status, 200);
   assert.equal(await env.DB.prepare("SELECT 1 AS ok FROM store_sessions WHERE user_id=?").bind(account.id).first(), null);

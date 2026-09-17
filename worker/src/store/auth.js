@@ -119,13 +119,18 @@ async function storeLogin(request, env, url) {
   requireBusinessAccess(accountPrincipal(account, "access_key", nowMs), STORE_BUSINESS);
   const secret = randomSession();
   const tokenHash = await hashAccessKey(secret);
-  await env.DB.batch([
-    env.DB.prepare("DELETE FROM store_sessions WHERE expires_at<=? OR (admin_token_hash IS NOT NULL AND admin_token_hash!=?)")
-      .bind(nowMs, await hashAccessKey(String(env.ADMIN_TOKEN || ""))),
-    env.DB.prepare(
-      "INSERT INTO store_sessions(token_hash,business_line,user_id,expires_at,admin_token_hash,created_at) VALUES (?,?,?,?,?,?)"
-    ).bind(tokenHash, STORE_BUSINESS, account.id, nowMs + SESSION_MS, adminTokenHash, nowMs)
-  ]);
+  try {
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM store_sessions WHERE expires_at<=? OR (admin_token_hash IS NOT NULL AND admin_token_hash!=?)")
+        .bind(nowMs, await hashAccessKey(String(env.ADMIN_TOKEN || ""))),
+      env.DB.prepare(
+        "INSERT INTO store_sessions(token_hash,business_line,user_id,expires_at,admin_token_hash,created_at) VALUES (?,?,?,?,?,?)"
+      ).bind(tokenHash, STORE_BUSINESS, account.id, nowMs + SESSION_MS, adminTokenHash, nowMs)
+    ]);
+  } catch (error) {
+    if (String(error?.message || "").includes("ACCOUNT_REVOKED")) fail("ACCOUNT_REVOKED", "账号已撤销");
+    throw error;
+  }
   return response({ ok: true, account: publicAccount(account, nowMs) }, 200, {
     "Set-Cookie": sessionCookie(secret, url, SESSION_MS / 1000)
   });

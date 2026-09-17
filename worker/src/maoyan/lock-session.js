@@ -114,7 +114,18 @@ export async function saveLockSession(env, tokenId, raw) {
     const envelope = await encryptSessionEnvelope(env, tokenId, session, version);
     const key = versionedSessionKey(tokenId, version);
     await env.MAOYAN_KV.put(key, JSON.stringify(envelope));
-    const result = await activateSessionVersion(env.DB, tokenId, version, current?.activeVersion ?? null);
+    let result;
+    try {
+      result = await activateSessionVersion(env.DB, tokenId, version, current?.activeVersion ?? null);
+    } catch (error) {
+      await env.MAOYAN_KV.delete(key).catch(() => {});
+      if (String(error?.message || "").includes("ACCOUNT_REVOKED")) {
+        const revoked = new Error("账号已撤销");
+        revoked.code = "ACCOUNT_REVOKED";
+        throw revoked;
+      }
+      throw error;
+    }
     if (Number(result?.meta?.changes ?? 1) > 0) {
       if (current) await env.MAOYAN_KV.delete(versionedSessionKey(tokenId, current.activeVersion));
       return publicStatus(envelope);

@@ -1,37 +1,14 @@
-// ---------------- 令牌管理(D1 存储) + 鉴权 ----------------
-// 令牌唯一来源: D1 tokens 表(id, token UNIQUE, remark, created_at), 鉴权按 token 点查一行。
+// ---------------- 管理入口与定时维护 ----------------
 
-import * as db from "./db.js";
-import { cleanupUserData, getUserConfig } from "./user.js";
 import { json } from "../common/http.js";
 import { runCheck } from "./check.js";
 import { monitorError } from "./log.js";
 import { inMonitorWindow } from "./cron.js";
 import { listSeatFeedback, deleteSeatFeedback } from "./seat-feedback.js";
-import { migrateKvToD1 } from "./migrate.js";
-import { accountStatus, getAccount } from "./accounts.js";
-import { authenticate } from "./auth.js";
+import { accountStatus } from "./accounts.js";
 import { cleanupExpiredAccount } from "./account-lifecycle.js";
-import { accountErrorResponse, handleAdminAccountApi, listAdminAccounts } from "./account-api.js";
-import { createManagedAccount, updateManagedAccount } from "./enrollment-store.js";
+import { accountErrorResponse, handleAdminAccountApi } from "./account-api.js";
 import { enqueueNotification, wakeNotificationDispatcher } from "./notification-outbox.js";
-
-export function randomToken() {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-function maskToken(token) {
-  const value = String(token || "");
-  if (!value) return "";
-  const edge = value.length <= 10 ? 2 : 4;
-  return `${value.slice(0, edge)} **** ${value.slice(-edge)}`;
-}
-
-export async function getManagedTokens(env) {
-  return await db.listTokens(env.DB);
-}
 
 function checkAdminAuth(request, env) {
   const admin = String(env.ADMIN_TOKEN || "").trim();
@@ -39,24 +16,7 @@ function checkAdminAuth(request, env) {
   return Boolean(admin) && given === admin;
 }
 
-async function publicTokenRecord(env, token) {
-  const config = await getUserConfig(env, token.id);
-  return {
-    id: token.id,
-    token: maskToken(token.token),
-    remark: token.remark || "",
-    createdAt: token.createdAt || null,
-    state: config.enabled === true ? "monitoring" : "stopped",
-  };
-}
-
-// 仅认 X-Token; 返回随机 namespace ID，而不是令牌本身。按 token 点查(D1 unique 索引)。
-export async function checkAuthFull(request, env) {
-  const principal = await authenticate(request, env);
-  return principal ? principal.userId : null;
-}
-
-// cron 直接读取唯一的令牌元数据，不维护会与删除操作竞争的副本。
+// cron 直接读取账号元数据，不维护会与删除操作竞争的副本。
 // 窗口外(北京 23:00~06:59)批次整体跳过: 不抓上游、锁座链不执行(等待中的规则保留, 窗口内恢复)。
 // opts.now 供测试注入固定时刻; 手动检查不经此函数, 不受窗口限制。
 export async function runScheduledChecks(env, afterMonitor, opts = {}) {
@@ -150,43 +110,6 @@ export async function handleAdminTokens(request, env, url) {
   try {
     const accountResponse = await handleAdminAccountApi(request, env, url);
     if (accountResponse) return accountResponse;
-    if (url.pathname === "/api/admin/tokens" && request.method === "GET") {
-      const accountUrl = new URL(url);
-      accountUrl.pathname = "/api/admin/accounts";
-      accountUrl.search = "?limit=100";
-      const listed = await listAdminAccounts(env, accountUrl, Date.now());
-      const tokens = listed.accounts.map((account) => ({
-        id: account.userId,
-        token: account.keyHint.replace("...", " **** "),
-        remark: account.remark,
-        createdAt: new Date(account.createdAt).toISOString(),
-        state: account.monitorState
-      }));
-      return json({ ok: true, tokens });
-    }
-    if (url.pathname === "/api/admin/tokens" && request.method === "POST") {
-      const body = await request.json().catch(() => ({}));
-      if (String(body.token || "").trim()) return json({ ok: false, error: "访问密钥仅支持系统随机生成" }, 400);
-      const created = await createManagedAccount(env, {
-        remark: body.remark,
-        requestId: body.requestId || crypto.randomUUID(),
-        nowMs: Date.now()
-      });
-      return json({ ok: true, id: created.account.id, ...(created.key ? { token: created.key } : {}) }, created.replayed ? 200 : 201);
-    }
-    if (url.pathname === "/api/admin/tokens/revoke" && request.method === "POST") {
-      const body = await request.json().catch(() => ({}));
-      const id = String(body.id || "");
-      const revoked = await getAccount(env.DB, id);
-      if (!revoked) return json({ ok: false, error: "令牌不存在" }, 404);
-      await updateManagedAccount(env, {
-        userId: id,
-        expectedVersion: body.expectedVersion ?? revoked.version,
-        patch: { state: "revoked" },
-        nowMs: Date.now()
-      });
-      return json({ ok: true });
-    }
     if (url.pathname === "/api/admin/seat-feedback" && request.method === "GET") {
       // 座位解析失败反馈全量列表: 记录只有标识, 管理员拿 id 现场重拉座位页复习
       return json({ ok: true, feedback: await listSeatFeedback(env) });
@@ -198,10 +121,6 @@ export async function handleAdminTokens(request, env, url) {
         return json({ ok: false, error: "无效的反馈记录" }, 400);
       }
       return json({ ok: true });
-    }
-    if (url.pathname === "/api/admin/migrate-kv-to-d1" && request.method === "POST") {
-      // 一次性 KV→D1 迁移(upsert, 可重复执行; 不删 KV 数据, 回滚=重新部署 KV 版)
-      return json({ ok: true, ...(await migrateKvToD1(env)) });
     }
     return json({ error: "Method Not Allowed" }, 405);
   } catch (e) {

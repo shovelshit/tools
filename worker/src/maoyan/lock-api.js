@@ -49,6 +49,7 @@ function ruleInputError(error) {
 
 function safeError(error) {
   const message = String(error?.message || "");
+  if (error?.code === "ACCOUNT_REVOKED") return response({ error: "账号已撤销" }, 403);
   if (error?.kind === "input") return response({ error: message }, 400);
   if (/^猫眼会话(格式错误|不完整)/.test(message)) {
     return response({ error: message }, 400);

@@ -37,6 +37,28 @@ test("a Store key creates a path-scoped browser session without storing its secr
   assert.notEqual(cookie.match(/^store_session=([^;]+)/)[1], session.token_hash);
 });
 
+test("a Store login racing revocation cannot recreate a browser session", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  env.NOW_MS = String(NOW);
+  const { account, key } = await seedAccount(env, { businessLine: "store", expiresAt: NOW + 60_000 });
+  const batch = env.DB.batch.bind(env.DB);
+  let revoked = false;
+  env.DB.batch = async (statements) => {
+    if (!revoked) {
+      revoked = true;
+      await env.DB.prepare("UPDATE users SET state='revoked' WHERE id=?").bind(account.id).run();
+    }
+    return await batch(statements);
+  };
+
+  const response = await worker.fetch(storeRequest("/store/auth/session", {
+    method: "POST", body: { key }, headers: { Origin: "https://worker.example" }
+  }), env);
+
+  assert.equal(response.status, 403);
+  assert.equal(await env.DB.prepare("SELECT 1 AS ok FROM store_sessions WHERE user_id=?").bind(account.id).first(), null);
+});
+
 test("Store session grants only its owner account inspection and logout", async () => {
   const env = await createAccountEnv({ nowMs: NOW });
   env.NOW_MS = String(NOW);

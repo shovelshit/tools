@@ -6,7 +6,8 @@ import { createAccountEnv, seedAccount } from "./account-fixtures.js";
 import { saveLockSession } from "../src/maoyan/lock-session.js";
 import { validSession } from "./helpers.js";
 import * as db from "../src/maoyan/db.js";
-import { cleanupUserData, userKey } from "../src/maoyan/user.js";
+import { cleanupUserData, retryPendingRevocationCleanups, userKey } from "../src/maoyan/user.js";
+import { updateManagedAccount } from "../src/maoyan/enrollment-store.js";
 
 test("renewal never revives manually stopped or uncertain work", () => {
   const nowMs = Date.parse("2026-09-16T04:00:00.000Z");
@@ -149,4 +150,56 @@ test("runtime cleanup removes Store sessions and session pointers but preserves 
   assert.notEqual(await env.DB.prepare("SELECT 1 AS ok FROM users WHERE id=?").bind(account.id).first(), null);
   assert.notEqual(await env.DB.prepare("SELECT 1 AS ok FROM access_keys WHERE user_id=?").bind(account.id).first(), null);
   assert.notEqual(await env.DB.prepare("SELECT 1 AS ok FROM audit_events WHERE subject_user_id=?").bind(account.id).first(), null);
+});
+
+test("revocation retains a durable KV cleanup marker until failed enumeration and deletion retry", async () => {
+  const nowMs = Date.parse("2026-09-16T04:00:00.000Z");
+  const env = await createAccountEnv({ nowMs });
+  const { account } = await seedAccount(env, { expiresAt: nowMs + 60_000 });
+  await saveLockSession(env, account.id, validSession());
+  const orphan = userKey(account.id, "maoyan-session:v999");
+  await env.MAOYAN_KV.put(orphan, "orphan");
+  const list = env.MAOYAN_KV.list.bind(env.MAOYAN_KV);
+  let failList = true;
+  env.MAOYAN_KV.list = async (options) => {
+    if (failList) throw new Error("list unavailable");
+    return await list(options);
+  };
+  const originalError = console.error;
+  const errors = [];
+  console.error = (message) => errors.push(String(message));
+  try {
+    await updateManagedAccount(env, {
+      userId: account.id, expectedVersion: account.version, patch: { state: "revoked" }, nowMs
+    });
+  } finally {
+    console.error = originalError;
+  }
+  assert.equal(await env.MAOYAN_KV.get(orphan), "orphan");
+  const failed = await env.DB.prepare(
+    "SELECT attempt_count,last_error FROM revocation_cleanup WHERE user_id=?"
+  ).bind(account.id).first();
+  assert.equal(Number(failed.attempt_count), 1);
+  assert.equal(failed.last_error, "kv_enumeration_failed");
+  assert.equal(errors.some((message) => message.includes(account.id)), false);
+
+  failList = false;
+  let failDelete = true;
+  const remove = env.MAOYAN_KV.delete.bind(env.MAOYAN_KV);
+  env.MAOYAN_KV.delete = async (key) => {
+    if (key === orphan && failDelete) throw new Error("delete unavailable");
+    return await remove(key);
+  };
+  await retryPendingRevocationCleanups(env, { nowMs });
+  const deleteFailed = await env.DB.prepare(
+    "SELECT attempt_count,last_error FROM revocation_cleanup WHERE user_id=?"
+  ).bind(account.id).first();
+  assert.equal(Number(deleteFailed.attempt_count), 2);
+  assert.equal(deleteFailed.last_error, "kv_delete_failed");
+  assert.equal(await env.MAOYAN_KV.get(orphan), "orphan");
+
+  failDelete = false;
+  await retryPendingRevocationCleanups(env, { nowMs: nowMs + 1 });
+  assert.equal(await env.MAOYAN_KV.get(orphan), null);
+  assert.equal(await env.DB.prepare("SELECT 1 AS ok FROM revocation_cleanup WHERE user_id=?").bind(account.id).first(), null);
 });

@@ -56,8 +56,7 @@ binding = "MAOYAN_KV"
 id = "2027a99d8e934025b3b82ef203c4acff"
 
 # ============ D1 数据库(用户状态全链路) ============
-# 上线步骤见 worker/DEPLOY-D1.md: d1 create → d1 execute --file schema.sql → deploy →
-# POST /api/admin/migrate-kv-to-d1(迁移可重复执行, 不删 KV, 回滚=重新部署 KV 版)
+# 上线步骤见 worker/DEPLOY-D1.md: d1 create → d1 execute --file schema.sql → deploy。
 [[d1_databases]]
 binding = "DB"
 database_name = "tools-db"

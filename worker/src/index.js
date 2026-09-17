@@ -2,7 +2,7 @@
 
 import { CORS, json } from "./common/http.js";
 import { NOTIFY_CHANNELS, pushBark } from "./common/notify.js";
-import { getUserConfig, saveUserConfig } from "./maoyan/user.js";
+import { getUserConfig, retryPendingRevocationCleanups, saveUserConfig } from "./maoyan/user.js";
 import * as db from "./maoyan/db.js";
 import { CITY_LIST, fetchCinemaDetail, publicCinemaShows, searchCinemasByKw, runCheck, appendChange, pushNotify, currentChannel, currentCredential, isNotificationVerified, notificationVerification, minBatchMinutes, describeCrons, isMinuteStepCrons, resolveCronExprs, handleAdminTokens, handleLockApi, runScheduledChecks, runScheduledLockAfterMonitor, runScheduledMaintenance, MONITOR_WINDOW_LABEL, inMonitorWindow } from "./maoyan/index.js";
 import { authenticate, requireActiveAccount, serviceNow } from "./maoyan/auth.js";
@@ -355,6 +355,7 @@ export default {
 
   async scheduled(event, env) {
     const nowMs = Number(event?.scheduledTime || Date.now());
+    await retryPendingRevocationCleanups(env, { nowMs });
     if (!env.MONITOR_DISPATCHER || !env.MONITOR_COORDINATOR) {
       await runScheduledChecks(env, (tokenId, cinemaData) =>
         runScheduledLockAfterMonitor(env, tokenId, cinemaData), { now: new Date(nowMs) });

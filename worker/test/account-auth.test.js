@@ -136,7 +136,7 @@ test("ADMIN_TOKEN exchanges for a short monitor session with a stable admin UUID
   const own = await worker.fetch(request("/api/account", { token: first.monitorSession }), env);
   assert.equal(own.status, 200);
   assert.equal((await own.json()).account.role, "admin");
-  const forbidden = await worker.fetch(request("/api/admin/tokens", { token: first.monitorSession }), env);
+  const forbidden = await worker.fetch(request("/api/admin/accounts", { token: first.monitorSession }), env);
   assert.equal(forbidden.status, 401);
   assert.equal(
     await authenticate(request("/api/account", { token: first.monitorSession }), env, NOW + 24 * 60 * 60 * 1000),

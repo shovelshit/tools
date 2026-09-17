@@ -1,7 +1,7 @@
 import { accountStatus, getAccount, hashAccessKey } from "./accounts.js";
 import { assertEnrollmentDeploymentReady } from "./enrollment-readiness.js";
-import { deleteUserDataStatements, getSessionVersion } from "./db.js";
-import { cleanupUserKvSessions } from "./user.js";
+import { deleteUserDataStatements, enqueueRevocationCleanupStatement, getSessionVersion } from "./db.js";
+import { retryRevocationCleanup } from "./user.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const RESERVATION_MS = 5 * 60 * 1000;
@@ -411,7 +411,10 @@ export async function updateManagedAccount(env, input) {
       "UPDATE users SET remark=?,state=?,expires_at=?,revoked_at=?,version=version+1 WHERE id=? AND version=?"
     ).bind(remark, state, expiresAt, revokedAt, userId, expectedVersion)
   );
-  if (revoking) statements.push(...deleteUserDataStatements(env.DB, userId));
+  if (revoking) {
+    statements.push(...deleteUserDataStatements(env.DB, userId));
+    statements.push(enqueueRevocationCleanupStatement(env.DB, userId, nowMs));
+  }
   if (needsBinding) {
     statements.push(env.DB.prepare(
       "INSERT INTO fingerprint_bindings(fingerprint_digest,fingerprint_version,user_id,bound_until,version) VALUES (?,?,?,?,1)"
@@ -434,6 +437,6 @@ export async function updateManagedAccount(env, input) {
     }
     throw translateDatabaseError(error);
   }
-  if (revoking) await cleanupUserKvSessions(env, userId, session);
+  if (revoking) await retryRevocationCleanup(env, userId, { session, nowMs });
   return await getAccount(env.DB, userId);
 }

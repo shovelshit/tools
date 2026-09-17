@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createDB } from "./helpers.js";
 import { createAccountEnv, seedAccount } from "./account-fixtures.js";
-import { handleAdminTokens, runScheduledChecks } from "../src/maoyan/tokens.js";
+import { runScheduledChecks } from "../src/maoyan/tokens.js";
 import * as db from "../src/maoyan/db.js";
 
 // 固定窗口内时刻(北京 10:00), 使 runScheduledChecks 的监控窗口判断稳定通过
@@ -17,30 +17,6 @@ async function withMockFetch(mock, callback) {
     globalThis.fetch = original;
   }
 }
-
-test("admin token listing masks short and long access tokens", async () => {
-  const env = {
-    ADMIN_TOKEN: "admin-secret",
-    DB: await createDB({
-      tokens: [
-        { id: "short-id", token: "abcdef", remark: "short" },
-        { id: "long-id", token: "abcdefghijklmnop", remark: "long" }
-      ]
-    })
-  };
-  const request = new Request("https://worker.example/api/admin/tokens", {
-    headers: { "X-Admin-Token": "admin-secret" }
-  });
-  const response = await handleAdminTokens(request, env, new URL(request.url));
-  const body = await response.json();
-
-  assert.equal(response.status, 200);
-  const byRemark = Object.fromEntries(body.tokens.map((token) => [token.remark, token]));
-  assert.equal(byRemark.short.token, "abcd **** cdef");
-  assert.equal(byRemark.long.token, "abcd **** mnop");
-  assert.equal(JSON.stringify(body).includes("abcdef"), false);
-  assert.equal(JSON.stringify(body).includes("abcdefghijklmnop"), false);
-});
 
 test("scheduled monitoring hands data off only after snapshot and status persistence", async () => {
   const tokenId = "11111111-1111-4111-8111-111111111111";

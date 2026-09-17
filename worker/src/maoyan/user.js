@@ -2,7 +2,10 @@
 // 用户状态(config/snapshot/changes/status/lock-rule/seatfb)已迁移 D1(见 db.js),
 // KV 仅保留加密会话(maoyan-session)。userKey 现在只服务会话键名。
 
-import { deleteUserData, getConfigRecord, getSessionVersion, putConfig, replaceConfigIfUnchanged } from "./db.js";
+import {
+  clearRevocationCleanup, deleteUserData, getConfigRecord, getSessionVersion,
+  listRevocationCleanups, putConfig, recordRevocationCleanupAttempt, replaceConfigIfUnchanged
+} from "./db.js";
 import { decryptNotifyCredential, encryptNotifyCredential } from "./notify-secrets.js";
 import { saveConfigWithSubscription, syncSubscription } from "./monitor-store.js";
 
@@ -104,6 +107,7 @@ async function deleteKvSession(env, key) {
 export async function cleanupUserKvSessions(env, tokenId, session = null) {
   const keys = new Set([userKey(tokenId, "maoyan-session")]);
   if (session) keys.add(userKey(tokenId, `maoyan-session:v${session.activeVersion}`));
+  let enumerationFailed = false;
   try {
     let cursor;
     do {
@@ -114,14 +118,60 @@ export async function cleanupUserKvSessions(env, tokenId, session = null) {
     } while (cursor);
   } catch {
     // The known active and legacy keys below are still deleted individually.
+    enumerationFailed = true;
   }
   const results = await Promise.all([...keys].map((key) => deleteKvSession(env, key)));
-  if (results.some((deleted) => !deleted)) console.error("[maoyan] revoked session cleanup incomplete");
+  const deletionFailed = results.some((deleted) => !deleted);
+  return {
+    complete: !enumerationFailed && !deletionFailed,
+    error: enumerationFailed ? "kv_enumeration_failed" : deletionFailed ? "kv_delete_failed" : null
+  };
+}
+
+function logRevocationCleanupFailure() {
+  console.error("[maoyan] revoked session cleanup incomplete");
+}
+
+// This consumes only durable markers created as part of a successful revocation.
+// A failure leaves the marker intact so a later scheduled run can converge.
+export async function retryRevocationCleanup(env, tokenId, { session = null, nowMs = Date.now() } = {}) {
+  let outcome;
+  try {
+    outcome = await cleanupUserKvSessions(env, tokenId, session);
+  } catch {
+    outcome = { complete: false, error: "kv_delete_failed" };
+  }
+  try {
+    if (outcome.complete) await clearRevocationCleanup(env.DB, tokenId);
+    else await recordRevocationCleanupAttempt(env.DB, tokenId, nowMs, outcome.error);
+  } catch {
+    // The marker was atomically created with revocation and remains for a later retry.
+    outcome = { complete: false, error: outcome.error || "kv_delete_failed" };
+  }
+  if (!outcome.complete) logRevocationCleanupFailure();
+  return outcome;
+}
+
+export async function retryPendingRevocationCleanups(env, { limit = 100, nowMs = Date.now() } = {}) {
+  let userIds;
+  try {
+    userIds = await listRevocationCleanups(env.DB, limit);
+  } catch {
+    logRevocationCleanupFailure();
+    return { attempted: 0, completed: 0 };
+  }
+  let completed = 0;
+  for (const tokenId of userIds) {
+    const outcome = await retryRevocationCleanup(env, tokenId, { nowMs });
+    if (outcome.complete) completed += 1;
+  }
+  return { attempted: userIds.length, completed };
 }
 
 // 令牌注销: 清 D1 全部运行时状态行 + KV 加密会话
 export async function cleanupUserData(env, tokenId) {
   const session = await getSessionVersion(env.DB, tokenId);
   await deleteUserData(env.DB, tokenId);
-  await cleanupUserKvSessions(env, tokenId, session);
+  const outcome = await cleanupUserKvSessions(env, tokenId, session);
+  if (!outcome.complete) logRevocationCleanupFailure();
 }

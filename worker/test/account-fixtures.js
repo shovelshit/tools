@@ -32,9 +32,10 @@ export async function seedAccount(env, {
   const nowMs = Date.now();
   const actualExpiry = role === "admin" ? null : (expiresAt ?? nowMs + 15 * DAY_MS);
   const tokenHash = await hashAccessKey(key);
+  const initialState = state === "revoked" ? "active" : state;
   await env.DB.prepare(
     "INSERT INTO users(id,role,remark,state,created_at,expires_at,source,business_line,version) VALUES (?,?,?,?,?,?,?,?,1)"
-  ).bind(id, role, remark, state, nowMs, actualExpiry, "test", businessLine).run();
+  ).bind(id, role, remark, initialState, nowMs, actualExpiry, "test", businessLine).run();
   await env.DB.prepare(
     "INSERT INTO access_keys(user_id,token_hash,key_prefix,key_suffix,created_at) VALUES (?,?,?,?,?)"
   ).bind(id, tokenHash, key.slice(0, 4), key.slice(-4), nowMs).run();
@@ -49,6 +50,9 @@ export async function seedAccount(env, {
     await env.DB.prepare(
       "INSERT INTO fingerprint_bindings(fingerprint_digest,fingerprint_version,user_id,bound_until,version) VALUES (?,?,?,?,1)"
     ).bind(fingerprint, "test-v1", id, actualExpiry).run();
+  }
+  if (state === "revoked") {
+    await env.DB.prepare("UPDATE users SET state='revoked',revoked_at=? WHERE id=?").bind(nowMs, id).run();
   }
   return { account: await getAccount(env.DB, id), key };
 }

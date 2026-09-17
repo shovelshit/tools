@@ -50,18 +50,7 @@ export class MemoryKV {
 // 记录写语句供断言「哪些表被写过/写过几次」(对应 KV 版 MemoryKV.ops)。
 
 const PRODUCTION_SCHEMA_SQL = readFileSync(new URL("../schema.sql", import.meta.url), "utf8");
-const LEGACY_TOKENS_SCHEMA_SQL = `
-CREATE TABLE tokens (
-  id TEXT PRIMARY KEY,
-  token TEXT NOT NULL UNIQUE,
-  remark TEXT NOT NULL DEFAULT '',
-  created_at TEXT
-);
-`;
-// Most historical migration tests still need the retired plaintext source
-// table. Production schema coverage reads schema.sql directly and verifies
-// that fresh databases no longer create it.
-const SCHEMA_SQL = `${LEGACY_TOKENS_SCHEMA_SQL}\n${PRODUCTION_SCHEMA_SQL}`;
+const SCHEMA_SQL = PRODUCTION_SCHEMA_SQL;
 const PRE_ACCOUNT_SCHEMA_SQL = `
 CREATE TABLE user_config (
   token_id TEXT PRIMARY KEY,
@@ -172,9 +161,7 @@ export function migrateBusinessLines(DB) {
 export async function createDB(seeds = {}) {
   const d1 = new MemoryD1();
   for (const token of seeds.tokens || []) {
-    // Runtime auth is account-based. Keep the legacy row as migration/admin
-    // fixture while giving existing endpoint tests the same UUID identity.
-    await db.upsertToken(d1, token);
+    // Test shorthand: create a current lifecycle account from a supplied key.
     const nowMs = Date.now();
     await d1.prepare(
       "INSERT OR IGNORE INTO users(id,role,remark,state,created_at,expires_at,source,version) VALUES (?,'user',?,'active',?,?,'test',1)"

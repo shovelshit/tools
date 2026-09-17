@@ -129,3 +129,22 @@ test("removing a versioned session deletes only the active object and pointer", 
   assert.equal(await env.DB.prepare("SELECT 1 AS ok FROM session_versions WHERE user_id=?").bind(account.id).first(), null);
   assert.deepEqual(await getLockSessionStatus(env, account.id), { uploaded: false });
 });
+
+test("a session save racing revocation cannot leave a pointer or KV ciphertext", async () => {
+  const env = await createAccountEnv();
+  const { account } = await seedAccount(env);
+  const put = env.MAOYAN_KV.put.bind(env.MAOYAN_KV);
+  let revoked = false;
+  env.MAOYAN_KV.put = async (key, value) => {
+    await put(key, value);
+    if (!revoked) {
+      revoked = true;
+      await env.DB.prepare("UPDATE users SET state='revoked' WHERE id=?").bind(account.id).run();
+    }
+  };
+
+  await assert.rejects(() => saveLockSession(env, account.id, validSession()), { code: "ACCOUNT_REVOKED" });
+
+  assert.equal(await env.DB.prepare("SELECT 1 AS ok FROM session_versions WHERE user_id=?").bind(account.id).first(), null);
+  assert.equal((await env.MAOYAN_KV.list({ prefix: userKey(account.id, "maoyan-session:v") })).keys.length, 0);
+});

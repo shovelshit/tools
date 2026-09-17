@@ -1,5 +1,5 @@
 // ---------------- D1 数据访问层(用户状态全链路) ----------------
-// 所有用户状态(tokens/config/status/snapshot/changes/seatfb/lock-rule)存 D1;
+// 所有用户运行状态(config/status/snapshot/changes/seatfb/lock-rule)存 D1;
 // KV 仅保留 maoyan-session 加密会话与 cache:cinemas:* 影院缓存(见 api.js/lock-session.js)。
 // 约定:
 //   - 函数首参一律是 D1 数据库实例(env.DB), 与 env 解耦, 便于测试替身;
@@ -14,40 +14,6 @@ function configData(config) {
   const data = { ...(config || {}) };
   delete data.version;
   return data;
-}
-
-// ---------- tokens ----------
-
-export async function listTokens(db) {
-  const { results } = await db.prepare("SELECT id, token, remark, created_at FROM tokens ORDER BY rowid").all();
-  return results.map((row) => ({ id: row.id, token: row.token, remark: row.remark || "", createdAt: row.created_at || null }));
-}
-
-export async function upsertToken(db, token) {
-  await db.prepare(
-    "INSERT INTO tokens (id, token, remark, created_at) VALUES (?, ?, ?, ?) " +
-    "ON CONFLICT(id) DO UPDATE SET token = excluded.token, remark = excluded.remark, created_at = excluded.created_at"
-  ).bind(token.id, token.token, token.remark || "", token.createdAt || null).run();
-}
-
-// 管理端整表替换: 与 KV 版「读数组-改-整写」语义对齐, 保留传入顺序(rowid 自增)
-export async function saveTokens(db, list) {
-  await db.prepare("DELETE FROM tokens").run();
-  for (const token of list) {
-    await db.prepare("INSERT INTO tokens (id, token, remark, created_at) VALUES (?, ?, ?, ?)")
-      .bind(token.id, token.token, token.remark || "", token.createdAt || null).run();
-  }
-}
-
-// 鉴权点查: 每次请求按 token 精确取一行, 替代 KV 版全量读数组
-export async function findTokenByToken(db, token) {
-  if (!token) return null;
-  return await db.prepare("SELECT id, token, remark, created_at FROM tokens WHERE token = ?").bind(String(token)).first();
-}
-
-export async function getAccountMigration(db, name = "accounts-v1") {
-  return await db.prepare("SELECT name, activated_at FROM account_migrations WHERE name=?")
-    .bind(name).first();
 }
 
 // ---------- config(每令牌一行 JSON) ----------
@@ -118,6 +84,32 @@ export async function deleteSessionVersion(db, tokenId, expectedVersion) {
   return await db.prepare(
     "DELETE FROM session_versions WHERE user_id=? AND active_version=? AND active=1"
   ).bind(tokenId, expectedVersion).run();
+}
+
+// ---------- revoked-session KV cleanup retry ledger ----------
+
+export function enqueueRevocationCleanupStatement(db, userId, nowMs) {
+  return db.prepare(
+    "INSERT INTO revocation_cleanup(user_id,created_at,attempt_count,last_attempt_at,last_error) VALUES (?,?,0,NULL,NULL) " +
+    "ON CONFLICT(user_id) DO NOTHING"
+  ).bind(userId, nowMs);
+}
+
+export async function listRevocationCleanups(db, limit = 100) {
+  const { results } = await db.prepare(
+    "SELECT user_id FROM revocation_cleanup ORDER BY created_at ASC LIMIT ?"
+  ).bind(Math.min(100, Math.max(1, Number(limit) || 100))).all();
+  return results.map((row) => String(row.user_id));
+}
+
+export async function recordRevocationCleanupAttempt(db, userId, nowMs, error) {
+  await db.prepare(
+    "UPDATE revocation_cleanup SET attempt_count=attempt_count+1,last_attempt_at=?,last_error=? WHERE user_id=?"
+  ).bind(nowMs, error, userId).run();
+}
+
+export async function clearRevocationCleanup(db, userId) {
+  await db.prepare("DELETE FROM revocation_cleanup WHERE user_id=?").bind(userId).run();
 }
 
 // ---------- status(每令牌一行 JSON, 字段与 KV 版一致) ----------
