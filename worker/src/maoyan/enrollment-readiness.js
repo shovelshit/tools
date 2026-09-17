@@ -22,7 +22,7 @@ export function enrollmentDeploymentReadiness(env) {
   if (!String(env.TURNSTILE_SECRET_KEY || "").trim()) missing.push("TURNSTILE_SECRET_KEY");
   if (!validHmacKey(env.ENROLLMENT_HMAC_KEY)) missing.push("ENROLLMENT_HMAC_KEY");
   if (!origin) missing.push("ENROLLMENT_ORIGIN");
-  if (!origin || String(env.ENROLLMENT_HOSTNAME || "").trim().toLowerCase() !== origin.hostname) {
+  if (!origin || String(env.ENROLLMENT_HOSTNAME || "") !== origin.hostname) {
     missing.push("ENROLLMENT_HOSTNAME");
   }
   return { ready: missing.length === 0, missing };

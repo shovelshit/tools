@@ -52,6 +52,7 @@
       return;
     }
     if (state.name === "full") { show("unavailable"); return; }
+    if (state.name === "unavailable") { show("unavailable"); return; }
     if (state.name === "pending-confirmation" && state.keyUnavailable) {
       show("error");
       $("claim-error-text").textContent = state.message;

@@ -117,6 +117,11 @@
           body: { requestId, ...identity, turnstileToken }
         });
       } catch (error) {
+        if (error?.code === "SERVICE_UNAVAILABLE") {
+          await clearPending();
+          emit("unavailable");
+          return null;
+        }
         if (error?.code === "CAPACITY_FULL" || error?.code === "RESOURCE_EXHAUSTED") {
           await clearPending();
           emit("full", { message: error.message });

@@ -150,6 +150,25 @@ test("an existing active profile key prevents accidental replacement", async () 
   assert.equal(states.at(-1).existing, true);
 });
 
+test("generic unavailable reserve responses stay in the unavailable state without recovery", async () => {
+  let statusCalls = 0;
+  const { controller, states } = fixture({
+    api: async (path) => {
+      if (path.endsWith("/reserve")) {
+        const error = new Error("当前暂不可领取");
+        error.code = "SERVICE_UNAVAILABLE";
+        error.status = 503;
+        throw error;
+      }
+      if (path.includes("/status?")) statusCalls += 1;
+      throw new Error(`unexpected ${path}`);
+    }
+  });
+  assert.equal(await controller.start("token"), null);
+  assert.equal(states.at(-1).name, "unavailable");
+  assert.equal(statusCalls, 0);
+});
+
 test("claim page stays compact and loads fingerprint code locally", () => {
   const html = fs.readFileSync(path.join(__dirname, "claim.html"), "utf8");
   const css = fs.readFileSync(path.join(__dirname, "claim.css"), "utf8");

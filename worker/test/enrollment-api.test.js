@@ -115,6 +115,28 @@ test("an invalid enrollment HMAC is hidden by the generic unavailable reserve re
   });
 });
 
+test("noncanonical enrollment hostname variants are unavailable before Turnstile verification", async () => {
+  for (const hostname of [" tools.example", "TOOLS.EXAMPLE"]) {
+    const env = await enrollmentEnv();
+    env.ENROLLMENT_HOSTNAME = hostname;
+    const configRequest = request("/api/enrollment/config");
+    assert.equal((await (await handleEnrollmentApi(configRequest, env, new URL(configRequest.url))).json()).claimable, false);
+
+    let turnstileCalls = 0;
+    const reserveRequest = request("/api/enrollment/reserve", {
+      method: "POST",
+      body: { requestId: crypto.randomUUID(), fingerprint: FINGERPRINT, version: "thumbmark-1.11.0-v1", turnstileToken: "test-token" }
+    });
+    const response = await handleEnrollmentApi(reserveRequest, env, new URL(reserveRequest.url), {
+      fetchImpl: async (...args) => { turnstileCalls += 1; return await turnstileFetch()(...args); }
+    });
+    assert.deepEqual(await response.json(), {
+      ok: false, code: "SERVICE_UNAVAILABLE", error: "当前暂不可领取"
+    });
+    assert.equal(turnstileCalls, 0);
+  }
+});
+
 test("origin and Turnstile checks reject invalid reserve requests", async () => {
   const env = await enrollmentEnv();
   const body = { requestId: crypto.randomUUID(), fingerprint: FINGERPRINT, version: "thumbmark-1.11.0-v1", turnstileToken: "bad" };
