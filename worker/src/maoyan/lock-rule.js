@@ -11,6 +11,7 @@ import { pushNotify } from "./notify.js";
 import { lockError, lockLog } from "./log.js";
 import { lockNotification } from "./notification-copy.js";
 import { requireActiveAccount } from "./auth.js";
+import { drawLotteryKey } from "./lock-lottery.js";
 
 // 这些错误会原样透传给前端(而不是笼统的"锁座参数无效")
 // 注意: 与上游(猫眼)相关的文案直接引用 lock-client 导出的常量, 避免文案漂移
@@ -197,6 +198,7 @@ export async function createLockRule(env, tokenId, input, options = {}) {
   // 默认的取图入口包一层解析失败自动留档(只写标识 KV, 失败静默); 测试/协调器注入的 fetchSeats 不经包装
   const fetchSeats = options.fetchSeats || withSeatFeedback(fetchSeatMap, env, { tokenId, cinemaId: values.cinemaId, movieId: values.movieId });
   const placeOrder = options.placeOrder || createUnpaidOrder;
+  const drawLottery = options.drawLottery || drawLotteryKey;
   const now = options.now || new Date();
   const [session, cinema] = await Promise.all([loadSession(env, tokenId), fetchCinema(values.cinemaId)]);
   const template = scheduleForTemplate(cinema, values.movieId, values.templateSeqNo);
@@ -286,7 +288,7 @@ export async function createLockRule(env, tokenId, input, options = {}) {
     }
   }
   lockLog("rule_create", { phase: "complete", state: "waiting_schedule" });
-  const rule = buildRule("waiting_schedule");
+  const rule = buildRule("waiting_schedule", { lotteryKey: drawLottery() });
   await putLockRule(env, tokenId, rule);
   return publicLockRule(rule, String(env.LOCK_SERVICE_ENABLED) === "true");
 }

@@ -79,6 +79,23 @@ test("creates a rule from authoritative cinema and seat data", async () => {
   assert.equal((await getLockRule(env, "token-a")).id, rule.id);
 });
 
+test("persists one injected lottery draw for a waiting rule without exposing it", async () => {
+  const env = await envWithConfig();
+  let draws = 0;
+  const rule = await createLockRule(env, "token-a", validInput(), dependencies({
+    drawLottery: () => {
+      draws += 1;
+      return "00112233-4455-4677-8899-aabbccddeeff";
+    }
+  }));
+
+  const stored = await getLockRule(env, "token-a");
+  assert.equal(draws, 1);
+  assert.equal(stored.lotteryKey, "00112233-4455-4677-8899-aabbccddeeff");
+  assert.equal(Object.hasOwn(rule, "lotteryKey"), false);
+  assert.equal(Object.hasOwn(publicLockRule(stored, true), "lotteryKey"), false);
+});
+
 test("maps the template sequence to the authenticated seat-map request", async () => {
   const env = await envWithConfig();
   await createLockRule(env, "token-a", validInput(), dependencies({
