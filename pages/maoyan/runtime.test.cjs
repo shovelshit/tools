@@ -78,22 +78,26 @@ test("web runtime connects with the supplied worker credentials", async () => {
   });
 });
 
-test("web runtime requires capabilities and never falls back to status", async () => {
-  const requests = [];
-  const runtime = loadRuntime().createWebRuntime({
-    fetchImpl: async (url) => {
-      requests.push(url);
-      if (url.endsWith("/api/capabilities")) return { ok: false, status: 404, json: async () => ({ error: "Not Found" }) };
-      return { ok: true, status: 200, json: async () => ({ profile: { id: "legacy" }, status: {} }) };
-    },
-    getWorkerUrl: () => "https://worker.example",
-    getToken: () => "token-a"
-  });
-  await assert.rejects(
-    runtime.connectWorker({ workerUrl: "https://worker.example", token: "token-a" }),
-    /无法连接服务/
-  );
-  assert.deepEqual(requests, ["https://worker.example/api/capabilities"]);
+test("web runtime preserves capabilities HTTP errors without falling back to status", async () => {
+  for (const response of [
+    { status: 404, code: "CAPABILITIES_MISSING", error: "Capabilities unavailable" },
+    { status: 500, code: "SERVICE_FAILURE", error: "Worker configuration failed" }
+  ]) {
+    const requests = [];
+    const runtime = loadRuntime().createWebRuntime({
+      fetchImpl: async (url) => {
+        requests.push(url);
+        return { ok: false, status: response.status, json: async () => response };
+      },
+      getWorkerUrl: () => "https://worker.example",
+      getToken: () => "token-a"
+    });
+    await assert.rejects(
+      runtime.connectWorker({ workerUrl: "https://worker.example", token: "token-a" }),
+      (error) => error.message === response.error && error.status === response.status && error.code === response.code
+    );
+    assert.deepEqual(requests, ["https://worker.example/api/capabilities"]);
+  }
 });
 
 test("web runtime does not downgrade authentication failures to legacy", async () => {

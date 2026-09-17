@@ -62,7 +62,7 @@
           connectedTokens.set(normalizedWorkerUrl, effectiveToken);
           return { status, profile: auth.account || null, account: auth.account || null, capabilities, httpRisk, persistInputToken: !auth.monitorSession };
         } catch (error) {
-          if (error?.status === 401 || error?.status === 403) throw error;
+          if (Number.isInteger(error?.status)) throw error;
           throw new Error("无法连接服务，请检查服务地址和网络");
         }
       },
