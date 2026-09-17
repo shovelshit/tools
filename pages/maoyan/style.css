@@ -1524,10 +1524,22 @@ summary:focus-visible {
   .lock-dialog-header,
   .lock-dialog-footer { padding: 10px 12px; background: var(--surface-solid); }
   .lock-dialog-body { padding: 12px; gap: 12px; }
-  .lock-dialog-footer .btn,
-  .lock-upload-row .btn { flex: 1 1 auto; }
-  .lock-zoom-bar .btn { min-width: 40px; padding: 0 7px; }
-}
+      .lock-dialog-footer .btn,
+      .lock-upload-row .btn { flex: 1 1 auto; }
+      .lock-zoom-bar .btn { min-width: 40px; padding: 0 7px; }
+
+      .admin-page .token-table th:nth-child(1),
+      .admin-page .token-table td:nth-child(1) { width: 29%; }
+      .admin-page .token-table th:nth-child(2),
+      .admin-page .token-table td:nth-child(2) { width: 18%; }
+      .admin-page .token-table th:nth-child(4),
+      .admin-page .token-table td:nth-child(4) { width: 23%; }
+      .admin-page .token-table th:nth-child(6),
+      .admin-page .token-table td:nth-child(6) { width: 30%; }
+      .admin-page .token-table td:last-child { overflow: visible; text-overflow: clip; vertical-align: top; }
+      .admin-page .account-actions-inner { flex-wrap: wrap; column-gap: 4px; row-gap: 2px; white-space: normal; }
+      .admin-page .account-actions-inner .link-btn { flex: 0 0 auto; white-space: nowrap; }
+    }
 
 @media (max-width: 430px) {
   .container { padding: 8px; }

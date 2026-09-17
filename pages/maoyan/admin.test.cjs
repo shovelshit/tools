@@ -6,6 +6,7 @@ const vm = require("node:vm");
 
 const html = fs.readFileSync(path.join(__dirname, "admin.html"), "utf8");
 const source = fs.readFileSync(path.join(__dirname, "admin.js"), "utf8");
+const style = fs.readFileSync(path.join(__dirname, "style.css"), "utf8");
 
 test("admin page manages lifecycle accounts instead of custom plaintext tokens", () => {
   assert.match(html, /id="account-tbody"/);
@@ -60,21 +61,37 @@ test("account operation cells preserve table layout and render an empty-state pl
   const { context, elements } = loadAdminWithDeferredRequests();
   vm.runInContext(`accounts = [
     { userId: "active-1", remark: "Active", source: "manual", accountStatus: "active", accountVersion: 1, expiresAt: "2026-10-01T00:00:00Z" },
+    { userId: "suspended-1", remark: "Suspended", source: "manual", accountStatus: "suspended", accountVersion: 1, expiresAt: "2026-10-01T00:00:00Z" },
+    { userId: "expired-1", remark: "Expired", source: "manual", accountStatus: "expired", accountVersion: 1, expiresAt: "2026-09-01T00:00:00Z" },
     { userId: "revoked-1", remark: "Revoked", source: "manual", accountStatus: "revoked", accountVersion: 2, expiresAt: "2026-10-01T00:00:00Z" }
   ]; capacity = { used: 1, maxUsers: 20 }; renderAccounts();`, context);
 
   const rows = elements.get("account-tbody").children;
-  assert.equal(rows.length, 2);
+  assert.equal(rows.length, 4);
   const activeOperations = rows[0].children[5];
+  assert.equal(rows[0].tagName, "TR");
+  assert.equal(activeOperations.tagName, "TD");
   assert.equal(activeOperations.className, "");
   assert.equal(activeOperations.children.length, 1);
+  assert.equal(activeOperations.children[0].tagName, "DIV");
   assert.equal(activeOperations.children[0].className, "account-actions-inner");
+  assert.equal(activeOperations.children[0].children.length, 2);
 
-  const revokedOperations = rows[1].children[5];
+  assert.equal(rows[1].children[5].children[0].children.length, 2);
+  assert.equal(rows[2].children[5].children[0].children.length, 2);
+
+  const revokedOperations = rows[3].children[5];
   assert.equal(revokedOperations.className, "");
   assert.equal(revokedOperations.children.length, 1);
+  assert.equal(revokedOperations.children[0].tagName, "DIV");
   assert.equal(revokedOperations.children[0].className, "account-actions-inner");
   assert.equal(revokedOperations.children[0].textContent, "—");
+});
+
+test("mobile action cells provide enough room and wrap buttons without clipping", () => {
+  assert.match(style, /@media \(max-width: 640px\)[\s\S]*?\.admin-page \.token-table th:nth-child\(6\),[\s\S]*?\.admin-page \.token-table td:nth-child\(6\) \{ width: 30%; \}/);
+  assert.match(style, /@media \(max-width: 640px\)[\s\S]*?\.admin-page \.token-table td:last-child \{ overflow: visible;/);
+  assert.match(style, /@media \(max-width: 640px\)[\s\S]*?\.admin-page \.account-actions-inner \{[\s\S]*?flex-wrap: wrap;/);
 });
 
 function deferred() {
@@ -88,6 +105,7 @@ function fakeElement() {
   const classes = new Set(["hidden"]);
   let html = "";
   return {
+    tagName: "DIV",
     value: "", textContent: "", checked: false, disabled: false, children: [],
     className: "",
     classList: {
@@ -123,7 +141,7 @@ function loadAdminWithDeferredRequests() {
       if (!elements.has(id)) elements.set(id, fakeElement());
       return elements.get(id);
     },
-    createElement: () => fakeElement(),
+    createElement: (tagName) => Object.assign(fakeElement(), { tagName: String(tagName).toUpperCase() }),
     execCommand: () => true,
     body: fakeElement()
   };
