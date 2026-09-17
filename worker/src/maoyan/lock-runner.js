@@ -16,7 +16,7 @@ import { allowManualOperation } from "./resource-budget.js";
 
 const TOKEN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-function chinaDate(now) {
+export function chinaDate(now) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit"
   }).formatToParts(now);

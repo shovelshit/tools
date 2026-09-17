@@ -2,7 +2,7 @@ import { fetchCinemaDetail } from "./api.js";
 import { newShowsNotification } from "./notification-copy.js";
 import { wakeNotificationDispatcher } from "./notification-outbox.js";
 import { advanceSubscriber, getCommittedCinemaBatch, listSubscribers, persistCinemaSnapshot } from "./monitor-store.js";
-import { resolveLockTarget, runScheduledLockAfterMonitor } from "./lock-runner.js";
+import { chinaDate, resolveLockTarget, runScheduledLockAfterMonitor } from "./lock-runner.js";
 import { orderLockCandidates, runBounded } from "./lock-lottery.js";
 import { allowManualOperation } from "./resource-budget.js";
 
@@ -38,7 +38,7 @@ export async function processCinemaBatch(env, {
   let subscribers = 0;
   let notifications = 0;
   const lockCandidates = [];
-  const ambiguousCandidates = [];
+  const terminalCandidates = [];
   do {
     const page = await listSubscribers(env.DB, {
       cinemaId: String(cinemaId), afterUserId, limit: 10, nowMs: Number(nowMs)
@@ -82,12 +82,15 @@ export async function processCinemaBatch(env, {
           target
         };
         if (target.status === "matched") lockCandidates.push(candidate);
-        else if (target.status === "ambiguous") ambiguousCandidates.push(candidate);
+        else if (target.status === "ambiguous" ||
+          (target.status === "waiting" && subscription.lockRule.targetDate < chinaDate(new Date(Number(nowMs))))) {
+          terminalCandidates.push(candidate);
+        }
       }
     }
     afterUserId = page.nextCursor || "";
   } while (afterUserId);
-  const queue = [...orderLockCandidates(lockCandidates, data), ...ambiguousCandidates];
+  const queue = [...orderLockCandidates(lockCandidates, data), ...terminalCandidates];
   const lockResults = await runBounded(queue, lockConcurrency, (candidate) => runLock(env, candidate.userId, data));
   const lockFailures = lockResults.filter((result) => result.status === "rejected").length;
   if (notifications) await wakeNotificationDispatcher(env);

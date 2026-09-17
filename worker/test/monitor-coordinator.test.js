@@ -8,12 +8,12 @@ import { cinemaFixture, createStorageFixture } from "./scaling-fixtures.js";
 
 const NOW = Date.parse("2026-09-16T04:00:00.000Z");
 
-function waitingRule({ lotteryKey, seqNo, templateTime }) {
+function waitingRule({ lotteryKey, seqNo, templateTime, targetDate = "2026-09-19" }) {
   return {
     id: crypto.randomUUID(),
     cinemaId: "1",
     movieId: "7",
-    targetDate: "2026-09-19",
+    targetDate,
     templateTime,
     hall: "1号厅",
     seats: [{ seatNo: "1-1-1", rowId: "1", columnId: "1" }],
@@ -22,6 +22,33 @@ function waitingRule({ lotteryKey, seqNo, templateTime }) {
     expectedSeqNo: seqNo
   };
 }
+
+test("expired unmatched waiting rules are dispatched for terminal handling", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  const userId = "00000000-0000-4000-8000-000000000010";
+  await seedAccount(env, {
+    id: userId,
+    expiresAt: NOW + 600_000,
+    config: { enabled: true, cinemaId: "1", selectedMovieIds: ["7"] }
+  });
+  await syncSubscription(env.DB, userId, { enabled: true, cinemaId: "1" }, 1, NOW);
+  await putLockRuleRow(env.DB, userId, waitingRule({
+    lotteryKey: "expired", seqNo: "absent", templateTime: "18:40", targetDate: "2026-09-15"
+  }));
+  const dispatched = [];
+
+  const result = await processCinemaBatch(env, {
+    cinemaId: "1",
+    batchId: "expired-unmatched",
+    nowMs: NOW,
+    fetchCinema: async () => ({ showData: { cinemaName: "影院 1", movies: [] } }),
+    runLock: async (_env, dispatchedUserId) => { dispatched.push(dispatchedUserId); }
+  });
+
+  assert.deepEqual(dispatched, [userId]);
+  assert.equal(result.lockAttempts, 1);
+  assert.equal(result.lockFailures, 0);
+});
 
 test("lock dispatch lotteries within actual shows, interleaves groups, and isolates failures", async () => {
   const env = await createAccountEnv({ nowMs: NOW, maxUsers: 10 });
