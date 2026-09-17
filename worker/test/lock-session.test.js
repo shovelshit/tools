@@ -366,6 +366,127 @@ test("revocation captures a successfully activated session that replaced its sta
   assert.equal(await env.DB.prepare("SELECT 1 AS ok FROM revocation_cleanup WHERE user_id=?").bind(account.id).first(), null);
 });
 
+test("a failed old-version deletion is retained when revocation cannot enumerate the old key", async () => {
+  const nowMs = Date.parse("2026-09-16T04:00:00.000Z");
+  const env = await createAccountEnv({ nowMs });
+  const { account } = await seedAccount(env, { expiresAt: nowMs + 60_000 });
+  await saveLockSession(env, account.id, validSession());
+  const oldVersion = await env.DB.prepare(
+    "SELECT active_version FROM session_versions WHERE user_id=?"
+  ).bind(account.id).first();
+  const oldKey = userKey(account.id, `maoyan-session:v${oldVersion.active_version}`);
+  const list = env.MAOYAN_KV.list.bind(env.MAOYAN_KV);
+  const remove = env.MAOYAN_KV.delete.bind(env.MAOYAN_KV);
+  let failOldDelete = true;
+
+  env.MAOYAN_KV.list = async (options) => {
+    const page = await list(options);
+    return { ...page, keys: page.keys.filter((entry) => entry.name !== oldKey) };
+  };
+  env.MAOYAN_KV.delete = async (key) => {
+    if (key === oldKey && failOldDelete) throw new Error("delete unavailable");
+    return await remove(key);
+  };
+
+  await assert.rejects(() => saveLockSession(env, account.id, validSession()), /delete unavailable/);
+  assert.notEqual(await env.MAOYAN_KV.get(oldKey), null);
+
+  await updateManagedAccount(env, {
+    userId: account.id, expectedVersion: account.version, patch: { state: "revoked" }, nowMs
+  });
+  assert.notEqual(await env.DB.prepare(
+    "SELECT 1 AS ok FROM revocation_cleanup_keys WHERE user_id=? AND session_key=?"
+  ).bind(account.id, oldKey).first(), null);
+
+  failOldDelete = false;
+  await retryPendingRevocationCleanups(env, { nowMs: nowMs + 1 });
+  assert.equal(await env.MAOYAN_KV.get(oldKey), null);
+  assert.equal(await env.DB.prepare("SELECT 1 AS ok FROM revocation_cleanup WHERE user_id=?").bind(account.id).first(), null);
+});
+
+test("a failed KV put releases this save's pending reservations", async () => {
+  const env = await createAccountEnv();
+  const { account } = await seedAccount(env);
+  await saveLockSession(env, account.id, validSession());
+  env.MAOYAN_KV.put = async () => { throw new Error("put unavailable"); };
+
+  await assert.rejects(() => saveLockSession(env, account.id, validSession()), /put unavailable/);
+  assert.equal(await env.DB.prepare(
+    "SELECT 1 AS ok FROM pending_session_saves WHERE user_id=?"
+  ).bind(account.id).first(), null);
+});
+
+test("concurrent saves never delete the winner when their proposed versions collide", async () => {
+  const env = await createAccountEnv();
+  const { account } = await seedAccount(env);
+  await saveLockSession(env, account.id, validSession());
+  const originalRandom = crypto.getRandomValues;
+  const originalPrepare = env.DB.prepare.bind(env.DB);
+  const originalPut = env.MAOYAN_KV.put.bind(env.MAOYAN_KV);
+  const proposedVersions = [7, 7, 8];
+  let sessionReads = 0;
+  let releaseSessionReads;
+  let puts = 0;
+
+  env.DB.prepare = (sql) => {
+    const statement = originalPrepare(sql);
+    if (!sql.startsWith("SELECT active_version,updated_at FROM session_versions")) return statement;
+    return {
+      bind: (...args) => {
+        const bound = statement.bind(...args);
+        return {
+          ...bound,
+          first: async () => {
+            const row = await bound.first();
+            sessionReads += 1;
+            if (sessionReads === 1) await new Promise((resolve) => { releaseSessionReads = resolve; });
+            return row;
+          }
+        };
+      }
+    };
+  };
+  crypto.getRandomValues = (bytes) => {
+    if (bytes instanceof Uint32Array) bytes[0] = proposedVersions.shift() || 9;
+    else originalRandom.call(crypto, bytes);
+    return bytes;
+  };
+  env.MAOYAN_KV.put = async (key, value) => {
+    puts += 1;
+    if (puts === 2) {
+      while (Number((await env.DB.prepare(
+        "SELECT active_version FROM session_versions WHERE user_id=?"
+      ).bind(account.id).first()).active_version) !== 7) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    }
+    if (key.endsWith(":v8")) throw new Error("later put unavailable");
+    return await originalPut(key, value);
+  };
+  try {
+    const firstSave = saveLockSession(env, account.id, validSession());
+    while (sessionReads < 1) await new Promise((resolve) => setTimeout(resolve, 0));
+    const secondSave = saveLockSession(env, account.id, validSession({
+      cookies: validSession().cookies.map((cookie) => cookie.name === "uid" ? { ...cookie, value: "987654321" } : cookie)
+    }));
+    while (puts < 1) await new Promise((resolve) => setTimeout(resolve, 0));
+    releaseSessionReads();
+    const results = await Promise.allSettled([firstSave, secondSave]);
+    assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+    assert.match(results.find((result) => result.status === "rejected").reason.message, /later put unavailable/);
+  } finally {
+    crypto.getRandomValues = originalRandom;
+    env.DB.prepare = originalPrepare;
+  }
+
+  const active = await env.DB.prepare(
+    "SELECT active_version FROM session_versions WHERE user_id=?"
+  ).bind(account.id).first();
+  assert.notEqual(active, null, JSON.stringify(env.MAOYAN_KV.ops));
+  assert.notEqual(await env.MAOYAN_KV.get(userKey(account.id, `maoyan-session:v${active.active_version}`)), null);
+  assert.match((await loadLockSession(env, account.id)).uid, /^(123456789|987654321)$/);
+});
+
 test("a late exact cleanup key prevents an in-flight retry from clearing its parent", async () => {
   const nowMs = Date.parse("2026-09-16T04:00:00.000Z");
   const env = await createAccountEnv({ nowMs });

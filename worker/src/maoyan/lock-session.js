@@ -1,7 +1,8 @@
 import { userKey } from "./user.js";
 import {
   activateSessionVersion, completePendingSessionSave, deleteSessionVersion,
-  enqueueRevocationCleanupKey, getSessionVersion, isAccountRevoked, reservePendingSessionSave
+  enqueueRevocationCleanupKey, getSessionVersion, isAccountRevoked,
+  reservePendingSessionSave, retainPendingSessionSave
 } from "./db.js";
 
 const QUERY_KEYS = ["yodaReady", "csecplatform", "csecversion"];
@@ -116,12 +117,27 @@ export async function saveLockSession(env, tokenId, raw) {
     } while (version === current?.activeVersion);
     const envelope = await encryptSessionEnvelope(env, tokenId, session, version);
     const key = versionedSessionKey(tokenId, version);
-    const reservation = await reservePendingSessionSave(env.DB, tokenId, key);
-    if (Number(reservation?.meta?.changes || 0) !== 1) {
-      if (await isAccountRevoked(env.DB, tokenId)) throw revokedSessionError();
-      throw new Error("猫眼会话保存冲突，请重试");
+    const previousKey = current ? versionedSessionKey(tokenId, current.activeVersion) : null;
+    if (previousKey) await retainPendingKey(env, tokenId, previousKey);
+    let reservation;
+    try {
+      reservation = await reservePendingSessionSave(env.DB, tokenId, key);
+    } catch (error) {
+      if (previousKey) await completePendingSessionSave(env.DB, tokenId, previousKey);
+      throw error;
     }
-    await env.MAOYAN_KV.put(key, JSON.stringify(envelope));
+    if (Number(reservation?.meta?.changes || 0) !== 1) {
+      if (previousKey) await completePendingSessionSave(env.DB, tokenId, previousKey);
+      if (await isAccountRevoked(env.DB, tokenId)) throw revokedSessionError();
+      continue;
+    }
+    try {
+      await env.MAOYAN_KV.put(key, JSON.stringify(envelope));
+    } catch (error) {
+      await completePendingSessionSave(env.DB, tokenId, key);
+      if (previousKey) await completePendingSessionSave(env.DB, tokenId, previousKey);
+      throw error;
+    }
     let result;
     try {
       result = await activateSessionVersion(env.DB, tokenId, version, current?.activeVersion ?? null);
@@ -129,6 +145,7 @@ export async function saveLockSession(env, tokenId, raw) {
       const isRevoked = String(error?.message || "").includes("ACCOUNT_REVOKED");
       if (isRevoked) {
         await compensateRevokedSessionKey(env, tokenId, key);
+        if (previousKey) await compensateRevokedSessionKey(env, tokenId, previousKey);
         throw revokedSessionError();
       }
       let deleted = false;
@@ -143,28 +160,57 @@ export async function saveLockSession(env, tokenId, raw) {
       } else {
         await completePendingSessionSave(env.DB, tokenId, key);
       }
+      if (previousKey) await completePendingSessionSave(env.DB, tokenId, previousKey);
       throw error;
     }
     if (Number(result?.meta?.changes ?? 1) > 0) {
-      if (current) await env.MAOYAN_KV.delete(versionedSessionKey(tokenId, current.activeVersion));
       await completePendingSessionSave(env.DB, tokenId, key);
+      if (previousKey) {
+        try {
+          await env.MAOYAN_KV.delete(previousKey);
+          await completePendingSessionSave(env.DB, tokenId, previousKey);
+        } catch (error) {
+          if (await isAccountRevoked(env.DB, tokenId)) throw revokedSessionError();
+          throw error;
+        }
+      }
+      if (await isAccountRevoked(env.DB, tokenId)) throw revokedSessionError();
       return publicStatus(envelope);
+    }
+    const latest = await getSessionVersion(env.DB, tokenId);
+    if (latest?.activeVersion === version) {
+      // Another writer won this exact version after our stale read. Its KV
+      // object is now active, so this loser must never compensate it.
+      await completePendingSessionSave(env.DB, tokenId, key);
+      if (previousKey) await completePendingSessionSave(env.DB, tokenId, previousKey);
+      continue;
     }
     if (await isAccountRevoked(env.DB, tokenId)) {
       await compensateRevokedSessionKey(env, tokenId, key);
+      if (previousKey) await compensateRevokedSessionKey(env, tokenId, previousKey);
       throw revokedSessionError();
     }
     try {
       await env.MAOYAN_KV.delete(key);
       await completePendingSessionSave(env.DB, tokenId, key);
+      if (previousKey) await completePendingSessionSave(env.DB, tokenId, previousKey);
     } catch (error) {
       if (await isAccountRevoked(env.DB, tokenId)) {
         await compensateRevokedSessionKey(env, tokenId, key);
+        if (previousKey) await compensateRevokedSessionKey(env, tokenId, previousKey);
         throw revokedSessionError();
       }
+      if (previousKey) await completePendingSessionSave(env.DB, tokenId, previousKey);
       throw error;
     }
   }
+  throw new Error("猫眼会话保存冲突，请重试");
+}
+
+async function retainPendingKey(env, tokenId, key) {
+  const reservation = await retainPendingSessionSave(env.DB, tokenId, key);
+  if (Number(reservation?.meta?.changes || 0) === 1) return;
+  if (await isAccountRevoked(env.DB, tokenId)) throw revokedSessionError();
   throw new Error("猫眼会话保存冲突，请重试");
 }
 

@@ -114,16 +114,30 @@ export async function isAccountRevoked(db, userId) {
 // promotes reservations to durable cleanup children before clearing pointers.
 export async function reservePendingSessionSave(db, userId, sessionKey) {
   return await db.prepare(
-    "INSERT INTO pending_session_saves(user_id,session_key) SELECT ?,? " +
+    "INSERT INTO pending_session_saves(user_id,session_key,reservation_count) SELECT ?,?,1 " +
     "WHERE NOT EXISTS (SELECT 1 FROM users WHERE id=? AND state='revoked') " +
     "ON CONFLICT(user_id,session_key) DO NOTHING"
   ).bind(userId, sessionKey, userId).run();
 }
 
+export async function retainPendingSessionSave(db, userId, sessionKey) {
+  return await db.prepare(
+    "INSERT INTO pending_session_saves(user_id,session_key,reservation_count) SELECT ?,?,1 " +
+    "WHERE NOT EXISTS (SELECT 1 FROM users WHERE id=? AND state='revoked') " +
+    "ON CONFLICT(user_id,session_key) DO UPDATE SET reservation_count=pending_session_saves.reservation_count+1"
+  ).bind(userId, sessionKey, userId).run();
+}
+
 export async function completePendingSessionSave(db, userId, sessionKey) {
-  await db.prepare(
-    "DELETE FROM pending_session_saves WHERE user_id=? AND session_key=?"
-  ).bind(userId, sessionKey).run();
+  await db.batch([
+    db.prepare(
+      "DELETE FROM pending_session_saves WHERE user_id=? AND session_key=? AND reservation_count=1"
+    ).bind(userId, sessionKey),
+    db.prepare(
+      "UPDATE pending_session_saves SET reservation_count=reservation_count-1 " +
+      "WHERE user_id=? AND session_key=? AND reservation_count>1"
+    ).bind(userId, sessionKey)
+  ]);
 }
 
 export function promotePendingSessionSavesStatements(db, userId) {
