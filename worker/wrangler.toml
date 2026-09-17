@@ -37,9 +37,12 @@ run_worker_first = ["/api/*", "/store", "/store/", "/store/*.html", "/store/auth
 crons = ["*/3 * * * *"]
 
 # ============ 环境变量 ============
-# 变量已改为仅在 Dashboard 中配置(配合 keep_vars, 部署不会删除/覆盖)
-# 需要恢复仓库管理时, 取消下面的注释即可
-# [vars]
+# 公开申请域名与 Site Key 随代码管理；敏感值和其余运行变量保留在 Dashboard。
+# keep_vars 可确保部署时不删除未在 toml 中声明的 Dashboard 变量。
+[vars]
+ENROLLMENT_ORIGIN = "https://ltools.asia"
+ENROLLMENT_HOSTNAME = "ltools.asia"
+TURNSTILE_SITE_KEY = "0x4AAAAAAE57zkw_Hl1wrTbT"
 # CF_ACCOUNT_ID = "4872db2724154d6cbee0709216b70a01"
 # LOCK_SERVICE_ENABLED = "true"
 
