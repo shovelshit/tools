@@ -46,6 +46,56 @@ async function main() {
     assert.equal(await page.locator("#main-page").isVisible(), true);
     assert.equal(await page.locator('[data-workflow-panel="1"]').getAttribute("aria-hidden"), "false");
     await page.locator("#btn-step-connection-next").click();
+    await page.waitForFunction(() => document.querySelector('[data-workflow-panel="2"]')?.getAttribute("aria-hidden") === "false"
+      && !document.querySelector(".workflow-view.is-leaving"));
+
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    const electronWorkspace = await page.evaluate(() => {
+      const workspace = document.querySelector(".app-workspace");
+      const main = document.querySelector(".workflow-main");
+      const activePanel = document.querySelector(".workflow-view.is-active");
+      const footer = activePanel?.querySelector(".panel-actions");
+      const form = activePanel?.querySelector(".panel-content");
+      const title = document.querySelector(".title-block h1");
+      const status = document.querySelector("#status-line");
+      const fields = [...(activePanel?.querySelectorAll("input, select") || [])];
+      const box = (element) => {
+        const rect = element?.getBoundingClientRect();
+        return rect && { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height };
+      };
+      const within = (child, parent) => {
+        const childBox = box(child);
+        const parentBox = box(parent);
+        return Boolean(childBox && parentBox && childBox.left >= parentBox.left - 1 && childBox.right <= parentBox.right + 1
+          && childBox.top >= parentBox.top - 1 && childBox.bottom <= parentBox.bottom + 1);
+      };
+      return {
+        runtime: document.documentElement.dataset.runtime,
+        workspace: box(workspace),
+        main: box(main),
+        footer: box(footer),
+        transform: getComputedStyle(workspace).transform,
+        titleSize: Number.parseFloat(getComputedStyle(title).fontSize),
+        fieldHeights: fields.map((field) => Number.parseFloat(getComputedStyle(field).height)),
+        footerInside: within(footer, main),
+        fieldsInside: fields.every((field) => within(field, form)),
+        statusInside: within(status, status.parentElement),
+        overflow: document.documentElement.scrollWidth - innerWidth,
+      };
+    });
+    assert.equal(electronWorkspace.runtime, "electron", JSON.stringify(electronWorkspace));
+    assert.ok(electronWorkspace.workspace.width <= 1120, JSON.stringify(electronWorkspace));
+    assert.ok(electronWorkspace.workspace.height <= 620, JSON.stringify(electronWorkspace));
+    assert.equal(electronWorkspace.transform, "none", JSON.stringify(electronWorkspace));
+    assert.equal(electronWorkspace.titleSize, 14, JSON.stringify(electronWorkspace));
+    assert.ok(electronWorkspace.fieldHeights.length > 0, JSON.stringify(electronWorkspace));
+    assert.ok(electronWorkspace.fieldHeights.every((height) => height === 32), JSON.stringify(electronWorkspace));
+    assert.equal(electronWorkspace.footerInside, true, JSON.stringify(electronWorkspace));
+    assert.equal(electronWorkspace.fieldsInside, true, JSON.stringify(electronWorkspace));
+    assert.equal(electronWorkspace.statusInside, true, JSON.stringify(electronWorkspace));
+    assert.ok(electronWorkspace.overflow <= 1, JSON.stringify(electronWorkspace));
+    await page.screenshot({ path: path.join(screenshotDirectory, "ui-electron-1920x1080.png"), fullPage: true });
+
     await page.setViewportSize({ width: 1200, height: 800 });
     const desktopLayout = await page.evaluate(() => {
       const workspace = document.querySelector(".app-workspace").getBoundingClientRect();
