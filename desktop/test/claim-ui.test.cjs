@@ -13,8 +13,7 @@ test("claim UI never transfers access keys through URLs", () => {
   assert.match(source, /secureSet\(window\.webTokenKey/);
 });
 
-test("claim external links prevent opener and referrer leakage", () => {
-  const external = [...html.matchAll(/<a[^>]+target="_blank"[^>]*>/g)].map((match) => match[0]);
-  assert.ok(external.length >= 2);
-  assert.equal(external.every((tag) => /rel="[^"]*noopener[^"]*noreferrer[^"]*"/.test(tag)), true);
+test("public claim UI exposes no external source or deployment links", () => {
+  assert.doesNotMatch(html, /<a\b[^>]*target\s*=\s*["']_blank["'][^>]*>/i);
+  assert.doesNotMatch(html, /(?:github\.com|源码|部署方式|自行部署)/i);
 });
