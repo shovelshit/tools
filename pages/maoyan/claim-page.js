@@ -1,7 +1,7 @@
 (async function () {
   const $ = (id) => document.getElementById(id);
   const workerUrl = location.origin.replace(/\/$/, "");
-  const views = ["loading", "idle", "working", "active", "full", "error"];
+  const views = ["loading", "idle", "working", "active", "unavailable", "error"];
   let config = null;
   let turnstileToken = "";
   let controller = null;
@@ -51,7 +51,7 @@
       void loadDownloads();
       return;
     }
-    if (state.name === "full") { show("full"); return; }
+    if (state.name === "full") { show("unavailable"); return; }
     if (state.name === "pending-confirmation" && state.keyUnavailable) {
       show("error");
       $("claim-error-text").textContent = state.message;
@@ -114,9 +114,6 @@
       config = await api("/api/enrollment/config");
       $("claim-subtitle").textContent = `${config.validDays} 天有效，名额有限`;
       $("claim-capacity").textContent = `剩余 ${config.capacity.remaining} / ${config.capacity.maxUsers} 个名额`;
-      const source = config.sourceUrl || "https://github.com/shovelshit/tools";
-      $("claim-source").href = source;
-      $("claim-deploy").href = `${source.replace(/\/$/, "")}#部署`;
       controller = window.createClaimController({
         api,
         secureGet: window.secureGet,
@@ -131,7 +128,7 @@
       });
       const restored = await controller.restorePending();
       if (restored) return;
-      if (!config.enabled || config.capacity.remaining <= 0) { show("full"); return; }
+      if (!config.claimable) { show("unavailable"); return; }
       show("idle");
       await loadTurnstile(config.turnstileSiteKey);
     } catch (error) {

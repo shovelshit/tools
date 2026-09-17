@@ -4,6 +4,7 @@ import { digestEnrollmentIdentity, ENROLLMENT_FINGERPRINT_VERSION } from "./enro
 import {
   confirmEnrollment, readCapacity, readEnrollmentStatus, readServiceSettings, reserveEnrollment
 } from "./enrollment-store.js";
+import { assertEnrollmentDeploymentReady, enrollmentDeploymentReadiness } from "./enrollment-readiness.js";
 import { readResourceSummary } from "./resource-budget.js";
 
 const VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
@@ -94,6 +95,9 @@ export async function verifyTurnstile(env, {
 
 function errorResponse(env, error, origin = "") {
   const code = error?.code || "INTERNAL_ERROR";
+  if (["ENROLLMENT_NOT_READY", "ENROLLMENT_DISABLED", "RESOURCE_EXHAUSTED", "CAPACITY_FULL"].includes(code)) {
+    return response(env, { ok: false, code: "SERVICE_UNAVAILABLE", error: "当前暂不可领取" }, 503, origin);
+  }
   const status = error?.status || (code === "CAPACITY_FULL" || code === "FINGERPRINT_IN_USE" || code === "REQUEST_CONFLICT" ? 409
     : code === "RESERVATION_EXPIRED" ? 410 : code === "SERVICE_UNAVAILABLE" ? 503
       : code === "INVALID_REQUEST" || code === "INVALID_RESERVATION" ? 400 : 500);
@@ -118,11 +122,15 @@ export async function handleEnrollmentApi(request, env, url, { fetchImpl = fetch
       });
     }
     if (url.pathname === "/api/enrollment/config" && request.method === "GET") {
-      const settings = await readServiceSettings(env.DB);
-      const capacity = await readCapacity(env.DB, serviceNow(env));
+      const nowMs = serviceNow(env);
+      const [settings, capacity, resources] = await Promise.all([
+        readServiceSettings(env.DB), readCapacity(env.DB, nowMs), readResourceSummary(env, nowMs)
+      ]);
+      const readiness = enrollmentDeploymentReadiness(env);
       return response(env, {
         ok: true,
         enabled: settings.publicSignupEnabled,
+        claimable: settings.publicSignupEnabled && readiness.ready && capacity.remaining > 0 && resources.admissionAllowed,
         capacity,
         validDays: settings.defaultValidDays,
         fingerprintVersion: ENROLLMENT_FINGERPRINT_VERSION,
@@ -140,6 +148,16 @@ export async function handleEnrollmentApi(request, env, url, { fetchImpl = fetch
     if (url.pathname === "/api/enrollment/reserve" && request.method === "POST") {
       const body = await smallJson(request);
       const id = requestId(body.requestId);
+      const settings = await readServiceSettings(env.DB);
+      if (!settings.publicSignupEnabled) throw new EnrollmentApiError("ENROLLMENT_DISABLED", "当前未开放申请", 403);
+      try {
+        assertEnrollmentDeploymentReady(env);
+      } catch (error) {
+        if (error?.code === "ENROLLMENT_NOT_READY") {
+          throw new EnrollmentApiError("SERVICE_UNAVAILABLE", "当前暂不可领取", 503);
+        }
+        throw error;
+      }
       const edgeIp = String(request.headers.get("CF-Connecting-IP") || "");
       const identity = await digestEnrollmentIdentity(env, {
         fingerprint: body.fingerprint, version: body.version, edgeIp
@@ -149,8 +167,6 @@ export async function handleEnrollmentApi(request, env, url, { fetchImpl = fetch
         const replay = await reserveEnrollment(env, { requestId: id, ...identity, nowMs: serviceNow(env) });
         return response(env, { ok: true, ...publicReservation(replay) }, 200, origin);
       }
-      const settings = await readServiceSettings(env.DB);
-      if (!settings.publicSignupEnabled) throw new EnrollmentApiError("ENROLLMENT_DISABLED", "当前未开放申请", 403);
       const resources = await readResourceSummary(env, serviceNow(env));
       if (!resources.admissionAllowed) throw new EnrollmentApiError("RESOURCE_EXHAUSTED", "当前资源已用尽", 503);
       await verifyTurnstile(env, {

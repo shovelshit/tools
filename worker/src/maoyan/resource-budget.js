@@ -52,7 +52,6 @@ export async function readResourceSummary(env, nowMs = Date.now()) {
   };
   const measured = Object.values(usage).filter((item) => item.measured);
   const explicitWarning = measured.some((item) => !item.admissionAllowed);
-  const allKnown = measured.length === Object.keys(usage).length;
   return {
     window: "daily",
     measuredAt: nowMs,
@@ -64,8 +63,8 @@ export async function readResourceSummary(env, nowMs = Date.now()) {
       used: Number(capacity?.used || 0),
       maxUsers: Number(capacity?.max_users || 0)
     },
-    admissionAllowed: allKnown && !explicitWarning,
-    reason: explicitWarning ? "RESOURCE_EXHAUSTED" : allKnown ? null : "PLATFORM_USAGE_UNKNOWN",
+    admissionAllowed: !explicitWarning,
+    reason: explicitWarning ? "RESOURCE_EXHAUSTED" : null,
     estimates: {
       maxQueriesPerInvocation: 35,
       dispatcherCinemaPageSize: 20,

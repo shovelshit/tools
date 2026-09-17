@@ -83,18 +83,62 @@ test("reserve and confirm return a key once and never bind later use to the clai
   assert.equal(turnstileCalls, 1);
 });
 
-test("origin, Turnstile, public switch and resource budget fail closed", async () => {
+test("public enrollment configuration fails closed without disclosing missing deployment settings", async () => {
+  const env = await enrollmentEnv();
+  delete env.TURNSTILE_SECRET_KEY;
+  const configRequest = request("/api/enrollment/config");
+  const configResponse = await handleEnrollmentApi(configRequest, env, new URL(configRequest.url));
+  const config = await configResponse.json();
+  assert.equal(config.claimable, false);
+  assert.equal(Object.hasOwn(config, "missing"), false);
+
+  const body = { requestId: crypto.randomUUID(), fingerprint: FINGERPRINT, version: "thumbmark-1.11.0-v1", turnstileToken: "bad" };
+  const unavailable = request("/api/enrollment/reserve", { method: "POST", body });
+  const unavailableResponse = await handleEnrollmentApi(unavailable, env, new URL(unavailable.url), { fetchImpl: turnstileFetch() });
+  assert.equal(unavailableResponse.status, 503);
+  assert.deepEqual(await unavailableResponse.json(), {
+    ok: false, code: "SERVICE_UNAVAILABLE", error: "当前暂不可领取"
+  });
+});
+
+test("an invalid enrollment HMAC is hidden by the generic unavailable reserve response", async () => {
+  const env = await enrollmentEnv();
+  env.ENROLLMENT_HMAC_KEY = "too-short";
+  const reserveRequest = request("/api/enrollment/reserve", {
+    method: "POST",
+    body: { requestId: crypto.randomUUID(), fingerprint: FINGERPRINT, version: "thumbmark-1.11.0-v1", turnstileToken: "test-token" }
+  });
+  const response = await handleEnrollmentApi(reserveRequest, env, new URL(reserveRequest.url), { fetchImpl: turnstileFetch() });
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), {
+    ok: false, code: "SERVICE_UNAVAILABLE", error: "当前暂不可领取"
+  });
+});
+
+test("origin and Turnstile checks reject invalid reserve requests", async () => {
   const env = await enrollmentEnv();
   const body = { requestId: crypto.randomUUID(), fingerprint: FINGERPRINT, version: "thumbmark-1.11.0-v1", turnstileToken: "bad" };
   const wrongOrigin = request("/api/enrollment/reserve", { method: "POST", body, origin: "https://evil.example" });
   assert.equal((await handleEnrollmentApi(wrongOrigin, env, new URL(wrongOrigin.url), { fetchImpl: turnstileFetch() })).status, 403);
   const invalid = request("/api/enrollment/reserve", { method: "POST", body });
   assert.equal((await handleEnrollmentApi(invalid, env, new URL(invalid.url), { fetchImpl: turnstileFetch({ success: false }) })).status, 400);
+});
+
+test("optional resource measurements allow enrollment while measured exhaustion blocks it", async () => {
+  const env = await enrollmentEnv();
+  const body = { fingerprint: FINGERPRINT, version: "thumbmark-1.11.0-v1", turnstileToken: "test-token" };
   delete env.RESOURCE_USAGE_JSON;
-  const unknownBudget = request("/api/enrollment/reserve", { method: "POST", body: { ...body, requestId: crypto.randomUUID() } });
-  const response = await handleEnrollmentApi(unknownBudget, env, new URL(unknownBudget.url), { fetchImpl: turnstileFetch() });
-  assert.equal(response.status, 503);
-  assert.equal((await response.json()).code, "RESOURCE_EXHAUSTED");
+  const optionalMetrics = request("/api/enrollment/reserve", { method: "POST", body: { ...body, requestId: crypto.randomUUID() } });
+  assert.equal((await handleEnrollmentApi(optionalMetrics, env, new URL(optionalMetrics.url), { fetchImpl: turnstileFetch() })).status, 201);
+
+  const exhausted = await enrollmentEnv();
+  exhausted.RESOURCE_USAGE_JSON = JSON.stringify({ workerRequests: { used: 70, limit: 100 } });
+  const exhaustedRequest = request("/api/enrollment/reserve", { method: "POST", body: { ...body, requestId: crypto.randomUUID() } });
+  const exhaustedResponse = await handleEnrollmentApi(exhaustedRequest, exhausted, new URL(exhaustedRequest.url), { fetchImpl: turnstileFetch() });
+  assert.equal(exhaustedResponse.status, 503);
+  assert.deepEqual(await exhaustedResponse.json(), {
+    ok: false, code: "SERVICE_UNAVAILABLE", error: "当前暂不可领取"
+  });
 });
 
 test("enrollment preflight is scoped to the configured origin", async () => {

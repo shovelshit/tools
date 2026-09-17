@@ -1,4 +1,5 @@
 import { accountStatus, getAccount, hashAccessKey } from "./accounts.js";
+import { assertEnrollmentDeploymentReady } from "./enrollment-readiness.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const RESERVATION_MS = 5 * 60 * 1000;
@@ -80,6 +81,7 @@ export async function updateServiceSettings(env, input) {
       !Number.isInteger(defaultValidDays) || defaultValidDays < 1) {
     fail("INVALID_REQUEST", "账号设置参数无效");
   }
+  if (publicSignupEnabled) assertEnrollmentDeploymentReady(env);
   let result;
   try {
     result = await env.DB.prepare(

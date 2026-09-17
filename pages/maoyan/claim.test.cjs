@@ -3,6 +3,55 @@ const assert = require("node:assert/strict");
 const { createClaimController } = require("./claim.js");
 const fs = require("node:fs");
 const path = require("node:path");
+const vm = require("node:vm");
+
+function fakeElement() {
+  const classes = new Set(["hidden"]);
+  return {
+    textContent: "", href: "", disabled: false,
+    classList: {
+      toggle(name, force) { if (force) classes.add(name); else classes.delete(name); },
+      contains(name) { return classes.has(name); },
+      add(name) { classes.add(name); },
+      remove(name) { classes.delete(name); }
+    },
+    addEventListener() {},
+    append() {}
+  };
+}
+
+async function loadClaimPage(config) {
+  const elements = new Map();
+  const turnstileScripts = [];
+  const document = {
+    getElementById(id) {
+      if (!elements.has(id)) elements.set(id, fakeElement());
+      return elements.get(id);
+    },
+    createElement: () => fakeElement(),
+    head: {
+      append(script) {
+        turnstileScripts.push(script);
+        script.onload();
+      }
+    }
+  };
+  const window = {
+    turnstile: { render() {} },
+    createClaimController: () => ({ restorePending: async () => false }),
+    secureGet: async () => "", secureSet: async () => ""
+  };
+  const context = {
+    window, document,
+    location: { origin: "https://worker.test", href: "https://worker.test/maoyan/claim.html", reload() {} },
+    fetch: async () => ({ ok: true, json: async () => config }),
+    localStorage: { setItem() {} },
+    URL, navigator: { clipboard: { writeText: async () => {} } }
+  };
+  const source = fs.readFileSync(path.join(__dirname, "claim-page.js"), "utf8");
+  await vm.runInNewContext(source, context, { filename: "claim-page.js" });
+  return { elements, turnstileScripts };
+}
 
 function fixture(overrides = {}) {
   const values = new Map();
@@ -109,4 +158,15 @@ test("claim page stays compact and loads fingerprint code locally", () => {
   assert.match(css, /width:\s*min\(520px, calc\(100% - 32px\)\)/);
   assert.match(css, /@media \(pointer:\s*coarse\)[\s\S]*min-height:\s*44px/);
   assert.doesNotMatch(css, /font-size:\s*clamp\(/);
+});
+
+test("unclaimable enrollment never loads Turnstile and shows only the generic unavailable view", async () => {
+  const page = await loadClaimPage({
+    enabled: true, claimable: false, validDays: 15,
+    capacity: { remaining: 1, maxUsers: 2 }, turnstileSiteKey: "site"
+  });
+  const html = fs.readFileSync(path.join(__dirname, "claim.html"), "utf8");
+  assert.equal(page.turnstileScripts.length, 0);
+  assert.equal(page.elements.get("claim-unavailable").classList.contains("hidden"), false);
+  assert.match(html, /id="claim-unavailable"[\s\S]*当前暂不可领取/);
 });

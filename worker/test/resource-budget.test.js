@@ -13,6 +13,16 @@ test("admission closes before exhausting the configured budget", () => {
   assert.equal(evaluateBudget({ used: NaN, limit: 100 }).admissionAllowed, false);
 });
 
+test("unmeasured resources do not block admission, but an exhausted measured resource does", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  assert.equal((await readResourceSummary(env, NOW)).admissionAllowed, true);
+
+  env.RESOURCE_USAGE_JSON = JSON.stringify({ d1RowsRead: { used: 70, limit: 100 } });
+  const exhausted = await readResourceSummary(env, NOW);
+  assert.equal(exhausted.admissionAllowed, false);
+  assert.equal(exhausted.reason, "RESOURCE_EXHAUSTED");
+});
+
 test("admin resources returns aggregate measured and estimated fields only", async () => {
   const env = await createAccountEnv({ nowMs: NOW, maxUsers: 20 });
   env.NOW_MS = String(NOW);

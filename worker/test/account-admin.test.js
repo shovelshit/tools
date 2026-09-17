@@ -74,6 +74,10 @@ test("admin updates use optimistic account versions and reject arbitrary fields"
 test("capacity settings use CAS and cannot drop below current occupancy", async () => {
   const env = await createAccountEnv({ nowMs: NOW, maxUsers: 2 });
   env.NOW_MS = String(NOW);
+  env.TURNSTILE_SITE_KEY = "site";
+  env.TURNSTILE_SECRET_KEY = "secret";
+  env.ENROLLMENT_ORIGIN = "https://worker.example";
+  env.ENROLLMENT_HOSTNAME = "worker.example";
   await seedAccount(env, { expiresAt: NOW + 365 * 86_400_000 });
   const read = await worker.fetch(request("/api/admin/settings"), env);
   assert.equal(read.status, 200);
@@ -89,6 +93,18 @@ test("capacity settings use CAS and cannot drop below current occupancy", async 
   }), env);
   assert.equal(saved.status, 200);
   assert.equal((await saved.json()).settings.maxUsers, 3);
+});
+
+test("admin settings cannot enable public enrollment with incomplete security configuration", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  env.NOW_MS = String(NOW);
+  const current = (await (await worker.fetch(request("/api/admin/settings"), env)).json()).settings;
+  const response = await worker.fetch(request("/api/admin/settings", {
+    method: "POST",
+    body: { expectedVersion: current.version, maxUsers: 20, defaultValidDays: 15, publicSignupEnabled: true }
+  }), env);
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /TURNSTILE_SITE_KEY/);
 });
 
 test("admin accounts, creation, and settings are independently scoped by business line", async () => {
