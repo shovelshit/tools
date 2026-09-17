@@ -118,7 +118,7 @@ async function loadResources() {
   const measured = Object.values(resources.usage || {}).filter((item) => item.measured).length;
   els.resourceNote.textContent = measured
     ? `${measured} 项平台指标已测量，其余为估算或未知`
-    : "平台用量未知；公开申请应保持关闭，现有账号不受影响";
+    : "未配置用量指标不阻止申请；仅明确耗尽阻止申请";
 }
 
 function fmtTime(value) {

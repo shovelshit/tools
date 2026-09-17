@@ -45,6 +45,22 @@ test("resource summary is compact and refreshes only with explicit admin loads",
   assert.doesNotMatch(source, /setInterval/);
 });
 
+test("unmeasured resource usage permits enrollment while explicit exhaustion keeps it closed", async () => {
+  const { context, elements, requests } = loadAdminWithDeferredRequests();
+  const load = vm.runInContext("loadResources()", context);
+  resolveJson(requests.at(-1), { resources: { admissionAllowed: true, usage: {} } });
+  await load;
+  assert.equal(elements.get("resource-admission").textContent, "可申请");
+  assert.equal(elements.get("resource-note").textContent, "未配置用量指标不阻止申请；仅明确耗尽阻止申请");
+
+  const exhausted = vm.runInContext("loadResources()", context);
+  resolveJson(requests.at(-1), {
+    resources: { admissionAllowed: false, usage: { workerRequests: { measured: true } } }
+  });
+  await exhausted;
+  assert.equal(elements.get("resource-admission").textContent, "保持关闭");
+});
+
 test("admin UI scopes accounts and settings by an immutable business selection", () => {
   assert.match(html, /id="account-business-line"/);
   assert.match(html, /value="maoyan"/);

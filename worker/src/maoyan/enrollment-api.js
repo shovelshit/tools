@@ -127,10 +127,12 @@ export async function handleEnrollmentApi(request, env, url, { fetchImpl = fetch
         readServiceSettings(env.DB), readCapacity(env.DB, nowMs), readResourceSummary(env, nowMs)
       ]);
       const readiness = enrollmentDeploymentReadiness(env);
+      const pendingConfirmable = settings.publicSignupEnabled && readiness.ready && resources.admissionAllowed;
       return response(env, {
         ok: true,
         enabled: settings.publicSignupEnabled,
-        claimable: settings.publicSignupEnabled && readiness.ready && capacity.remaining > 0 && resources.admissionAllowed,
+        claimable: pendingConfirmable && capacity.remaining > 0,
+        pendingConfirmable,
         capacity,
         validDays: settings.defaultValidDays,
         fingerprintVersion: ENROLLMENT_FINGERPRINT_VERSION,
@@ -181,6 +183,11 @@ export async function handleEnrollmentApi(request, env, url, { fetchImpl = fetch
     }
     if (url.pathname === "/api/enrollment/confirm" && request.method === "POST") {
       const body = await smallJson(request);
+      const settings = await readServiceSettings(env.DB);
+      if (!settings.publicSignupEnabled) throw new EnrollmentApiError("ENROLLMENT_DISABLED", "当前未开放申请", 403);
+      assertEnrollmentDeploymentReady(env);
+      const resources = await readResourceSummary(env, serviceNow(env));
+      if (!resources.admissionAllowed) throw new EnrollmentApiError("RESOURCE_EXHAUSTED", "当前资源已用尽", 503);
       const result = await confirmEnrollment(env, {
         requestId: requestId(body.requestId),
         key: String(request.headers.get("X-Token") || ""),

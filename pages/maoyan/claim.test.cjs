@@ -20,7 +20,7 @@ function fakeElement() {
   };
 }
 
-async function loadClaimPage(config) {
+async function loadClaimPage(config, { restorePending = async () => false } = {}) {
   const elements = new Map();
   const turnstileScripts = [];
   const document = {
@@ -38,7 +38,7 @@ async function loadClaimPage(config) {
   };
   const window = {
     turnstile: { render() {} },
-    createClaimController: () => ({ restorePending: async () => false }),
+    createClaimController: () => ({ restorePending }),
     secureGet: async () => "", secureSet: async () => ""
   };
   const context = {
@@ -188,4 +188,17 @@ test("unclaimable enrollment never loads Turnstile and shows only the generic un
   assert.equal(page.turnstileScripts.length, 0);
   assert.equal(page.elements.get("claim-unavailable").classList.contains("hidden"), false);
   assert.match(html, /id="claim-unavailable"[\s\S]*当前暂不可领取/);
+});
+
+test("a pending reservation is not restored while pending confirmation is unavailable", async () => {
+  let restoreCalls = 0;
+  const page = await loadClaimPage({
+    enabled: true, claimable: true, pendingConfirmable: false, validDays: 15,
+    capacity: { remaining: 1, maxUsers: 2 }, turnstileSiteKey: "site"
+  }, {
+    restorePending: async () => { restoreCalls += 1; return false; }
+  });
+  assert.equal(restoreCalls, 0);
+  assert.equal(page.turnstileScripts.length, 0);
+  assert.equal(page.elements.get("claim-unavailable").classList.contains("hidden"), false);
 });

@@ -127,6 +127,7 @@
           location.href = url;
         }
       });
+      if (!config.pendingConfirmable) { show("unavailable"); return; }
       const restored = await controller.restorePending();
       if (restored) return;
       if (!config.claimable) { show("unavailable"); return; }

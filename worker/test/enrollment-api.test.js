@@ -90,6 +90,7 @@ test("public enrollment configuration fails closed without disclosing missing de
   const configResponse = await handleEnrollmentApi(configRequest, env, new URL(configRequest.url));
   const config = await configResponse.json();
   assert.equal(config.claimable, false);
+  assert.equal(config.pendingConfirmable, false);
   assert.equal(Object.hasOwn(config, "missing"), false);
 
   const body = { requestId: crypto.randomUUID(), fingerprint: FINGERPRINT, version: "thumbmark-1.11.0-v1", turnstileToken: "bad" };
@@ -161,6 +162,53 @@ test("optional resource measurements allow enrollment while measured exhaustion 
   assert.deepEqual(await exhaustedResponse.json(), {
     ok: false, code: "SERVICE_UNAVAILABLE", error: "当前暂不可领取"
   });
+});
+
+test("confirm fails closed with a generic unavailable response when the service gate closes", async () => {
+  for (const closeGate of [
+    async (env) => { await env.DB.prepare("UPDATE service_settings SET public_signup_enabled=0 WHERE id=1").run(); },
+    async (env) => { delete env.TURNSTILE_SECRET_KEY; },
+    async (env) => { env.RESOURCE_USAGE_JSON = JSON.stringify({ workerRequests: { used: 70, limit: 100 } }); }
+  ]) {
+    const env = await enrollmentEnv();
+    const requestId = crypto.randomUUID();
+    const reserveRequest = request("/api/enrollment/reserve", {
+      method: "POST",
+      body: { requestId, fingerprint: FINGERPRINT, version: "thumbmark-1.11.0-v1", turnstileToken: "test-token" }
+    });
+    const reservation = await (await handleEnrollmentApi(
+      reserveRequest, env, new URL(reserveRequest.url), { fetchImpl: turnstileFetch() }
+    )).json();
+    await closeGate(env);
+
+    const confirmRequest = request("/api/enrollment/confirm", { method: "POST", token: reservation.key, body: { requestId } });
+    const confirmResponse = await handleEnrollmentApi(confirmRequest, env, new URL(confirmRequest.url));
+    assert.equal(confirmResponse.status, 503);
+    assert.deepEqual(await confirmResponse.json(), {
+      ok: false, code: "SERVICE_UNAVAILABLE", error: "当前暂不可领取"
+    });
+  }
+});
+
+test("a reservation holding the final capacity slot remains confirmable", async () => {
+  const env = await enrollmentEnv();
+  const requestId = crypto.randomUUID();
+  const reserveRequest = request("/api/enrollment/reserve", {
+    method: "POST",
+    body: { requestId, fingerprint: FINGERPRINT, version: "thumbmark-1.11.0-v1", turnstileToken: "test-token" }
+  });
+  const reservation = await (await handleEnrollmentApi(
+    reserveRequest, env, new URL(reserveRequest.url), { fetchImpl: turnstileFetch() }
+  )).json();
+  const configRequest = request("/api/enrollment/config");
+  const config = await (await handleEnrollmentApi(configRequest, env, new URL(configRequest.url))).json();
+  assert.equal(config.capacity.remaining, 0);
+  assert.equal(config.claimable, false);
+  assert.equal(config.pendingConfirmable, true);
+
+  const confirmRequest = request("/api/enrollment/confirm", { method: "POST", token: reservation.key, body: { requestId } });
+  const confirmed = await handleEnrollmentApi(confirmRequest, env, new URL(confirmRequest.url));
+  assert.equal(confirmed.status, 200);
 });
 
 test("enrollment preflight is scoped to the configured origin", async () => {
