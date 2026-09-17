@@ -3,8 +3,9 @@
 // KV 仅保留加密会话(maoyan-session)。userKey 现在只服务会话键名。
 
 import {
-  clearRevocationCleanup, deleteUserData, getConfigRecord, getSessionVersion,
-  listRevocationCleanups, putConfig, recordRevocationCleanupAttempt, replaceConfigIfUnchanged
+  completeRevocationCleanup, deleteUserData, getConfigRecord, getSessionVersion,
+  listRevocationCleanupKeys, listRevocationCleanups, putConfig,
+  recordRevocationCleanupAttempt, replaceConfigIfUnchanged
 } from "./db.js";
 import { decryptNotifyCredential, encryptNotifyCredential } from "./notify-secrets.js";
 import { saveConfigWithSubscription, syncSubscription } from "./monitor-store.js";
@@ -104,9 +105,10 @@ async function deleteKvSession(env, key) {
 
 // 撤销后的 KV 残留不再可被使用：账号状态和 D1 会话指针已先持久化失效。
 // 这里保留尽力删除语义，避免 KV 瞬时故障回滚已经成功的账号撤销。
-export async function cleanupUserKvSessions(env, tokenId, session = null) {
+export async function cleanupUserKvSessions(env, tokenId, session = null, cleanupKeys = []) {
   const keys = new Set([userKey(tokenId, "maoyan-session")]);
   if (session) keys.add(userKey(tokenId, `maoyan-session:v${session.activeVersion}`));
+  for (const key of cleanupKeys) keys.add(key);
   let enumerationFailed = false;
   try {
     let cursor;
@@ -135,14 +137,16 @@ function logRevocationCleanupFailure() {
 // This consumes only durable markers created as part of a successful revocation.
 // A failure leaves the marker intact so a later scheduled run can converge.
 export async function retryRevocationCleanup(env, tokenId, { session = null, nowMs = Date.now() } = {}) {
+  let cleanupKeys = [];
   let outcome;
   try {
-    outcome = await cleanupUserKvSessions(env, tokenId, session);
+    cleanupKeys = await listRevocationCleanupKeys(env.DB, tokenId);
+    outcome = await cleanupUserKvSessions(env, tokenId, session, cleanupKeys);
   } catch {
     outcome = { complete: false, error: "kv_delete_failed" };
   }
   try {
-    if (outcome.complete) await clearRevocationCleanup(env.DB, tokenId);
+    if (outcome.complete) await completeRevocationCleanup(env.DB, tokenId, cleanupKeys);
     else await recordRevocationCleanupAttempt(env.DB, tokenId, nowMs, outcome.error);
   } catch {
     // The marker was atomically created with revocation and remains for a later retry.

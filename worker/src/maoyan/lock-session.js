@@ -1,5 +1,7 @@
 import { userKey } from "./user.js";
-import { activateSessionVersion, deleteSessionVersion, getSessionVersion } from "./db.js";
+import {
+  activateSessionVersion, deleteSessionVersion, enqueueRevocationCleanupKey, getSessionVersion
+} from "./db.js";
 
 const QUERY_KEYS = ["yodaReady", "csecplatform", "csecversion"];
 const SAFE_QUERY_VALUE = /^[A-Za-z0-9._:-]{1,64}$/;
@@ -118,11 +120,29 @@ export async function saveLockSession(env, tokenId, raw) {
     try {
       result = await activateSessionVersion(env.DB, tokenId, version, current?.activeVersion ?? null);
     } catch (error) {
-      await env.MAOYAN_KV.delete(key).catch(() => {});
-      if (String(error?.message || "").includes("ACCOUNT_REVOKED")) {
-        const revoked = new Error("账号已撤销");
-        revoked.code = "ACCOUNT_REVOKED";
-        throw revoked;
+      const isRevoked = String(error?.message || "").includes("ACCOUNT_REVOKED");
+      if (isRevoked) {
+        try {
+          // Persist before compensation: a delete failure must leave a retryable key.
+          await enqueueRevocationCleanupKey(env.DB, tokenId, key, Date.now());
+        } catch {
+          console.error("[maoyan] revoked session cleanup marker unavailable");
+        }
+      }
+      let deleted = false;
+      try {
+        await env.MAOYAN_KV.delete(key);
+        deleted = true;
+      } catch {}
+      if (!deleted) {
+        console.error(isRevoked
+          ? "[maoyan] revoked session cleanup incomplete"
+          : "[maoyan] lock session compensation incomplete");
+      }
+      if (isRevoked) {
+        const revokedError = new Error("账号已撤销");
+        revokedError.code = "ACCOUNT_REVOKED";
+        throw revokedError;
       }
       throw error;
     }

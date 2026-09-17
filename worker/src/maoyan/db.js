@@ -95,11 +95,27 @@ export function enqueueRevocationCleanupStatement(db, userId, nowMs) {
   ).bind(userId, nowMs);
 }
 
+export async function enqueueRevocationCleanupKey(db, userId, sessionKey, nowMs) {
+  await db.batch([
+    enqueueRevocationCleanupStatement(db, userId, nowMs),
+    db.prepare(
+      "INSERT INTO revocation_cleanup_keys(user_id,session_key) VALUES (?,?) ON CONFLICT(user_id,session_key) DO NOTHING"
+    ).bind(userId, sessionKey)
+  ]);
+}
+
 export async function listRevocationCleanups(db, limit = 100) {
   const { results } = await db.prepare(
     "SELECT user_id FROM revocation_cleanup ORDER BY created_at ASC LIMIT ?"
   ).bind(Math.min(100, Math.max(1, Number(limit) || 100))).all();
   return results.map((row) => String(row.user_id));
+}
+
+export async function listRevocationCleanupKeys(db, userId) {
+  const { results } = await db.prepare(
+    "SELECT session_key FROM revocation_cleanup_keys WHERE user_id=?"
+  ).bind(userId).all();
+  return results.map((row) => String(row.session_key));
 }
 
 export async function recordRevocationCleanupAttempt(db, userId, nowMs, error) {
@@ -108,8 +124,15 @@ export async function recordRevocationCleanupAttempt(db, userId, nowMs, error) {
   ).bind(nowMs, error, userId).run();
 }
 
-export async function clearRevocationCleanup(db, userId) {
-  await db.prepare("DELETE FROM revocation_cleanup WHERE user_id=?").bind(userId).run();
+export async function completeRevocationCleanup(db, userId, sessionKeys) {
+  const statements = sessionKeys.map((sessionKey) => db.prepare(
+    "DELETE FROM revocation_cleanup_keys WHERE user_id=? AND session_key=?"
+  ).bind(userId, sessionKey));
+  statements.push(db.prepare(
+    "DELETE FROM revocation_cleanup WHERE user_id=? AND NOT EXISTS (" +
+    "SELECT 1 FROM revocation_cleanup_keys WHERE user_id=?)"
+  ).bind(userId, userId));
+  await db.batch(statements);
 }
 
 // ---------- status(每令牌一行 JSON, 字段与 KV 版一致) ----------

@@ -10,7 +10,8 @@ import {
   removeLockSession,
   saveLockSession
 } from "../src/maoyan/lock-session.js";
-import { userKey } from "../src/maoyan/user.js";
+import { retryPendingRevocationCleanups, userKey } from "../src/maoyan/user.js";
+import { updateManagedAccount } from "../src/maoyan/enrollment-store.js";
 
 test("normalizes a local session and masks its uid", () => {
   const session = normalizeSession(validSession());
@@ -147,4 +148,84 @@ test("a session save racing revocation cannot leave a pointer or KV ciphertext",
 
   assert.equal(await env.DB.prepare("SELECT 1 AS ok FROM session_versions WHERE user_id=?").bind(account.id).first(), null);
   assert.equal((await env.MAOYAN_KV.list({ prefix: userKey(account.id, "maoyan-session:v") })).keys.length, 0);
+});
+
+test("a failed revoke-race KV compensation retains a durable cleanup retry", async () => {
+  const nowMs = Date.parse("2026-09-16T04:00:00.000Z");
+  const env = await createAccountEnv({ nowMs });
+  const { account } = await seedAccount(env, { expiresAt: nowMs + 60_000 });
+  const list = env.MAOYAN_KV.list.bind(env.MAOYAN_KV);
+  const remove = env.MAOYAN_KV.delete.bind(env.MAOYAN_KV);
+  const put = env.MAOYAN_KV.put.bind(env.MAOYAN_KV);
+  let hideNewVersion = true;
+  let failCompensation = false;
+  let versionedKey = "";
+
+  env.MAOYAN_KV.list = async (options) => hideNewVersion
+    ? { keys: [], list_complete: true }
+    : await list(options);
+  env.MAOYAN_KV.delete = async (key) => {
+    if (key === versionedKey && failCompensation) throw new Error("delete unavailable");
+    return await remove(key);
+  };
+  env.MAOYAN_KV.put = async (key, value) => {
+    await put(key, value);
+    versionedKey = key;
+    await updateManagedAccount(env, {
+      userId: account.id, expectedVersion: account.version, patch: { state: "revoked" }, nowMs
+    });
+    failCompensation = true;
+  };
+
+  await assert.rejects(() => saveLockSession(env, account.id, validSession()), { code: "ACCOUNT_REVOKED" });
+
+  assert.equal(await env.DB.prepare("SELECT 1 AS ok FROM session_versions WHERE user_id=?").bind(account.id).first(), null);
+  assert.notEqual(await env.MAOYAN_KV.get(versionedKey), null);
+  assert.notEqual(await env.DB.prepare("SELECT 1 AS ok FROM revocation_cleanup WHERE user_id=?").bind(account.id).first(), null);
+
+  hideNewVersion = false;
+  failCompensation = false;
+  await retryPendingRevocationCleanups(env, { nowMs: nowMs + 1 });
+  assert.equal(await env.MAOYAN_KV.get(versionedKey), null);
+  assert.equal(await env.DB.prepare("SELECT 1 AS ok FROM revocation_cleanup WHERE user_id=?").bind(account.id).first(), null);
+});
+
+test("a non-revocation pointer failure with failed compensation is observable without a revoke retry", async () => {
+  const env = await createAccountEnv();
+  const { account } = await seedAccount(env);
+  const prepare = env.DB.prepare.bind(env.DB);
+  const remove = env.MAOYAN_KV.delete.bind(env.MAOYAN_KV);
+  let versionedKey = "";
+  env.MAOYAN_KV.delete = async (key) => {
+    if (key === versionedKey) throw new Error("delete unavailable");
+    return await remove(key);
+  };
+  env.DB.prepare = (sql) => {
+    const statement = prepare(sql);
+    if (!sql.startsWith("INSERT INTO session_versions")) return statement;
+    return {
+      bind: (...args) => {
+        const bound = statement.bind(...args);
+        return { ...bound, run: async () => { throw new Error("D1 unavailable"); } };
+      }
+    };
+  };
+  const put = env.MAOYAN_KV.put.bind(env.MAOYAN_KV);
+  env.MAOYAN_KV.put = async (key, value) => {
+    versionedKey = key;
+    return await put(key, value);
+  };
+  const originalError = console.error;
+  const errors = [];
+  console.error = (message) => errors.push(String(message));
+  try {
+    await assert.rejects(() => saveLockSession(env, account.id, validSession()), /D1 unavailable/);
+  } finally {
+    console.error = originalError;
+  }
+
+  assert.notEqual(await env.MAOYAN_KV.get(versionedKey), null);
+  assert.equal(await env.DB.prepare("SELECT 1 AS ok FROM revocation_cleanup WHERE user_id=?").bind(account.id).first(), null);
+  assert.equal(errors.includes("[maoyan] lock session compensation incomplete"), true);
+  assert.equal(errors.some((message) => message.includes(account.id)), false);
 });
