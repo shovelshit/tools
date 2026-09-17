@@ -1,1 +1,0 @@
-ALTER TABLE user_config ADD COLUMN version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0);
