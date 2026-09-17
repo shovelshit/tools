@@ -2,7 +2,8 @@ import { fetchCinemaDetail } from "./api.js";
 import { newShowsNotification } from "./notification-copy.js";
 import { wakeNotificationDispatcher } from "./notification-outbox.js";
 import { advanceSubscriber, getCommittedCinemaBatch, listSubscribers, persistCinemaSnapshot } from "./monitor-store.js";
-import { runScheduledLockAfterMonitor } from "./lock-runner.js";
+import { resolveLockTarget, runScheduledLockAfterMonitor } from "./lock-runner.js";
+import { orderLockCandidates, runBounded } from "./lock-lottery.js";
 import { allowManualOperation } from "./resource-budget.js";
 
 function eventText(event) {
@@ -21,7 +22,8 @@ async function fetchWithTimeout(fetchCinema, cinemaId) {
 }
 
 export async function processCinemaBatch(env, {
-  cinemaId, batchId, nowMs = Date.now(), fetchCinema = fetchCinemaDetail, runLock = runScheduledLockAfterMonitor
+  cinemaId, batchId, nowMs = Date.now(), fetchCinema = fetchCinemaDetail,
+  runLock = runScheduledLockAfterMonitor, lockConcurrency = 4
 }) {
   let persisted = await getCommittedCinemaBatch(env.DB, String(cinemaId), String(batchId));
   if (persisted) persisted = { ...persisted, replayed: true };
@@ -35,6 +37,8 @@ export async function processCinemaBatch(env, {
   let afterUserId = "";
   let subscribers = 0;
   let notifications = 0;
+  const lockCandidates = [];
+  const ambiguousCandidates = [];
   do {
     const page = await listSubscribers(env.DB, {
       cinemaId: String(cinemaId), afterUserId, limit: 10, nowMs: Number(nowMs)
@@ -71,11 +75,21 @@ export async function processCinemaBatch(env, {
       subscribers += 1;
       notifications += Number(advanced.notificationsCreated || 0);
       if (subscription.lockRule?.state === "waiting_schedule" && typeof runLock === "function") {
-        await runLock(env, subscription.userId, data);
+        const target = resolveLockTarget(subscription.lockRule, data);
+        const candidate = {
+          userId: subscription.userId,
+          lotteryKey: subscription.lockRule.lotteryKey,
+          target
+        };
+        if (target.status === "matched") lockCandidates.push(candidate);
+        else if (target.status === "ambiguous") ambiguousCandidates.push(candidate);
       }
     }
     afterUserId = page.nextCursor || "";
   } while (afterUserId);
+  const queue = [...orderLockCandidates(lockCandidates, data), ...ambiguousCandidates];
+  const lockResults = await runBounded(queue, lockConcurrency, (candidate) => runLock(env, candidate.userId, data));
+  const lockFailures = lockResults.filter((result) => result.status === "rejected").length;
   if (notifications) await wakeNotificationDispatcher(env);
   return {
     ok: true,
@@ -84,7 +98,9 @@ export async function processCinemaBatch(env, {
     snapshotVersion: persisted.snapshot.version,
     replayed: persisted.replayed,
     subscribers,
-    notifications
+    notifications,
+    lockAttempts: queue.length,
+    lockFailures
   };
 }
 

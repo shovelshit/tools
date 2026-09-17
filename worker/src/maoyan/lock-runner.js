@@ -37,6 +37,37 @@ function seatsMatch(rule, seatMap) {
   });
 }
 
+export function resolveLockTarget(rule, cinema, deps = {}) {
+  const exactShows = deps.findShows || findExactShows;
+  const nearbyShows = deps.findCompatibleShows || findCompatibleShows;
+  const exactMatches = exactShows(cinema, rule) || [];
+  const matches = rule.hall
+    ? exactMatches.filter((candidate) => String(candidate.th || "") === String(rule.hall))
+    : exactMatches;
+  if (matches.length === 1) {
+    return { status: "matched", show: matches[0], matchMode: "exact", timeDeltaMinutes: 0 };
+  }
+  if (matches.length > 1) return { status: "ambiguous", reason: "exact" };
+  if (!rule.hall) return { status: "waiting" };
+  const candidates = nearbyShows(cinema, {
+    movieId: rule.movieId,
+    targetDate: rule.targetDate,
+    templateTime: rule.templateTime,
+    templateHall: rule.hall,
+    maxMinutes: 30
+  }) || [];
+  if (!candidates.length) return { status: "waiting" };
+  const nearestDelta = Math.abs(Number(candidates[0].timeDeltaMinutes));
+  const nearest = candidates.filter((candidate) => Math.abs(Number(candidate.timeDeltaMinutes)) === nearestDelta);
+  if (nearest.length > 1) return { status: "ambiguous", reason: "fuzzy" };
+  return {
+    status: "matched",
+    show: nearest[0],
+    matchMode: "fuzzy",
+    timeDeltaMinutes: Number(nearest[0].timeDeltaMinutes)
+  };
+}
+
 async function saveRule(env, tokenId, rule, changes, deps) {
   const next = { ...rule, ...changes, updatedAt: new Date((deps.now || (() => new Date()))()).toISOString() };
   await (deps.putRule || putLockRule)(env, tokenId, next);
@@ -93,8 +124,6 @@ export async function runOneLockRule(env, tokenId, deps = {}) {
   if (typeof fetchCinema !== "function") {
     return { ok: true, skipped: true, missingMonitorData: true };
   }
-  const exactShows = deps.findShows || findExactShows;
-  const nearbyShows = deps.findCompatibleShows || findCompatibleShows;
   const loadSession = deps.loadSession || loadLockSession;
   // 默认的取图入口包一层解析失败自动留档(只写标识 KV, 失败静默); 测试注入的 deps.fetchSeats 不经包装
   const fetchSeats = deps.fetchSeats || withSeatFeedback(fetchSeatMap, env, { tokenId, cinemaId: rule.cinemaId, movieId: rule.movieId });
@@ -107,33 +136,16 @@ export async function runOneLockRule(env, tokenId, deps = {}) {
   try {
     const cinema = await fetchCinema(rule.cinemaId);
     if (shouldCancel()) return { ok: true, skipped: true };
-    const exactMatches = exactShows(cinema, rule) || [];
-    const sameHallExact = rule.hall
-      ? exactMatches.filter((candidate) => String(candidate.th || "") === String(rule.hall))
-      : exactMatches;
-    let matches = sameHallExact;
-    let matchMode = "exact";
-    if (!matches.length && rule.hall) {
-      const candidates = nearbyShows(cinema, {
-        movieId: rule.movieId,
-        targetDate: rule.targetDate,
-        templateTime: rule.templateTime,
-        templateHall: rule.hall,
-        maxMinutes: 30
-      }) || [];
-      if (candidates.length) {
-        const nearestDelta = Math.abs(Number(candidates[0].timeDeltaMinutes));
-        const nearest = candidates.filter((candidate) => Math.abs(Number(candidate.timeDeltaMinutes)) === nearestDelta);
-        if (nearest.length > 1) {
-          return await terminal(env, tokenId, rule, "failed", { lastError: "目标日期存在多个同厅型且时间相近场次" }, deps);
-        }
-        matches = nearest;
-        matchMode = "fuzzy";
-      }
+    const target = resolveLockTarget(rule, cinema, deps);
+    if (target.status === "waiting") return { ok: true, waiting: true };
+    if (target.status === "ambiguous") {
+      const lastError = target.reason === "fuzzy"
+        ? "目标日期存在多个同厅型且时间相近场次"
+        : "目标日期存在多个相同时间场次";
+      return await terminal(env, tokenId, rule, "failed", { lastError }, deps);
     }
-    if (!matches.length) return { ok: true, waiting: true };
-    if (matches.length !== 1) return await terminal(env, tokenId, rule, "failed", { lastError: "目标日期存在多个相同时间场次" }, deps);
-    show = matches[0];
+    show = target.show;
+    const matchMode = target.matchMode;
     const matchingChanges = {
       state: "matching",
       attemptStartedAt: new Date(now).toISOString(),
@@ -141,7 +153,7 @@ export async function runOneLockRule(env, tokenId, deps = {}) {
       targetSeqNo: String(show.seqNo),
       targetTime: String(show.tm || rule.templateTime),
       matchMode,
-      timeDeltaMinutes: matchMode === "fuzzy" ? Number(show.timeDeltaMinutes) : 0,
+      timeDeltaMinutes: target.timeDeltaMinutes,
       lastError: null,
       hall: String(show.th || rule.hall || "")
     };

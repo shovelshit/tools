@@ -4,7 +4,7 @@ import { captureConsole, createDB } from "./helpers.js";
 import { OrderAttemptError } from "../src/maoyan/lock-client.js";
 import * as db from "../src/maoyan/db.js";
 import * as lockRunner from "../src/maoyan/lock-runner.js";
-import { LockCoordinator, runOneLockRule } from "../src/maoyan/lock-runner.js";
+import { LockCoordinator, resolveLockTarget, runOneLockRule } from "../src/maoyan/lock-runner.js";
 import worker from "../src/index.js";
 
 const tokenId = "11111111-1111-4111-8111-111111111111";
@@ -48,6 +48,56 @@ function deps(stored, overrides = {}) {
     ...overrides
   };
 }
+
+test("resolveLockTarget selects one exact show in the requested hall", () => {
+  const target = resolveLockTarget(rule({ hall: "2号厅" }), {
+    showData: { movies: [{ id: "7", shows: [{ showDate: "2026-09-12", plist: [
+      { seqNo: "wrong-hall", tm: "20:00", th: "1号厅" },
+      { seqNo: "exact", tm: "20:00", th: "2号厅" }
+    ] }] }] }
+  });
+
+  assert.equal(target.status, "matched");
+  assert.equal(target.show.seqNo, "exact");
+  assert.equal(target.matchMode, "exact");
+  assert.equal(target.timeDeltaMinutes, 0);
+});
+
+test("resolveLockTarget selects the nearest same-hall show within thirty minutes", () => {
+  const target = resolveLockTarget(rule({ hall: "2号厅", templateTime: "20:00" }), {
+    showData: { movies: [{ id: "7", shows: [{ showDate: "2026-09-12", plist: [
+      { seqNo: "far", tm: "19:35", th: "2号厅", ticketStatus: 0 },
+      { seqNo: "near", tm: "20:10", th: "2号厅", ticketStatus: 0 },
+      { seqNo: "other-hall", tm: "20:05", th: "1号厅", ticketStatus: 0 }
+    ] }] }] }
+  });
+
+  assert.equal(target.status, "matched");
+  assert.equal(target.show.seqNo, "near");
+  assert.equal(target.matchMode, "fuzzy");
+  assert.equal(target.timeDeltaMinutes, 10);
+});
+
+test("resolveLockTarget reports equally-near same-hall shows as ambiguous", () => {
+  const target = resolveLockTarget(rule({ hall: "2号厅", templateTime: "20:00" }), {
+    showData: { movies: [{ id: "7", shows: [{ showDate: "2026-09-12", plist: [
+      { seqNo: "early", tm: "19:50", th: "2号厅", ticketStatus: 0 },
+      { seqNo: "late", tm: "20:10", th: "2号厅", ticketStatus: 0 }
+    ] }] }] }
+  });
+
+  assert.deepEqual(target, { status: "ambiguous", reason: "fuzzy" });
+});
+
+test("resolveLockTarget reports no match outside the fuzzy window", () => {
+  const target = resolveLockTarget(rule({ hall: "2号厅", templateTime: "20:00" }), {
+    showData: { movies: [{ id: "7", shows: [{ showDate: "2026-09-12", plist: [
+      { seqNo: "late", tm: "20:31", th: "2号厅", ticketStatus: 0 }
+    ] }] }] }
+  });
+
+  assert.deepEqual(target, { status: "waiting" });
+});
 
 test("automation disabled leaves a waiting rule unchanged", async () => {
   const stored = rule();
