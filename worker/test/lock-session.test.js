@@ -38,16 +38,21 @@ test("rejects camelCase upload fields", () => {
 });
 
 test("stores ciphertext bound to the token namespace", async () => {
-  const env = { MAOYAN_KV: new MemoryKV(), SESSION_ENCRYPTION_KEY: testEncryptionKey() };
-  const status = await saveLockSession(env, "token-a", validSession());
-  const stored = env.MAOYAN_KV.data.get(userKey("token-a", "maoyan-session"));
+  const env = await createAccountEnv();
+  const { account: first } = await seedAccount(env);
+  const { account: second } = await seedAccount(env);
+  const status = await saveLockSession(env, first.id, validSession());
+  const pointer = await env.DB.prepare("SELECT active_version FROM session_versions WHERE user_id=?").bind(first.id).first();
+  const stored = env.MAOYAN_KV.data.get(userKey(first.id, `maoyan-session:v${pointer.active_version}`));
   assert.equal(status.uidMasked, "UID 123***789");
   assert.equal(stored.includes("cookie-secret"), false);
   assert.equal(stored.includes("signature-secret"), false);
-  assert.equal((await loadLockSession(env, "token-a")).uid, "123456789");
-  await env.MAOYAN_KV.put(userKey("token-b", "maoyan-session"), stored);
+  assert.equal((await loadLockSession(env, first.id)).uid, "123456789");
+  await env.MAOYAN_KV.put(userKey(second.id, `maoyan-session:v${pointer.active_version}`), stored);
+  await env.DB.prepare("INSERT INTO session_versions(user_id,active_version,updated_at) VALUES (?,?,?)")
+    .bind(second.id, pointer.active_version, new Date().toISOString()).run();
   await assert.rejects(
-    () => loadLockSession(env, "token-b"),
+    () => loadLockSession(env, second.id),
     (error) => {
       assert.match(error.message, /猫眼会话不可用/);
       assert.equal(error.message.includes("cookie-secret"), false);
@@ -60,9 +65,11 @@ test("stores ciphertext bound to the token namespace", async () => {
 test("rejects unavailable encryption keys without echoing them", async () => {
   const keys = [undefined, "not-base64!", Buffer.alloc(31, 9).toString("base64")];
   for (const key of keys) {
-    const env = { MAOYAN_KV: new MemoryKV(), SESSION_ENCRYPTION_KEY: key };
+    const env = await createAccountEnv();
+    env.SESSION_ENCRYPTION_KEY = key;
+    const { account } = await seedAccount(env);
     await assert.rejects(
-      () => saveLockSession(env, "token-a", validSession()),
+      () => saveLockSession(env, account.id, validSession()),
       (error) => {
         assert.equal(error.message, "锁座服务尚未配置加密密钥");
         if (key) assert.equal(error.message.includes(key), false);
@@ -73,12 +80,14 @@ test("rejects unavailable encryption keys without echoing them", async () => {
 });
 
 test("uses a fresh 12-byte IV for every session save", async () => {
-  const env = { MAOYAN_KV: new MemoryKV(), SESSION_ENCRYPTION_KEY: testEncryptionKey() };
-  const key = userKey("token-a", "maoyan-session");
-  await saveLockSession(env, "token-a", validSession());
-  const first = JSON.parse(await env.MAOYAN_KV.get(key));
-  await saveLockSession(env, "token-a", validSession());
-  const second = JSON.parse(await env.MAOYAN_KV.get(key));
+  const env = await createAccountEnv();
+  const { account } = await seedAccount(env);
+  await saveLockSession(env, account.id, validSession());
+  const firstPointer = await env.DB.prepare("SELECT active_version FROM session_versions WHERE user_id=?").bind(account.id).first();
+  const first = JSON.parse(await env.MAOYAN_KV.get(userKey(account.id, `maoyan-session:v${firstPointer.active_version}`)));
+  await saveLockSession(env, account.id, validSession());
+  const secondPointer = await env.DB.prepare("SELECT active_version FROM session_versions WHERE user_id=?").bind(account.id).first();
+  const second = JSON.parse(await env.MAOYAN_KV.get(userKey(account.id, `maoyan-session:v${secondPointer.active_version}`)));
   assert.equal(Buffer.from(first.iv, "base64").length, 12);
   assert.equal(Buffer.from(second.iv, "base64").length, 12);
   assert.notEqual(first.iv, second.iv);
@@ -86,12 +95,30 @@ test("uses a fresh 12-byte IV for every session save", async () => {
 });
 
 test("status and removal never return credentials", async () => {
-  const env = { MAOYAN_KV: new MemoryKV(), SESSION_ENCRYPTION_KEY: testEncryptionKey() };
-  await saveLockSession(env, "token-a", validSession());
-  const status = await getLockSessionStatus(env, "token-a");
+  const env = await createAccountEnv();
+  const { account } = await seedAccount(env);
+  await saveLockSession(env, account.id, validSession());
+  const status = await getLockSessionStatus(env, account.id);
   assert.deepEqual(Object.keys(status).sort(), ["sourceSavedAt", "uidMasked", "uploaded", "uploadedAt"]);
-  await removeLockSession(env, "token-a");
-  assert.deepEqual(await getLockSessionStatus(env, "token-a"), { uploaded: false });
+  await removeLockSession(env, account.id);
+  assert.deepEqual(await getLockSessionStatus(env, account.id), { uploaded: false });
+});
+
+test("session operations require D1 configuration", async () => {
+  const env = { MAOYAN_KV: new MemoryKV(), SESSION_ENCRYPTION_KEY: testEncryptionKey() };
+  await assert.rejects(() => saveLockSession(env, "token-a", validSession()), /D1/);
+  await assert.rejects(() => loadLockSession(env, "token-a"), /D1/);
+  await assert.rejects(() => getLockSessionStatus(env, "token-a"), /D1/);
+  await assert.rejects(() => removeLockSession(env, "token-a"), /D1/);
+});
+
+test("an unversioned session object is ignored without a D1 pointer", async () => {
+  const env = await createAccountEnv();
+  const { account } = await seedAccount(env);
+  await env.MAOYAN_KV.put(userKey(account.id, "maoyan-session"), JSON.stringify({ v: 1 }));
+  assert.deepEqual(await getLockSessionStatus(env, account.id), { uploaded: false });
+  await assert.rejects(() => loadLockSession(env, account.id), /未上传猫眼会话/);
+  assert.notEqual(await env.MAOYAN_KV.get(userKey(account.id, "maoyan-session")), null);
 });
 
 test("D1 selects the only active versioned session", async () => {

@@ -70,7 +70,7 @@ async function startWebApp({ savedWorker, requestedWorker, savedToken = "token-a
   return { requests, entries, els, opened, links };
 }
 
-test("Web startup URL override never sends another Worker's legacy token", async () => {
+test("Web startup URL override never sends another Worker's global token", async () => {
   const app = await startWebApp({ savedWorker: "https://a.example", requestedWorker: "https://b.example" });
   assert.deepEqual(app.requests.map((request) => request.url), [
     "https://b.example/api/capabilities", "https://b.example/api/auth/session", "https://b.example/api/status"
@@ -79,20 +79,20 @@ test("Web startup URL override never sends another Worker's legacy token", async
   assert.equal(app.els.token.value, "");
 });
 
-test("Web startup restores only the requested profile and migrates bound legacy credentials", async () => {
+test("Web startup restores only profile-scoped credentials and ignores the global token", async () => {
   const equivalent = await startWebApp({ savedWorker: "HTTPS://A.EXAMPLE:443/", requestedWorker: "https://a.example" });
   assert.deepEqual(equivalent.requests.map((request) => request.url), [
     "https://a.example/api/capabilities", "https://a.example/api/auth/session", "https://a.example/api/status"
   ]);
-  assert.equal(equivalent.requests.every((request) => request.token === "token-a"), true);
-  assert.equal(equivalent.entries.get("token:https%3A%2F%2Fa.example"), "token-a");
-  assert.equal(equivalent.entries.has("token"), false);
+  assert.equal(equivalent.requests.every((request) => request.token === ""), true);
+  assert.equal(equivalent.entries.has("token:https%3A%2F%2Fa.example"), false);
+  assert.equal(equivalent.entries.get("token"), "token-a");
   const another = await startWebApp({ savedWorker: "https://a.example", requestedWorker: "https://b.example", tokens: { "token:https%3A%2F%2Fb.example": "token-b" } });
   assert.equal(another.requests.every((request) => request.token === "token-b"), true);
-  assert.equal(another.entries.get("token:https%3A%2F%2Fa.example"), "token-a");
+  assert.equal(another.entries.has("token:https%3A%2F%2Fa.example"), false);
   const unbound = await startWebApp({ requestedWorker: "https://b.example" });
   assert.equal(unbound.requests[0].token, "");
-  assert.equal(unbound.entries.has("token"), false);
+  assert.equal(unbound.entries.get("token"), "token-a");
 });
 
 test("setup link clicks use runtime external navigation and suppress window creation", async () => {

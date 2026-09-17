@@ -186,13 +186,6 @@ function profileTokenStorageKey(profileKey) {
 }
 
 async function restoreWebToken(savedWorker, requestedWorker) {
-  const savedProfile = savedWorker === null ? "" : normalizeWorkerProfile(savedWorker);
-  // The legacy global token is usable only with its explicitly saved Worker.
-  const legacyToken = savedProfile ? await secureGet("token") : "";
-  if (legacyToken && !(await secureGet(profileTokenStorageKey(savedProfile)))) {
-    await secureSet(profileTokenStorageKey(savedProfile), legacyToken);
-  }
-  await secureSet("token", "");
   return requestedWorker ? (await secureGet(profileTokenStorageKey(requestedWorker))) || "" : "";
 }
 

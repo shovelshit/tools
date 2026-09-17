@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { captureConsole, createDB, MemoryKV, validSession } from "./helpers.js";
-import { userKey, cleanupUserData } from "../src/maoyan/user.js";
+import { captureConsole, createDB, MemoryKV, testEncryptionKey, validSession } from "./helpers.js";
+import { userKey, cleanupUserData, putUserConfig } from "../src/maoyan/user.js";
 import { getLockRuleRow, putConfig } from "../src/maoyan/db.js";
 import {
   createLockRule,
@@ -15,11 +15,14 @@ import {
 const now = new Date("2026-09-11T04:00:00.000Z");
 
 async function envWithConfig(config = { cinemaId: "25428", selectedMovieIds: ["7"] }) {
-  return {
+  const env = {
     LOCK_SERVICE_ENABLED: "true",
-    DB: await createDB({ configs: { "token-a": config } }),
-    MAOYAN_KV: new MemoryKV()
+    DB: await createDB(),
+    MAOYAN_KV: new MemoryKV(),
+    SESSION_ENCRYPTION_KEY: testEncryptionKey()
   };
+  await putUserConfig(env, "token-a", config);
+  return env;
 }
 
 function dependencies(overrides = {}) {

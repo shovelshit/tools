@@ -8,19 +8,21 @@ import { createDB, testEncryptionKey } from "./helpers.js";
 import { getConfig, listChanges } from "../src/maoyan/db.js";
 import { isExpired } from "../src/maoyan/ddl.js";
 import { runScheduledChecks } from "../src/maoyan/tokens.js";
+import { putUserConfig } from "../src/maoyan/user.js";
 
 const tokenId = "11111111-1111-4111-8111-111111111111";
 const ACCESS = "access-token";
 const FUTURE = new Date(Date.now() + 86400e3).toISOString();
 
 async function runtime(config = {}) {
-  return {
+  const env = {
     DB: await createDB({
-      tokens: [{ id: tokenId, token: ACCESS }],
-      configs: { [tokenId]: config }
+      tokens: [{ id: tokenId, token: ACCESS }]
     }),
     SESSION_ENCRYPTION_KEY: testEncryptionKey()
   };
+  await putUserConfig(env, tokenId, config);
+  return env;
 }
 
 function request(path, body) {

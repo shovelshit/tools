@@ -15,6 +15,7 @@ import { userKey } from "../src/maoyan/user.js";
 const now = new Date("2026-09-11T04:00:00.000Z");
 const tokenId = "11111111-1111-4111-8111-111111111111";
 const SESSION_NAME = "maoyan-session";
+const SESSION_VERSION = 7;
 
 // ---------------- 通用脚手架 ----------------
 
@@ -71,7 +72,10 @@ function coordinatorRequest(body) {
 
 async function lockApiEnv(overrides = {}) {
   return {
-    DB: await createDB({ configs: { [tokenId]: { cinemaId: "25428", selectedMovieIds: ["7"] } } }),
+    DB: await createDB({
+      tokens: [{ id: tokenId, token: "access-token" }],
+      configs: { [tokenId]: { cinemaId: "25428", selectedMovieIds: ["7"] } }
+    }),
     MAOYAN_KV: new MemoryKV(), // 加密会话仍存 KV
     SESSION_ENCRYPTION_KEY: testEncryptionKey(),
     LOCK_SERVICE_ENABLED: "true",
@@ -108,18 +112,25 @@ async function encryptedEnvelope(token, plaintext, keyBase64 = testEncryptionKey
   const key = await crypto.subtle.importKey("raw", base64ToBytes(keyBase64), "AES-GCM", false, ["encrypt"]);
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const data = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv, additionalData: new TextEncoder().encode(`maoyan-session:${token}`) },
+    { name: "AES-GCM", iv, additionalData: new TextEncoder().encode(`maoyan-session:${token}:v${SESSION_VERSION}`) },
     key,
     new TextEncoder().encode(JSON.stringify(plaintext))
   );
   return {
-    v: 1,
+    v: 2,
+    sessionVersion: SESSION_VERSION,
     iv: bytesToBase64(iv),
     data: bytesToBase64(new Uint8Array(data)),
     uploadedAt: "2026-09-11T00:00:00.000Z",
     uidMasked: "UID 123***789",
     sourceSavedAt: ""
   };
+}
+
+async function installSessionEnvelope(env, envelope) {
+  await env.MAOYAN_KV.put(userKey(tokenId, `${SESSION_NAME}:v${SESSION_VERSION}`), JSON.stringify(envelope));
+  await env.DB.prepare("INSERT INTO session_versions(user_id,active_version,updated_at) VALUES (?,?,?)")
+    .bind(tokenId, SESSION_VERSION, new Date().toISOString()).run();
 }
 
 // ---------------- BUG-8: 上游错误语义 ----------------
@@ -225,14 +236,14 @@ test("锁座规则创建遇上游拒绝时 API 返回 502 与真实原因", asyn
 // ---------------- BUG-7: 会话不可用 ----------------
 
 test("解密成功但会话字段不完整时保留可操作提示", async () => {
-  const env = { SESSION_ENCRYPTION_KEY: testEncryptionKey(), MAOYAN_KV: new MemoryKV() };
+  const env = await lockApiEnv();
   const envelope = await encryptedEnvelope(tokenId, {
     cookies: [{ name: "uid", value: "123456789", domain: ".maoyan.com" }],
     csrf: "csrf-value",
     mtgsig: "",
     userAgent: "Mozilla/5.0 Test"
   });
-  await env.MAOYAN_KV.put(userKey(tokenId, SESSION_NAME), JSON.stringify(envelope));
+  await installSessionEnvelope(env, envelope);
   await assert.rejects(loadLockSession(env, tokenId), (error) => {
     assert.match(error.message, /猫眼会话不完整/);
     assert.doesNotMatch(error.message, /不可用/);
@@ -247,25 +258,18 @@ test("加密密钥轮换后旧会话解密失败时 API 返回 409 而非 500", 
     mtgsig: "signature-secret",
     userAgent: "Mozilla/5.0 Test"
   });
-  const env = await lockApiEnv({
-    SESSION_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
-    MAOYAN_KV: new MemoryKV({
-      [userKey(tokenId, SESSION_NAME)]: JSON.stringify(envelope)
-    })
-  });
+  const env = await lockApiEnv({ SESSION_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64") });
+  await installSessionEnvelope(env, envelope);
   const response = await callLockApi("/api/lock/template-seats?cinemaId=25428&movieId=7&seqNo=100", undefined, env);
   assert.equal(response.status, 409);
   assert.match((await response.json()).error, /重新上传/);
 });
 
 test("会话信封损坏(非法 iv)时同样按 409 处理", async () => {
-  const env = await lockApiEnv({
-    MAOYAN_KV: new MemoryKV({
-      [userKey(tokenId, SESSION_NAME)]: JSON.stringify({
-        v: 1, iv: "AAAA", data: "BBBB",
-        uploadedAt: "2026-09-11T00:00:00.000Z", uidMasked: "UID 1**", sourceSavedAt: ""
-      })
-    })
+  const env = await lockApiEnv();
+  await installSessionEnvelope(env, {
+    v: 2, sessionVersion: SESSION_VERSION, iv: "AAAA", data: "BBBB",
+    uploadedAt: "2026-09-11T00:00:00.000Z", uidMasked: "UID 1**", sourceSavedAt: ""
   });
   const response = await callLockApi("/api/lock/template-seats?cinemaId=25428&movieId=7&seqNo=100", undefined, env);
   assert.equal(response.status, 409);

@@ -3,17 +3,19 @@ import assert from "node:assert/strict";
 import worker from "../src/index.js";
 import { createDB, testEncryptionKey } from "./helpers.js";
 import { getConfig, putConfigVersioned } from "../src/maoyan/db.js";
+import { putUserConfig } from "../src/maoyan/user.js";
 
 const tokenId = "11111111-1111-4111-8111-111111111111";
 
 async function runtime(config = {}) {
-  return {
+  const env = {
     DB: await createDB({
-      tokens: [{ id: tokenId, token: "access-token" }],
-      configs: { [tokenId]: config }
+      tokens: [{ id: tokenId, token: "access-token" }]
     }),
     SESSION_ENCRYPTION_KEY: testEncryptionKey()
   };
+  await putUserConfig(env, tokenId, config);
+  return env;
 }
 
 function request(path, body) {
@@ -101,6 +103,12 @@ test("a successful test verifies only the current channel and credential", async
   const restartResponse = await worker.fetch(request("/api/config", { enabled: true }), env);
   assert.equal(restartResponse.status, 400);
   assert.match((await restartResponse.json()).error, /测试推送/);
+});
+
+test("the removed Bark-specific test route is unsupported", async () => {
+  const response = await worker.fetch(request("/api/test-bark", {}), await runtime());
+  assert.equal(response.status, 404);
+  assert.equal((await response.json()).error, "Unknown API");
 });
 
 test("stale config writes cannot overwrite another device", async () => {

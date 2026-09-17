@@ -5,8 +5,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { runCheck } from "../src/maoyan/check.js";
-import { createDB } from "./helpers.js";
+import { createDB, testEncryptionKey } from "./helpers.js";
 import * as db from "../src/maoyan/db.js";
+import { putUserConfig } from "../src/maoyan/user.js";
 
 const tokenId = "33333333-3333-4333-8333-333333333333";
 const HEARTBEAT_MS = 30 * 60e3;
@@ -28,12 +29,14 @@ function baseConfig() {
 async function runtime({ config = baseConfig(), snapshot = null, status = null, changes = null } = {}) {
   const DB = await createDB({
     tokens: [{ id: tokenId, token: "access-token" }],
-    configs: { [tokenId]: config },
     ...(snapshot ? { snapshots: { [tokenId]: snapshot } } : {}),
     ...(status ? { statuses: { [tokenId]: status } } : {}),
     ...(changes ? { changes: { [tokenId]: changes } } : {})
   });
-  return { DB };
+  const env = { DB, SESSION_ENCRYPTION_KEY: testEncryptionKey() };
+  await putUserConfig(env, tokenId, config);
+  DB.resetWrites();
+  return env;
 }
 
 // 上游影院数据: movies = [{ id, nm, seqNos: ["A1", ...] }]

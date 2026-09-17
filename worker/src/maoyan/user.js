@@ -5,10 +5,10 @@
 import {
   completeRevocationCleanup, deleteUserData, getConfigRecord, getSessionVersion,
   listRevocationCleanupKeys, listRevocationCleanups, putConfig,
-  recordRevocationCleanupAttempt, replaceConfigIfUnchanged
+  recordRevocationCleanupAttempt
 } from "./db.js";
 import { decryptNotifyCredential, encryptNotifyCredential } from "./notify-secrets.js";
-import { saveConfigWithSubscription, syncSubscription } from "./monitor-store.js";
+import { saveConfigWithSubscription } from "./monitor-store.js";
 
 const CREDENTIALS = {
   bark: "barkKey",
@@ -26,21 +26,13 @@ export async function getUserConfig(env, tokenId) {
   const encrypted = config.notifyCredentials && typeof config.notifyCredentials === "object"
     ? config.notifyCredentials : {};
   delete config.notifyCredentials;
+  for (const field of Object.values(CREDENTIALS)) delete config[field];
   for (const [channel, field] of Object.entries(CREDENTIALS)) {
     if (encrypted[channel]) {
       config[field] = await decryptNotifyCredential(env, tokenId, channel, encrypted[channel]);
     }
   }
 
-  const hasLegacyPlaintext = Object.values(CREDENTIALS).some((field) => Object.hasOwn(record.config, field));
-  if (hasLegacyPlaintext && (env.NOTIFY_ENCRYPTION_KEY || env.SESSION_ENCRYPTION_KEY)) {
-    const migrated = await storedConfig(env, tokenId, config);
-    const result = await replaceConfigIfUnchanged(env.DB, tokenId, record.raw, migrated);
-    if (Number(result?.meta?.changes || 0) === 1) {
-      config.version += 1;
-      await syncSubscription(env.DB, tokenId, config, config.version, Date.now());
-    }
-  }
   return config;
 }
 

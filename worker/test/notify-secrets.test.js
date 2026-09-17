@@ -22,7 +22,7 @@ test("notification encryption uses a fresh IV", async () => {
   assert.notEqual(first.data, second.data);
 });
 
-test("legacy plaintext migration preserves both channels and verification metadata", async () => {
+test("plaintext notification fields are ignored and not migrated at read time", async () => {
   const env = await createAccountEnv();
   const userId = crypto.randomUUID();
   const verification = { channel: "bark", fingerprint: "abc", testedAt: "2026-09-16T00:00:00.000Z" };
@@ -33,13 +33,12 @@ test("legacy plaintext migration preserves both channels and verification metada
     .bind(userId, JSON.stringify({ barkKey: "bark-secret", serverChanKey: "server-secret", notifyVerification: verification }), new Date().toISOString()).run();
 
   const runtime = await getUserConfig(env, userId);
-  assert.equal(runtime.barkKey, "bark-secret");
-  assert.equal(runtime.serverChanKey, "server-secret");
+  assert.equal(Object.hasOwn(runtime, "barkKey"), false);
+  assert.equal(Object.hasOwn(runtime, "serverChanKey"), false);
   assert.deepEqual(runtime.notifyVerification, verification);
   const stored = await getConfig(env.DB, userId);
-  assert.equal(Object.hasOwn(stored, "barkKey"), false);
-  assert.equal(Object.hasOwn(stored, "serverChanKey"), false);
+  assert.equal(stored.barkKey, "bark-secret");
+  assert.equal(stored.serverChanKey, "server-secret");
   assert.deepEqual(stored.notifyVerification, verification);
-  assert.equal(JSON.stringify(stored).includes("bark-secret"), false);
-  assert.equal(JSON.stringify(stored).includes("server-secret"), false);
+  assert.equal(Object.hasOwn(stored, "notifyCredentials"), false);
 });

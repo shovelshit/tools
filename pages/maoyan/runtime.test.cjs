@@ -78,7 +78,7 @@ test("web runtime connects with the supplied worker credentials", async () => {
   });
 });
 
-test("web runtime falls back only when capabilities explicitly returns 404", async () => {
+test("web runtime requires capabilities and never falls back to status", async () => {
   const requests = [];
   const runtime = loadRuntime().createWebRuntime({
     fetchImpl: async (url) => {
@@ -89,9 +89,11 @@ test("web runtime falls back only when capabilities explicitly returns 404", asy
     getWorkerUrl: () => "https://worker.example",
     getToken: () => "token-a"
   });
-  const result = await runtime.connectWorker({ workerUrl: "https://worker.example", token: "token-a" });
-  assert.deepEqual(requests, ["https://worker.example/api/capabilities", "https://worker.example/api/status"]);
-  assert.equal(result.capabilities.accountLifecycle, false);
+  await assert.rejects(
+    runtime.connectWorker({ workerUrl: "https://worker.example", token: "token-a" }),
+    /无法连接服务/
+  );
+  assert.deepEqual(requests, ["https://worker.example/api/capabilities"]);
 });
 
 test("web runtime does not downgrade authentication failures to legacy", async () => {

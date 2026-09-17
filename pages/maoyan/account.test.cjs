@@ -30,15 +30,6 @@ test("revoked or unknown lifecycle identities are forgotten", () => {
   assert.equal(normalize({ account: null, capabilities: { accountLifecycle: true } }).shouldForgetKey, true);
 });
 
-test("legacy workers remain monitor-capable", () => {
-  const { normalizeAccountConnection: normalize } = load();
-  assert.deepEqual(JSON.parse(JSON.stringify(normalize({ capabilities: { accountLifecycle: false } }))), {
-    canRenew: false,
-    shouldForgetKey: false,
-    canMonitor: true
-  });
-});
-
 test("account status presentation distinguishes expiry, suspension and partial resume", () => {
   const { accountStatusPresentation: present } = load();
   assert.equal(present({ account: { accountStatus: "expired" } }).action, "renew");

@@ -1,7 +1,7 @@
 // ---------------- Worker 入口: 路由分发 ----------------
 
 import { CORS, json } from "./common/http.js";
-import { NOTIFY_CHANNELS, pushBark } from "./common/notify.js";
+import { NOTIFY_CHANNELS } from "./common/notify.js";
 import { getUserConfig, retryPendingRevocationCleanups, saveUserConfig } from "./maoyan/user.js";
 import * as db from "./maoyan/db.js";
 import { CITY_LIST, fetchCinemaDetail, publicCinemaShows, searchCinemasByKw, runCheck, appendChange, pushNotify, currentChannel, currentCredential, isNotificationVerified, notificationVerification, minBatchMinutes, describeCrons, isMinuteStepCrons, resolveCronExprs, handleAdminTokens, handleLockApi, runScheduledChecks, runScheduledLockAfterMonitor, runScheduledMaintenance, MONITOR_WINDOW_LABEL, inMonitorWindow } from "./maoyan/index.js";
@@ -287,19 +287,6 @@ export default {
         });
         const result = await runCheck(env, true, token, coordinated ? { fetchCinema: async () => coordinated.data } : {});
         return result.ok ? json(result) : json(result, result.status || 400);
-      }
-      if (url.pathname === "/api/test-bark" && request.method === "POST") {
-        // 遗留接口: 前端已改用 /api/test-push, 这里仅保留兼容
-        const cfg = await getUserConfig(env, token);
-        const notification = testNotification();
-        try {
-          await pushBark(cfg.barkKey, notification.title, notification.content);
-        } catch (e) {
-          return json({ ok: false, error: e.message }, upstreamStatus(e.message));
-        }
-        cfg.notifyVerification = await notificationVerification({ ...cfg, notifyChannel: "bark" });
-        await saveUserConfig(env, token, cfg);
-        return json({ ok: true });
       }
       // ---- 按当前选中渠道发送测试推送 ----
       if (url.pathname === "/api/test-push" && request.method === "POST") {

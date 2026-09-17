@@ -54,18 +54,9 @@
         if (!normalizedWorkerUrl) throw new Error("服务地址不能为空");
         const httpRisk = /^http:/i.test(normalizedWorkerUrl);
         if (httpRisk && !httpRiskConfirmed) throw new Error("HTTP 服务需要确认安全风险");
-        let capabilities;
         try {
-          capabilities = await requestWorker("/api/capabilities", {}, { workerUrl: normalizedWorkerUrl, token });
-        } catch (error) {
-          if (error?.status !== 404) throw new Error("无法连接服务，请检查服务地址和网络");
-          const status = await requestWorker("/api/status", {}, { workerUrl: normalizedWorkerUrl, token });
-          connectedTokens.set(normalizedWorkerUrl, token);
-          return { status, profile: status.profile || null, account: null, capabilities: { accountLifecycle: false }, httpRisk };
-        }
-        let auth;
-        try {
-          auth = await requestWorker("/api/auth/session", { method: "POST" }, { workerUrl: normalizedWorkerUrl, token });
+          const capabilities = await requestWorker("/api/capabilities", {}, { workerUrl: normalizedWorkerUrl, token });
+          const auth = await requestWorker("/api/auth/session", { method: "POST" }, { workerUrl: normalizedWorkerUrl, token });
           const effectiveToken = auth.monitorSession || token;
           const status = await requestWorker("/api/status", {}, { workerUrl: normalizedWorkerUrl, token: effectiveToken });
           connectedTokens.set(normalizedWorkerUrl, effectiveToken);
