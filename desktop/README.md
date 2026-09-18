@@ -1,4 +1,4 @@
-# 猫眼监控桌面客户端
+# 电影场次监控桌面客户端
 
 支持 macOS（Apple Silicon / Intel）和 Windows x64。桌面端与 Web 版共用 `pages/maoyan` 页面，通过你配置的 Worker API 提供监控和锁座服务。主窗口加载本地页面，服务地址会显示在页面顶栏。
 

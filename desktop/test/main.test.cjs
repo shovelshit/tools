@@ -20,6 +20,20 @@ function loadMain(electron) {
   }
 }
 
+test("packaged rename preserves existing user data but honors an explicit profile", () => {
+  for (const explicitProfile of [false, true]) {
+    const paths = [];
+    loadMain({ app: {
+      isPackaged: true,
+      commandLine: { hasSwitch: (name) => name === "user-data-dir" && explicitProfile },
+      getPath: () => path.join("/tmp", "app-data"),
+      setPath: (...args) => paths.push(args),
+      whenReady: () => new Promise(() => {}), on() {}
+    } });
+    assert.deepEqual(paths, explicitProfile ? [] : [["userData", path.join("/tmp", "app-data", "Maoyan Monitor")]]);
+  }
+});
+
 test("main window keeps Node disabled, isolates context, sandboxes preload, and blocks remote navigation", () => {
   const calls = { handlers: [] };
   class FakeBrowserWindow {

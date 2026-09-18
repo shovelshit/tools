@@ -8,14 +8,14 @@
 
 | 工具 | 说明 | 形态 |
 |---|---|---|
-| 🎬 [猫眼场次监控 + 自动锁座](https://ltools.asia/maoyan/) | 监控影院排片变化，新场次推送到手机；开售后自动锁座 | Worker Static Assets + D1 / KV / Durable Objects / Cron |
+| 🎬 [电影场次监控 + 自动锁座](https://ltools.asia/maoyan/) | 监控影院排片变化，新场次推送到手机；开售后自动锁座 | Worker Static Assets + D1 / KV / Durable Objects / Cron |
 | 📦 [应用商店](https://ltools.asia/store/) | 浏览和下载 AList 网盘中的应用，云端加速直连、在线预览 | Pages 前端 + Worker 文件代理（无需登录） |
 | 🚗 领克签到助手 | 领克 App 自动签到、分享任务、积分查询与 Bark 推送 | Python 脚本 · [独立仓库](https://github.com/shovelshit/LynkCoHelper) |
 | 📶 蓝牙调试助手 | 低功耗蓝牙调试工具，扫描/读写特征值/订阅通知，可替代 nRF Connect | 微信小程序 + iOS · [独立仓库](https://github.com/shovelshit/BLE-debug) |
 
 ---
 
-## 🎬 猫眼场次监控 + 自动锁座
+## 🎬 电影场次监控 + 自动锁座
 
 解决两个痛点：**想看的场次（IMAX/首映）一开售就没了**、**开售时间不可预测要一直刷**。
 
@@ -37,6 +37,35 @@
 - 目标场次开售后由 Durable Object（`LockCoordinator`）自动执行锁座，成功后推送通知（座位 + 支付倒计时）
 - 单规则约束：同一令牌同时只允许一条进行中的规则，防止并发误下单
 - 锁座异常原因可一键上报（seat-feedback），便于定位问题
+
+### 猫眼接口与签名现状
+
+正式 `tools-api` 的请求按用途区分域名，并非全部切换到移动站：
+
+| 用途 | 请求地址 | 实现 |
+|---|---|---|
+| 影院详情、排期监控 | `https://m.maoyan.com/ajax/cinemaDetail` | `worker/src/maoyan/api.js` |
+| 影院列表 | `https://m.maoyan.com/ajax/moreCinemas` | `worker/src/maoyan/api.js` |
+| 真实座位图、官方对照 | `https://www.maoyan.com/xseats/{seqNo}` | `worker/src/maoyan/lock-client.js` |
+| 创建待支付订单 | `https://m.maoyan.com/ajax/createOrder` | `worker/src/maoyan/lock-client.js` |
+
+- 正式下单携带会话 Cookie 和 User-Agent，使用 `Origin: https://m.maoyan.com`、`Referer: https://m.maoyan.com/`，**不发送 `mtgsig` 请求头，也不动态生成签名**。
+- **尚存的旧依赖**：Electron 登录捕获、会话上传校验与 Worker 会话存储仍要求并保留 `mtgsig`；因此当前不能从上传 JSON 中直接删去该字段。这不代表正式下单仍使用它。
+- `local/maoyan_lock.py` 是旧 CLI 实现，仍使用 `www.maoyan.com` 下单并发送捕获的 `mtgsig`，尚未与正式 Worker 对齐，不应将其结果视为正式链路的等价验证。
+
+#### 本地动态签名实验（不随仓库分发）
+
+以下是维护者工作区中的实验文件定位，不是 fork 后可直接运行的项目依赖，也不会由 `worker/wrangler.toml` 部署：
+
+| 本地文件 | 作用 |
+|---|---|
+| `worker-locktest/src/h5guard.js` | `createH5Guard({ cookies, userAgent })` 加载 SDK，封装动态签名并返回 `signed.headers.mtgsig` |
+| `worker-locktest/src/index.js` | 探针通过 `guard.sign({ url, method: "POST", body })` 为请求生成签名 |
+| `worker-locktest/src/generated/` | 探针使用的 SDK 模块与浏览器环境适配 |
+| `local/h5guard/h5guard-node.mjs` | Node 环境加载 H5Guard，调用 `window.H5guard.sign(...)` |
+| `local/h5guard/forge-sign-session.mjs` | 生成签名并写回本地会话文件的实验入口 |
+
+`local/h5guard/` 已被 Git 忽略；`worker-locktest/` 当前未纳入版本控制。正式 Worker 不引用这些目录。实验文件可能包含会话或调试凭据，请勿直接提交或公开分发。
 
 ### 安全设计
 

@@ -8,6 +8,11 @@ const { createMaoyanLogin } = require("./maoyan-login");
 const { captureSession, normalizeUploadedSession, sanitizeError, safeError, publicLoginResult, publicSessionStatus } = require("./session-validation");
 const { checkForUpdates, openExternal } = require("./updates");
 
+// Keep installed profiles across the product rename; explicit test profiles take precedence.
+if (app.isPackaged && !app.commandLine.hasSwitch("user-data-dir")) {
+  app.setPath("userData", path.join(app.getPath("appData"), "Maoyan Monitor"));
+}
+
 const pagePath = path.join(__dirname, "..", "..", "pages", "maoyan", "index.html");
 const MAX_SESSION_FILE_BYTES = 256 * 1024;
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;

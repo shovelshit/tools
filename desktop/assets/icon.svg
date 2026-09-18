@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
-  <title id="title">Maoyan Monitor</title>
+  <title id="title">Movie Monitor</title>
   <desc id="desc">A cinema screen above a compact seat grid with one red monitored seat.</desc>
   <rect width="1024" height="1024" rx="224" fill="#172126"/>
   <rect x="42" y="42" width="940" height="940" rx="204" fill="none" stroke="#33434a" stroke-width="10"/>

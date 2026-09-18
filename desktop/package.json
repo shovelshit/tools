@@ -21,7 +21,7 @@
   },
   "build": {
     "appId": "io.github.shovelshit.maoyan",
-    "productName": "Maoyan Monitor",
+    "productName": "Movie Monitor",
     "asar": true,
     "npmRebuild": false,
     "directories": { "output": "dist", "buildResources": "assets" },

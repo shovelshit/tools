@@ -18,8 +18,8 @@ async function main() {
     let executablePath;
     if (packaged) {
       executablePath = process.platform === "darwin"
-        ? path.join(desktop, "dist", process.arch === "arm64" ? "mac-arm64" : "mac", "Maoyan Monitor.app", "Contents", "MacOS", "Maoyan Monitor")
-        : path.join(desktop, "dist", "win-unpacked", "Maoyan Monitor.exe");
+        ? path.join(desktop, "dist", process.arch === "arm64" ? "mac-arm64" : "mac", "Movie Monitor.app", "Contents", "MacOS", "Movie Monitor")
+        : path.join(desktop, "dist", "win-unpacked", "Movie Monitor.exe");
       assert.ok(fs.existsSync(executablePath), `Packaged executable missing: ${executablePath}`);
     } else executablePath = require("electron");
     const env = { ...process.env };
@@ -29,6 +29,7 @@ async function main() {
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.waitForFunction(() => window.maoyanRuntime?.kind === "electron");
+    assert.equal(await page.title(), "电影场次监控");
     const mainPageUrl = page.url();
     assert.match(page.url(), /file:.*\/pages\/maoyan\/index\.html$/);
     if (packaged) assert.match(page.url(), /app\.asar\/pages\/maoyan\/index\.html$/);
