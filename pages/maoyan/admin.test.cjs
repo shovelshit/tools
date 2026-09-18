@@ -8,6 +8,12 @@ const html = fs.readFileSync(path.join(__dirname, "admin.html"), "utf8");
 const source = fs.readFileSync(path.join(__dirname, "admin.js"), "utf8");
 const style = fs.readFileSync(path.join(__dirname, "style.css"), "utf8");
 
+test("failure diagnostics start collapsed and have a bounded scrolling area", () => {
+  assert.match(html, /<details class="notification-diagnostics">/);
+  assert.doesNotMatch(html, /<details[^>]*\bopen\b/);
+  assert.match(style, /\.notification-diagnostics[^}]*max-height:\s*320px/s);
+});
+
 test("admin page manages lifecycle accounts instead of custom plaintext tokens", () => {
   assert.match(html, /id="account-tbody"/);
   assert.match(html, /id="capacity-max"/);
@@ -121,6 +127,51 @@ function deferred() {
   return { promise, resolve };
 }
 
+test("notification diagnostics render localized states and separate errors as safe text", async () => {
+  const { context, elements, requests } = loadAdminWithDeferredRequests();
+  const load = vm.runInContext("loadResources()", context);
+  resolveJson(requests.at(-1), { resources: { usage: {}, notificationFailures: [
+    { kind: "lock-terminal", state: "pending", attempts: 1, retryEligible: true, lastError: "<img onerror=alert(1)>", failureDetail: '{"status":403}' },
+    { kind: "lock-terminal", state: "sending", attempts: 2, retryEligible: true },
+    { kind: "lock-terminal", state: "sent", attempts: 3, retryEligible: false, failureDetail: "lock error" },
+    { kind: "lock-terminal", state: "failed", attempts: 4, retryEligible: false, lastError: "delivery error" }
+  ] } });
+  await load;
+  const details = elements.get("resource-failure-details");
+  assert.match(details.textContent, /待发送/);
+  assert.match(details.textContent, /发送中/);
+  assert.match(details.textContent, /通知状态：已发送/);
+  assert.match(details.textContent, /发送失败/);
+  assert.match(details.textContent, /尝试 1 次/);
+  assert.match(details.textContent, /可自动重试/);
+  assert.match(details.textContent, /不再重试/);
+  assert.match(details.textContent, /通知发送错误：<img onerror=alert\(1\)>/);
+  assert.match(details.textContent, /锁座失败详情：/);
+  assert.equal(details.innerHTML, "");
+});
+
+test("captured HTTP diagnostics show readable headers and body without executing markup", async () => {
+  const { context, elements, requests } = loadAdminWithDeferredRequests();
+  const load = vm.runInContext("loadResources()", context);
+  resolveJson(requests.at(-1), { resources: { usage: {}, notificationFailures: [
+    { kind: "new-shows", state: "sent", attempts: 1, failureDetail: JSON.stringify({
+      httpStatus: 403, headers: { "content-type": "text/html", "cf-ray": "trace-1" },
+      responseBody: "Access Denied\n<script>alert(1)</script>", bodyTruncated: true
+    }) },
+    { kind: "account-expiry", state: "failed", attempts: 1, failureDetail: "legacy failure" }
+  ] } });
+  await load;
+  const details = elements.get("resource-failure-details");
+  assert.match(details.textContent, /HTTP 状态：403/);
+  assert.match(details.textContent, /content-type: text\/html\ncf-ray: trace-1/);
+  assert.match(details.textContent, /响应体：\nAccess Denied\n<script>alert\(1\)<\/script>/);
+  assert.match(details.textContent, /响应体已截断/);
+  assert.match(details.textContent, /新场次通知/);
+  assert.match(details.textContent, /账号到期通知/);
+  assert.match(details.textContent, /legacy failure/);
+  assert.equal(details.innerHTML, "");
+});
+
 function fakeElement() {
   const listeners = new Map();
   const classes = new Set(["hidden"]);
@@ -149,11 +200,76 @@ function fakeElement() {
     },
     append(...nodes) { this.children.push(...nodes); },
     appendChild(node) { this.children.push(node); return node; },
+    replaceChild(node, old) { this.children[this.children.indexOf(old)] = node; return old; },
     select() {}, remove() {},
     get innerHTML() { return html; },
     set innerHTML(value) { html = String(value); this.children = []; }
   };
 }
+
+test("account updates replace only their row and retain filters and pagination", async () => {
+  const { context, elements, requests } = loadAdminWithDeferredRequests();
+  vm.runInContext(`accounts = [
+    { userId: "one", remark: "First", businessLine: "maoyan", accountStatus: "active", accountVersion: 1 },
+    { userId: "two", remark: "Second", businessLine: "maoyan", accountStatus: "active", accountVersion: 1 }
+  ]; nextAfter = "next-page"; renderAccounts();`, context);
+  elements.get("account-search").value = "First";
+  elements.get("account-status-filter").value = "active";
+  const otherRow = elements.get("account-tbody").children[1];
+  const update = vm.runInContext('updateAccount(accounts[0], { state: "suspended" })', context);
+  resolveJson(requests[0], { adminAccount: { userId: "one", remark: "First", businessLine: "maoyan", accountStatus: "suspended", accountVersion: 2 }, capacity: { used: 1, maxUsers: 20 } });
+  await new Promise(setImmediate);
+  assert.equal(requests.length, 1, "must not request a replacement list");
+  await update;
+  assert.equal(elements.get("account-tbody").children[1], otherRow);
+  assert.equal(elements.get("account-tbody").children[0].children[1].children[0].textContent, "已暂停");
+  assert.equal(vm.runInContext("nextAfter", context), "next-page");
+  assert.equal(elements.get("account-search").value, "First");
+  assert.equal(elements.get("account-status-filter").value, "active");
+  assert.equal(elements.get("capacity-summary").textContent, "1 / 20");
+});
+
+test("remark editing trims, allows clearing, and rejects more than 50 characters", async () => {
+  const { context, elements, requests } = loadAdminWithDeferredRequests();
+  vm.runInContext('accounts = [{ userId: "abcdefgh-more", remark: "", accountStatus: "active", accountVersion: 1 }]; renderAccounts()', context);
+  assert.match(elements.get("account-tbody").children[0].children[0].children[0].textContent, /自助申请.*abcdefgh/);
+  context.prompt = () => "x".repeat(51);
+  await vm.runInContext("editRemark(accounts[0])", context);
+  assert.equal(requests.length, 0);
+  context.prompt = () => null;
+  await vm.runInContext("editRemark(accounts[0])", context);
+  assert.equal(requests.length, 0);
+  context.prompt = () => "   ";
+  const edit = vm.runInContext("editRemark(accounts[0])", context);
+  assert.equal(JSON.parse(requests[0].options.body).patch.remark, "");
+  resolveJson(requests[0], { adminAccount: { userId: "abcdefgh-more", remark: "", accountStatus: "active", accountVersion: 2 }, capacity: { used: 1, maxUsers: 20 } });
+  await edit;
+});
+
+test("version conflicts leave existing rows and pagination intact", async () => {
+  const { context, elements, requests } = loadAdminWithDeferredRequests();
+  vm.runInContext('accounts = [{ userId: "one", remark: "Name", accountStatus: "active", accountVersion: 1 }]; nextAfter = "cursor"; renderAccounts()', context);
+  const row = elements.get("account-tbody").children[0];
+  const update = vm.runInContext('updateAccount(accounts[0], { remark: "Changed" })', context);
+  requests[0].pending.resolve({ ok: false, status: 409, json: async () => ({ code: "VERSION_CONFLICT", error: "账号状态已变化" }) });
+  await update;
+  assert.equal(requests.length, 1);
+  assert.equal(elements.get("account-tbody").children[0], row);
+  assert.equal(vm.runInContext("nextAfter", context), "cursor");
+});
+
+test("account update responses cannot overwrite a different business list", async () => {
+  const { context, elements, requests } = loadAdminWithDeferredRequests();
+  vm.runInContext('accounts = [{ userId: "one", businessLine: "maoyan", accountStatus: "active", accountVersion: 1 }]; renderAccounts()', context);
+  const update = vm.runInContext('updateAccount(accounts[0], { state: "suspended" })', context);
+  elements.get("account-business-line").value = "store";
+  vm.runInContext('businessGeneration += 1; accounts = [{ userId: "store-one", businessLine: "store", remark: "Store", accountStatus: "active", accountVersion: 1 }]; renderAccounts()', context);
+  const row = elements.get("account-tbody").children[0];
+  resolveJson(requests[0], { adminAccount: { userId: "one", businessLine: "maoyan", accountStatus: "suspended", accountVersion: 2 }, capacity: { used: 0, maxUsers: 20 } });
+  await update;
+  assert.equal(elements.get("account-tbody").children[0], row);
+  assert.equal(vm.runInContext("accounts[0].userId", context), "store-one");
+});
 
 function loadAdminWithDeferredRequests() {
   const elements = new Map();

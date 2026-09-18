@@ -1581,3 +1581,6 @@ summary:focus-visible {
     transition: none !important;
   }
 }
+.notification-diagnostics { width: 100%; min-width: 0; }
+.notification-diagnostics summary { cursor: pointer; padding: 8px 0; }
+.notification-diagnostics #resource-failure-details { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 8px 0; }

@@ -96,6 +96,7 @@ async function terminal(env, tokenId, rule, state, changes, deps) {
       rule: next,
       title: notification.title,
       content: notification.content,
+      failureDetail: changes.failureDetail,
       credentialVersion: config.version,
       nowMs: new Date(now).getTime()
     });
@@ -205,7 +206,10 @@ export async function runOneLockRule(env, tokenId, deps = {}) {
   try {
     order = await createOrder(session, seatMap, matching.seats.map((seat) => seat.seatNo));
   } catch (error) {
-    return await terminal(env, tokenId, matching, "failed", { lastError: "锁座失败，未获得有效订单" }, deps);
+    return await terminal(env, tokenId, matching, "failed", {
+      lastError: "锁座失败，未获得有效订单",
+      failureDetail: error?.failureDetail || null
+    }, deps);
   }
   return await terminal(env, tokenId, matching, "locked", {
     orderId: String(order.orderId), payLeftSecond: order.payLeftSecond ?? null, lockedAt: new Date(now).toISOString(), lastError: null

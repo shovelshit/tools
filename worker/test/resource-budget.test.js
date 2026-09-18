@@ -40,6 +40,41 @@ test("admin resources returns aggregate measured and estimated fields only", asy
   assert.equal(JSON.stringify(payload).includes("token"), false);
 });
 
+test("notification diagnostics are admin-only, bounded and business isolated", async () => {
+  const env = await createAccountEnv({ nowMs: NOW, maxUsers: 20 });
+  const { account } = await seedAccount(env, { expiresAt: NOW + 86_400_000 });
+  await env.DB.prepare(
+    "INSERT INTO notification_outbox(event_key,user_id,kind,payload,credential_version,state,attempts,last_error,created_at,updated_at) VALUES (?,?,?,?,?,'failed',4,?,?,?)"
+  ).bind("failure-1", account.id, "lock-terminal", "{}", 1, "full HTTP 403 response", NOW, NOW).run();
+  const { account: store } = await seedAccount(env, { businessLine: "store", expiresAt: NOW + 86_400_000 });
+  for (let i = 0; i < 8; i++) {
+    await env.DB.prepare("INSERT INTO notification_outbox(event_key,user_id,kind,payload,credential_version,state,attempts,last_error,failure_detail,next_attempt_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
+      .bind(`recent-${i}`, i === 7 ? store.id : account.id, "lock-terminal", "{}", 1, i === 6 ? "sent" : i === 5 ? "sending" : "pending", 1, i === 6 ? null : "delivery error", i === 6 ? "lock failure" : null, NOW + 1000, NOW, NOW + i + 1).run();
+  }
+  const summary = await readResourceSummary(env, NOW);
+  assert.equal(Object.hasOwn(summary, "notificationFailures"), false);
+  assert.equal(summary.notificationPending, 6);
+  const publicResponse = await worker.fetch(new Request("https://worker.example/api/enrollment/config"), env);
+  assert.equal(publicResponse.status, 200);
+  const publicText = await publicResponse.text();
+  assert.equal(publicText.includes("notificationFailures"), false);
+  assert.equal(publicText.includes("full HTTP 403 response"), false);
+  assert.equal(publicText.includes("lock failure"), false);
+  const request = (headers = {}) => new Request("https://worker.example/api/admin/resources", { headers });
+  assert.notEqual((await worker.fetch(request(), env)).status, 200);
+  const response = await worker.fetch(request({ "X-Admin-Token": env.ADMIN_TOKEN }), env);
+  const { resources } = await response.json();
+  assert.equal(resources.notificationFailures.length, 5);
+  assert.deepEqual(resources.notificationFailures[0], {
+    kind: "lock-terminal", state: "sent", attempts: 1, lastError: null,
+    failureDetail: "lock failure", retryEligible: false
+  });
+  assert.equal(resources.notificationFailures[1].state, "sending");
+  assert.equal(resources.notificationFailures[1].retryEligible, true);
+  assert.equal(resources.notificationFailures[2].state, "pending");
+  assert.equal(resources.notificationFailures[2].retryEligible, true);
+});
+
 test("Maoyan resource capacity excludes active Store accounts", async () => {
   const env = await createAccountEnv({ nowMs: NOW, maxUsers: 20 });
   await seedAccount(env, { businessLine: "maoyan", expiresAt: NOW + 86_400_000 });

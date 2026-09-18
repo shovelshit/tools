@@ -378,6 +378,9 @@ export async function updateManagedAccount(env, input) {
   if (!['active', 'suspended', 'revoked'].includes(state)) fail("INVALID_REQUEST", "账号状态无效");
   if (account.state === "revoked" && state !== "revoked") fail("ACCOUNT_REVOKED", "已撤销账号不能恢复");
   const remark = patch.remark === undefined ? account.remark : String(patch.remark).trim();
+  if (patch.remark !== undefined && (typeof patch.remark !== "string" || remark.length > 50)) {
+    fail("INVALID_REQUEST", "备注最多 50 字");
+  }
   const expiresAt = patch.expiresAt === undefined ? account.expiresAt : Number(patch.expiresAt);
   const revokedAt = state === "revoked" ? (account.revokedAt || nowMs) : null;
   const revoking = account.state !== "revoked" && state === "revoked";

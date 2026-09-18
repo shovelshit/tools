@@ -1,9 +1,14 @@
 import { getUserConfig } from "./user.js";
 import { currentCredential, isNotificationVerified, pushNotify } from "./notify.js";
 import { accountStatus } from "./accounts.js";
+import { sanitizeFailureText } from "./failure-detail.js";
 
 const RETRY_DELAYS = [30_000, 120_000, 600_000];
 const LEASE_MS = 30_000;
+
+function errorDetail(error, config) {
+  return sanitizeFailureText(String(error?.message || "通知发送失败"), [currentCredential(config)]);
+}
 
 export async function enqueueNotification(DB, {
   eventKey, userId, kind, title, content, credentialVersion, meta, nowMs = Date.now()
@@ -23,7 +28,7 @@ export async function enqueueNotification(DB, {
 }
 
 export async function persistTerminalNotification(env, {
-  userId, rule, title, content, credentialVersion, nowMs = Date.now()
+  userId, rule, title, content, failureDetail, credentialVersion, nowMs = Date.now()
 }) {
   const result = await env.DB.batch([
     rule.state === "failed" || rule.state === "expired" ? env.DB.prepare(
@@ -34,24 +39,23 @@ export async function persistTerminalNotification(env, {
     ).bind(userId, JSON.stringify(rule), new Date(nowMs).toISOString()),
     env.DB.prepare(
       "INSERT OR IGNORE INTO notification_outbox(" +
-      "event_key,user_id,kind,payload,credential_version,state,attempts,next_attempt_at,lease_until,created_at,updated_at" +
-      ") VALUES (?,?,?,?,?,'pending',0,?,NULL,?,?)"
+      "event_key,user_id,kind,payload,credential_version,state,attempts,next_attempt_at,lease_until,created_at,updated_at,failure_detail" +
+      ") VALUES (?,?,?,?,?,'pending',0,?,NULL,?,?,?)"
     ).bind(
       `lock:${rule.id}:${rule.state}`, userId, "lock-terminal", JSON.stringify({ title, content }),
-      Number(credentialVersion || 0), Number(nowMs), Number(nowMs), Number(nowMs)
+      Number(credentialVersion || 0), Number(nowMs), Number(nowMs), Number(nowMs), typeof failureDetail === "string" ? failureDetail : null
     )
   ]);
   return { created: Number(result[1]?.meta?.changes || 0) === 1 };
 }
 
-async function defaultSend(env, row, payload) {
+async function defaultSend(env, row, payload, config) {
   const user = await env.DB.prepare("SELECT role,state,expires_at FROM users WHERE id=?").bind(row.user_id).first();
   if (!user || user.state === "revoked") {
     const error = new Error("账号已撤销");
     error.permanent = true;
     throw error;
   }
-  const config = await getUserConfig(env, row.user_id);
   if (row.kind === "account-expiry" && Number(payload?.meta?.expiresAt) !== Number(user.expires_at)) {
     const error = new Error("账号期限已变化");
     error.permanent = true;
@@ -89,19 +93,21 @@ export async function deliverOutbox(env, { nowMs = Date.now(), limit = 10, send 
     if (Number(claimed?.meta?.changes || 0) !== 1) continue;
     const attempts = Number(row.attempts) + 1;
     const payload = JSON.parse(row.payload);
+    let config;
     try {
-      if (send) await send(await getUserConfig(env, row.user_id), payload.title, payload.content, row);
-      else await defaultSend(env, row, payload);
+      config = await getUserConfig(env, row.user_id);
+      if (send) await send(config, payload.title, payload.content, row);
+      else await defaultSend(env, row, payload, config);
       await env.DB.prepare(
-        "UPDATE notification_outbox SET state='sent',lease_until=NULL,next_attempt_at=NULL,updated_at=? WHERE id=? AND state='sending'"
+        "UPDATE notification_outbox SET state='sent',last_error=NULL,lease_until=NULL,next_attempt_at=NULL,updated_at=? WHERE id=? AND state='sending'"
       ).bind(Number(nowMs), row.id).run();
       sent += 1;
     } catch (error) {
       const exhausted = error?.permanent === true || attempts >= 4;
       const nextAttemptAt = exhausted ? null : Number(nowMs) + RETRY_DELAYS[attempts - 1];
       await env.DB.prepare(
-        "UPDATE notification_outbox SET state=?,lease_until=NULL,next_attempt_at=?,updated_at=? WHERE id=? AND state='sending'"
-      ).bind(exhausted ? "failed" : "pending", nextAttemptAt, Number(nowMs), row.id).run();
+        "UPDATE notification_outbox SET state=?,last_error=?,lease_until=NULL,next_attempt_at=?,updated_at=? WHERE id=? AND state='sending'"
+      ).bind(exhausted ? "failed" : "pending", errorDetail(error, config), nextAttemptAt, Number(nowMs), row.id).run();
       failed += 1;
     }
   }

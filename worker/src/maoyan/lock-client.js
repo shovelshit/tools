@@ -1,7 +1,10 @@
 import { lockError, lockLog } from "./log.js";
+import { captureFailureDetail } from "./failure-detail.js";
 
 const ORIGIN = "https://www.maoyan.com";
 const HOST = "www.maoyan.com";
+// Remote Worker verification: m returned a valid order; www returned HTTP 403.
+const ORDER_ORIGIN = "https://m.maoyan.com";
 const TIMEOUT_MS = 15000;
 const DEFAULT_ORDER_QUERY = {
   yodaReady: "h5",
@@ -28,7 +31,7 @@ function trustedUrl(value) {
   } catch {
     throw new Error("猫眼请求目标不受信任");
   }
-  if (url.protocol !== "https:" || url.hostname !== HOST) {
+  if (url.protocol !== "https:" || (url.hostname !== HOST && url.hostname !== "m.maoyan.com")) {
     throw new Error("猫眼请求目标不受信任");
   }
   return url;
@@ -83,6 +86,7 @@ function explicitProviderRejection(body) {
   if (!body || typeof body !== "object") return false;
   const data = body.data && typeof body.data === "object" ? body.data : {};
   return body.success === false || data.success === false ||
+    (Object.hasOwn(body, "status") && Number(body.status) !== 0) ||
     typeof body.msg === "string" || typeof body.message === "string" || typeof body.error === "string" ||
     typeof data.msg === "string" || typeof data.message === "string" || typeof data.error === "string" ||
     (Object.hasOwn(body, "code") && Number(body.code) !== 0) ||
@@ -99,22 +103,26 @@ function snippet(text, max = 400) {
   return value.length > max ? `${value.slice(0, max)}...` : value;
 }
 
-function providerErrorSummary(error) {
-  const errorName = typeof error?.name === "string" ? snippet(error.name, 80) : "UnknownError";
-  const errorMessage = typeof error?.message === "string" ? snippet(error.message, 160) : "无错误信息";
+function providerErrorSummary(error, response, session) {
+  let sanitized = {};
+  try {
+    sanitized = JSON.parse(captureFailureDetail(response, JSON.stringify({ name: error?.name, message: error?.message }), session).responseBody);
+  } catch { /* Oversized summaries are omitted; the bounded body remains available. */ }
+  const errorName = typeof sanitized.name === "string" ? snippet(sanitized.name, 80) : "UnknownError";
+  const errorMessage = typeof sanitized.message === "string" ? snippet(sanitized.message, 160) : "无错误信息";
   return { errorName, errorMessage };
 }
 
-function nonJsonResponseDiagnostics(response, text) {
+function nonJsonResponseDiagnostics(headers, text) {
   const title = snippet((String(text).match(/<title[^>]*>([^<]*)<\/title>/i) || [])[1] || "", 80);
   const markers = [];
   if (/cf-chl|captcha|challenge|验证/i.test(text)) markers.push("challenge");
   if (/forbidden|access denied|\b403\b/i.test(text)) markers.push("forbidden");
   if (/\blogin\b|登录/i.test(text)) markers.push("login");
   return {
-    contentType: response.headers.get("content-type") || undefined,
-    server: response.headers.get("server") || undefined,
-    mitigation: response.headers.get("cf-mitigated") || undefined,
+    contentType: headers?.contentType || undefined,
+    server: headers?.server || undefined,
+    mitigation: headers?.mitigation || undefined,
     bodyLength: String(text).length,
     responseHint: `页面 ${title || "无标题"}; 标记 ${markers.length ? markers.join(",") : "none"}`
   };
@@ -138,7 +146,7 @@ export async function requestMaoyan(session, value, options = {}) {
     }
     throw new Error("猫眼请求失败：网络异常");
   }
-  if (response.status >= 300 && response.status < 400) {
+  if (response.status >= 300 && response.status < 400 && !allowHttpError) {
     throw new Error(`猫眼请求失败：HTTP ${response.status}`);
   }
   if (!response.ok && !allowHttpError) throw new Error(`猫眼请求失败：HTTP ${response.status}`);
@@ -423,19 +431,10 @@ function selectedSeats(seatMap, seats) {
   });
 }
 
-function seatPageReferer(seatMap) {
-  const url = new URL(`${ORIGIN}/xseats/${assertId(seatMap.seqNo)}`);
-  if (seatMap.movieId && seatMap.cinemaId) {
-    url.searchParams.set("movieId", assertId(seatMap.movieId));
-    url.searchParams.set("cinemaId", assertId(seatMap.cinemaId));
-  }
-  return url.toString();
-}
-
-
 export async function createUnpaidOrder(session, seatMap, seats) {
   const selected = selectedSeats(seatMap, seats);
-  const url = new URL(`${ORIGIN}/ajax/createOrder`);
+  // Keep seat-page reads on www; the verified order endpoint is on m.
+  const url = new URL(`${ORDER_ORIGIN}/ajax/createOrder`);
   // 会话捕获的下单参数优先(签名版本等必须与登录会话匹配), 缺省时用默认值
   const query = { ...DEFAULT_ORDER_QUERY, ...(session.createOrderQuery || {}) };
   for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);
@@ -445,7 +444,13 @@ export async function createUnpaidOrder(session, seatMap, seats) {
     seqNo: seatMap.seqNo,
     seats: JSON.stringify({ count: selected.length, list: selected })
   });
-  lockLog("order_attempt", { phase: "request", seatCount: selected.length });
+  const startedAt = Date.now();
+  const context = {
+    attemptId: crypto.randomUUID(), endpoint: `${ORDER_ORIGIN}/ajax/createOrder`,
+    seqNo: String(seatMap.seqNo), seatCount: selected.length
+  };
+  const fields = (extra) => ({ ...context, durationMs: Date.now() - startedAt, ...extra });
+  lockLog("order_attempt", fields({ phase: "request" }));
   let response;
   try {
     response = await requestMaoyan(session, url.toString(), {
@@ -454,38 +459,62 @@ export async function createUnpaidOrder(session, seatMap, seats) {
       headers: {
         Accept: "application/json, text/plain, */*",
         "Accept-Language": "zh-CN,zh;q=0.9",
-        mtgsig: session.mtgsig,
-        Origin: ORIGIN,
-        Referer: seatPageReferer(seatMap),
+        Origin: ORDER_ORIGIN,
+        Referer: `${ORDER_ORIGIN}/`,
         "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
         "X-Requested-With": "XMLHttpRequest"
       },
       body
     });
   } catch (error) {
-    lockError("order_attempt", { phase: "request", state: "failed", reason: "network_error" });
-    throw new OrderAttemptError("锁座失败，未获得有效订单", true);
+    lockError("order_attempt", fields({ phase: "request", state: "failed", reason: "network_error" }));
+    // 诊断上下文跟随错误透传: 网络异常的具体形态(超时/连接重置等), 便于区分风控拦截与链路问题
+    throw orderUncertainError(`网络异常：${snippet(error?.message || "unknown", 80)}`);
   }
-  const text = await response.text();
-  lockLog("order_attempt", { phase: "response", httpStatus: response.status });
+  context.httpStatus = response.status;
+  let text;
+  try {
+    text = await response.text();
+  } catch {
+    lockError("order_attempt", fields({ phase: "response", state: "failed", reason: "body_read_error" }));
+    throw orderUncertainError(`HTTP ${response.status} 响应读取失败`);
+  }
+  const contentType = response.headers.get("content-type") || "";
+  const failure = captureFailureDetail(response, text, session);
+  const withFailureDetail = (error) => {
+    error.failureDetail = JSON.stringify(failure);
+    return error;
+  };
+  context.responseType = /json/i.test(contentType) ? "json" : /xml/i.test(contentType) ? "xml" : /html/i.test(contentType) ? "html" : "other";
+  lockLog("order_attempt", fields({ phase: "response" }));
   let payload;
   try {
     payload = JSON.parse(text);
   } catch {
-    lockError("order_attempt", {
+    const diagnostics = nonJsonResponseDiagnostics({
+      contentType: failure.headers["content-type"] || "",
+      server: failure.headers.server || "",
+      mitigation: failure.headers["cf-mitigated"] || ""
+    }, failure.responseBody);
+    lockError("order_attempt", fields({
       phase: "response",
       state: "failed",
       reason: "invalid_json",
-      ...nonJsonResponseDiagnostics(response, text)
-    });
-    throw new OrderAttemptError("锁座失败，未获得有效订单", true);
+      responseBody: failure.responseBody,
+      ...diagnostics
+    }));
+    throw withFailureDetail(orderUncertainError(`HTTP ${response.status} 非 JSON 响应`));
   }
-  const order = payload?.data?.data;
-  if (response.ok && !payload?.error && order &&
+  const rejected = explicitProviderRejection(payload);
+  // Mobile responses expose data.id; desktop responses wrap it in data.data.
+  const order = payload?.data?.data ?? (
+    payload?.success === true && payload?.status === 0 ? payload?.data : null
+  );
+  if (response.ok && !payload?.error && !rejected && order &&
       ((typeof order.id === "string" && order.id.trim().length > 0) ||
        (typeof order.id === "number" && Number.isFinite(order.id) && order.id > 0))) {
     const payLeftSecond = Number(order.payLeftSecond);
-    lockLog("order_attempt", { phase: "complete", state: "locked" });
+    lockLog("order_attempt", fields({ phase: "complete", state: "locked" }));
     return {
       orderId: String(order.id),
       payLeftSecond: Number.isFinite(payLeftSecond) ? payLeftSecond : null
@@ -493,17 +522,26 @@ export async function createUnpaidOrder(session, seatMap, seats) {
   }
   // 猫眼网关错误(error 对象, 如 NetError/Bad Request): 多为会话或 mtgsig 签名过期
   if (payload?.error && typeof payload.error === "object") {
-    lockError("order_attempt", {
+    lockError("order_attempt", fields({
       phase: "response",
       state: "failed",
-      ...providerErrorSummary(payload.error)
-    });
-    throw new OrderAttemptError(ORDER_REJECTED_SESSION, false);
+      responseBody: failure.responseBody,
+      ...providerErrorSummary(payload.error, response, session)
+    }));
+    throw withFailureDetail(new OrderAttemptError(ORDER_REJECTED_SESSION, false));
   }
-  if (explicitProviderRejection(payload)) {
-    lockError("order_attempt", { phase: "response", state: "failed", reason: "provider_rejected" });
-    throw new OrderAttemptError(ORDER_REJECTED_SEATS, false);
+  if (rejected) {
+    lockError("order_attempt", fields({ phase: "response", state: "failed", reason: "provider_rejected", responseBody: failure.responseBody }));
+    throw withFailureDetail(new OrderAttemptError(ORDER_REJECTED_SEATS, false));
   }
-  lockError("order_attempt", { phase: "response", state: "failed", reason: "unrecognized_response" });
-  throw new OrderAttemptError("锁座失败，未获得有效订单", true);
+  lockError("order_attempt", fields({ phase: "response", state: "failed", reason: "unrecognized_response", responseBody: failure.responseBody }));
+  // Error details reach the API caller; never include raw provider JSON.
+  throw withFailureDetail(orderUncertainError(`HTTP ${response.status} JSON 响应结构未识别`));
+}
+
+// 失败文案保持稳定, 真实原因放 detail 由上层决定是否透出
+function orderUncertainError(detail) {
+  const error = new OrderAttemptError("锁座失败，未获得有效订单", true);
+  error.detail = snippet(detail, 200);
+  return error;
 }

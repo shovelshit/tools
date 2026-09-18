@@ -11,6 +11,7 @@ const els = {
   btnEnterMonitor: $("btn-enter-monitor"),
   resourceCinemas: $("resource-cinemas"), resourcePending: $("resource-pending"),
   resourceFailed: $("resource-failed"), resourceAdmission: $("resource-admission"), resourceNote: $("resource-note"),
+  resourceFailureDetails: $("resource-failure-details"),
   resourceSummary: $("maoyan-resource-summary")
 };
 
@@ -109,11 +110,38 @@ async function loadSettings(scope = captureBusinessScope()) {
   return true;
 }
 
+function formatFailureDetail(value) {
+  const raw = String(value);
+  try {
+    const detail = JSON.parse(raw);
+    if (!detail || typeof detail !== "object" || Array.isArray(detail) ||
+      !Number.isInteger(detail.httpStatus) || typeof detail.responseBody !== "string" ||
+      !detail.headers || typeof detail.headers !== "object" || Array.isArray(detail.headers)) return raw;
+    const headers = Object.entries(detail.headers)
+      .filter(([, content]) => typeof content === "string")
+      .map(([name, content]) => `${name}: ${content}`).join("\n");
+    return `HTTP 状态：${detail.httpStatus}\n响应头：\n${headers || "（无）"}\n响应体：\n${detail.responseBody}` +
+      (detail.bodyTruncated === true ? "\n（响应体已截断）" : "");
+  } catch {
+    return raw;
+  }
+}
+
 async function loadResources() {
   const { resources } = await adminApi("/api/admin/resources");
   els.resourceCinemas.textContent = String(resources.activeCinemas ?? "--");
   els.resourcePending.textContent = String(resources.notificationPending ?? "--");
   els.resourceFailed.textContent = String(resources.notificationFailed ?? "--");
+  const failures = resources.notificationFailures || [];
+  els.resourceFailureDetails.textContent = failures.length
+    ? failures.map((item) => {
+      const state = { pending: "待发送", sending: "发送中", sent: "已发送", failed: "发送失败" }[item.state] || "未知状态";
+      const kind = { "lock-terminal": "锁座结果", "monitor-diff": "监控变更", "new-shows": "新场次通知", "account-expiry": "账号到期通知" }[item.kind] || item.kind;
+      return `${kind} · 通知状态：${state} · 尝试 ${item.attempts} 次 · ${item.retryEligible ? "可自动重试" : "不再重试"}` +
+        (item.lastError ? `\n通知发送错误：${item.lastError}` : "") +
+        (item.failureDetail ? `\n锁座失败详情：\n${formatFailureDetail(item.failureDetail)}` : "");
+    }).join("\n\n")
+    : "暂无通知失败详情";
   els.resourceAdmission.textContent = resources.admissionAllowed ? "可申请" : "保持关闭";
   const measured = Object.values(resources.usage || {}).filter((item) => item.measured).length;
   els.resourceNote.textContent = measured
@@ -142,7 +170,7 @@ function actionButton(text, className, handler) {
   return button;
 }
 
-function renderAccounts() {
+function renderAccountSummary() {
   const used = Number(capacity?.used || 0);
   const max = Number(capacity?.maxUsers || 0);
   els.capacitySummary.textContent = `${used} / ${max}`;
@@ -151,18 +179,27 @@ function renderAccounts() {
   els.btnEnterMonitor.classList.toggle("hidden", els.businessLine.value !== "maoyan");
   els.summary.textContent = `当前显示 ${accounts.length} 个账号`;
   els.btnLoadMore.classList.toggle("hidden", !nextAfter);
+}
+
+function renderAccounts() {
+  renderAccountSummary();
   els.tbody.innerHTML = "";
   if (!accounts.length) return renderMessage("没有符合条件的账号");
 
   for (const account of accounts) {
+    els.tbody.appendChild(renderAccountRow(account));
+  }
+}
+
+function renderAccountRow(account) {
     const row = document.createElement("tr");
     const identity = document.createElement("td");
     const title = document.createElement("strong");
-    title.textContent = account.remark || "未命名账号";
+    title.textContent = account.remark || `自助申请 · ${account.userId.slice(0, 8)}`;
     const hint = document.createElement("small");
     hint.className = "muted account-hint";
     hint.textContent = `${account.keyHint || ""} · ${account.source || "-"}`;
-    identity.append(title, hint);
+    identity.append(title, hint, actionButton("编辑备注", "", () => editRemark(account)));
 
     const qualification = document.createElement("td");
     qualification.appendChild(badge(STATUS_LABEL[account.accountStatus] || account.accountStatus, account.accountStatus));
@@ -193,8 +230,7 @@ function renderAccounts() {
     if (!operationsInner.children.length) operationsInner.textContent = "—";
     operations.appendChild(operationsInner);
     row.append(identity, qualification, monitor, expiry, activity, operations);
-    els.tbody.appendChild(row);
-  }
+    return row;
 }
 
 function renderMessage(text) {
@@ -211,16 +247,31 @@ function renderMessage(text) {
 async function updateAccount(account, patch, scope = captureBusinessScope()) {
   if (!isCurrentBusinessScope(scope) || (account.businessLine && account.businessLine !== scope.businessLine)) return;
   try {
-    await adminApi("/api/admin/accounts/update", {
+    const data = await adminApi("/api/admin/accounts/update", {
       method: "POST",
       body: JSON.stringify({ id: account.userId, expectedVersion: account.accountVersion, patch })
     });
-    if (isCurrentBusinessScope(scope)) await refreshAccounts({ reset: true, scope });
+    if (!isCurrentBusinessScope(scope)) return;
+    const index = accounts.findIndex((item) => item.userId === account.userId);
+    if (index < 0 || !data.adminAccount) return;
+    if (accounts[index].accountVersion > data.adminAccount.accountVersion) return;
+    accounts[index] = data.adminAccount;
+    capacity = data.capacity;
+    els.tbody.replaceChild(renderAccountRow(data.adminAccount), els.tbody.children[index]);
+    renderAccountSummary();
   } catch (error) {
     if (!isCurrentBusinessScope(scope)) return;
     showToast(`操作失败：${error.message}`, "error");
-    if (error.code === "VERSION_CONFLICT") await refreshAccounts({ reset: true, scope });
   }
+}
+
+async function editRemark(account) {
+  const scope = captureBusinessScope();
+  const value = prompt("编辑账号备注（最多 50 字，可留空）", account.remark || "");
+  if (value === null) return;
+  const remark = value.trim();
+  if (remark.length > 50) return showToast("备注最多 50 字", "error");
+  await updateAccount(account, { remark }, scope);
 }
 
 async function revokeAccount(account) {

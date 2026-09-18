@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { captureConsole } from "./helpers.js";
+import { sanitizeFailureText } from "../src/maoyan/failure-detail.js";
 import {
   createUnpaidOrder,
   extractOfficialSeatHtml,
@@ -34,6 +35,13 @@ const session = {
     csecversion: "4.3.0"
   }
 };
+
+test("shared failure sanitizer preserves provider reason while stripping configured credentials", () => {
+  const detail = sanitizeFailureText("HTTP 403 provider rejected notify-key https://notify.example/notify-key token=unknown-secret", ["notify-key"]);
+  assert.match(detail, /HTTP 403 provider rejected/);
+  assert.doesNotMatch(detail, /notify-key|notify.example|unknown-secret/);
+  assert.ok(new TextEncoder().encode(sanitizeFailureText("座".repeat(7000))).length <= 16384);
+});
 
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -409,7 +417,8 @@ test("creates an unpaid order using session-captured query values only", async (
   const seatMap = { ...parseSeatPage(seatHtml), movieId: "7", cinemaId: "25428" };
   await withMockFetch(async (input, init) => {
     const url = new URL(input);
-    assert.equal(url.origin, "https://www.maoyan.com");
+    // 下单走 m 站(www 站 createOrder 对数据中心出口 IP 返回 403)
+    assert.equal(url.origin, "https://m.maoyan.com");
     assert.equal(url.pathname, "/ajax/createOrder");
     // 会话捕获的值优先(签名版本须与登录会话匹配)
     assert.deepEqual([...url.searchParams.entries()].sort(), [
@@ -419,9 +428,9 @@ test("creates an unpaid order using session-captured query values only", async (
     ]);
     assert.equal(init.method, "POST");
     assert.equal(init.headers.Cookie, "uid=test-user; token=test-cookie");
-    assert.equal(init.headers.mtgsig, "test-signature");
-    assert.equal(init.headers.Origin, "https://www.maoyan.com");
-    assert.equal(init.headers.Referer, "https://www.maoyan.com/xseats/2026091201?movieId=7&cinemaId=25428");
+    assert.equal(Object.hasOwn(init.headers, "mtgsig"), false);
+    assert.equal(init.headers.Origin, "https://m.maoyan.com");
+    assert.equal(init.headers.Referer, "https://m.maoyan.com/");
     assert.equal(init.headers["User-Agent"], "Test Agent/1.0");
     assert.equal(init.headers.Accept, "application/json, text/plain, */*");
     assert.equal(init.headers["Accept-Language"], "zh-CN,zh;q=0.9");
@@ -440,6 +449,58 @@ test("creates an unpaid order using session-captured query values only", async (
       { orderId: "12345", payLeftSecond: 600 }
     );
   });
+});
+
+test("recognizes the mobile order success envelope", async () => {
+  await withMockFetch(async () => jsonResponse({
+    success: true,
+    status: 0,
+    data: { id: 12345, order: { movieId: 7 }, payLeftSecond: 598 }
+  }), async () => {
+    assert.deepEqual(
+      await createUnpaidOrder(session, parseSeatPage(seatHtml), ["1-6-18"]),
+      { orderId: "12345", payLeftSecond: 598 }
+    );
+  });
+});
+
+test("preserves nested order success when the envelope includes success flags", async () => {
+  await withMockFetch(async () => jsonResponse({
+    success: true, status: 0, data: { data: { id: 12345, payLeftSecond: 600 } }
+  }), async () => {
+    assert.deepEqual(
+      await createUnpaidOrder(session, parseSeatPage(seatHtml), ["1-6-18"]),
+      { orderId: "12345", payLeftSecond: 600 }
+    );
+  });
+});
+
+test("does not accept order identifiers from explicitly failed envelopes", async () => {
+  for (const flags of [{ success: false }, { status: 1 }, { code: 401 }]) {
+    for (const data of [{ id: 12345 }, { data: { id: 12345 } }]) {
+      await withMockFetch(async () => jsonResponse({ ...flags, data }), async () => {
+        await assert.rejects(
+          () => createUnpaidOrder(session, parseSeatPage(seatHtml), ["1-6-18"]),
+          (error) => error instanceof OrderAttemptError && error.uncertain === false
+        );
+      });
+    }
+  }
+});
+
+test("does not treat an unconfirmed mobile identifier as a successful order", async () => {
+  for (const payload of [
+    { data: { id: 12345 } },
+    { success: true, status: 0, data: { id: "" } },
+    { success: true, status: 0, data: { id: 0 } }
+  ]) {
+    await withMockFetch(async () => jsonResponse(payload), async () => {
+      await assert.rejects(
+        () => createUnpaidOrder(session, parseSeatPage(seatHtml), ["1-6-18"]),
+        (error) => error instanceof OrderAttemptError
+      );
+    });
+  }
 });
 
 test("classifies an explicit provider rejection as a certain order failure", async () => {
@@ -529,7 +590,109 @@ test("logs sanitized diagnostics for a non-JSON order rejection", async () => {
   assert.match(logs, /"mitigation":"challenge"/);
   assert.match(logs, /"bodyLength":\d+/);
   assert.match(logs, /"responseHint":"页面 Access Denied; 标记 challenge,forbidden"/);
-  assert.doesNotMatch(logs, /private-provider-detail|cf-chl-captcha/);
+  assert.match(logs, /private-provider-detail|cf-chl-captcha/);
+});
+
+test("unrecognized order responses do not expose provider data through error detail", async () => {
+  const payload = { token: "private-provider-token", url: "http://internal.example/order", data: {} };
+  await withMockFetch(async () => jsonResponse(payload), async () => {
+    await assert.rejects(
+      () => createUnpaidOrder(session, parseSeatPage(seatHtml), ["1-6-18"]),
+      (error) => {
+        assert.equal(error instanceof OrderAttemptError, true);
+        assert.doesNotMatch(`${error.message} ${error.detail}`, /private-provider-token|internal\.example/);
+        assert.match(error.detail, /HTTP 200/);
+        return true;
+      }
+    );
+  });
+});
+
+test("HTML order errors do not expose private titles through error detail", async () => {
+  await withMockFetch(async () => new Response("<title>private-provider-token</title>", { status: 403 }), async () => {
+    await assert.rejects(
+      () => createUnpaidOrder(session, parseSeatPage(seatHtml), ["1-6-18"]),
+      (error) => {
+        assert.doesNotMatch(`${error.message} ${error.detail}`, /private-provider-token/);
+        assert.match(error.detail, /HTTP 403/);
+        return true;
+      }
+    );
+  });
+});
+
+test("order logs correlate a failed response without exposing credentials", async () => {
+  const { entries, text: logs } = await captureConsole(async () => {
+    await withMockFetch(async () => new Response('<Error><Code>InvalidRequest</Code></Error>', {
+      status: 400, headers: { 'content-type': 'text/xml' }
+    }), async () => {
+      await assert.rejects(() => createUnpaidOrder(session, parseSeatPage(seatHtml), ['1-6-18']));
+    });
+  });
+  const events = entries.map(args => args[0]).filter(event => event.event === 'order_attempt');
+  assert.ok(events.length >= 2);
+  assert.match(events[0].attemptId, /^[a-f0-9-]{36}$/);
+  assert.ok(events.every(event => event.attemptId === events[0].attemptId));
+  const failed = events.find(event => event.state === 'failed');
+  assert.equal(failed.httpStatus, 400);
+  assert.equal(failed.responseType, 'xml');
+  assert.equal(failed.seqNo, '2026091201');
+  assert.equal(failed.endpoint, 'https://m.maoyan.com/ajax/createOrder');
+  assert.ok(failed.durationMs >= 0);
+  assert.match(failed.responseBody, /InvalidRequest/);
+  assert.doesNotMatch(logs, /test-signature|test-cookie|test-csrf/);
+});
+
+test("failed JSON response logs are bounded and redact credential-shaped fields", async () => {
+  const payload = {
+    error: "Bad Request",
+    token: "private-token",
+    mtgsig: "private-signature",
+    data: { message: "seat unavailable", cookie: "private-cookie" }
+  };
+  const { entries } = await captureConsole(async () => {
+    await withMockFetch(async () => jsonResponse(payload, 400), async () => {
+      await assert.rejects(() => createUnpaidOrder(session, parseSeatPage(seatHtml), ["1-6-18"]));
+    });
+  });
+  const failed = entries.map(args => args[0]).find(event => event.event === "order_attempt" && event.state === "failed");
+  assert.ok(failed);
+  assert.match(failed.responseBody, /redacted/);
+  assert.doesNotMatch(failed.responseBody, /private-token|private-signature|private-cookie/);
+  assert.ok(failed.responseBody.length <= 2000);
+});
+
+test("failure detail captures diagnostic headers and redacts structured and echoed credentials", async () => {
+  const payload = { error: "rejected", accessToken: "unknown-secret", nested: { "uid.sig": "unknown-signature" }, message: "test-cookie test-csrf test-signature", note: "Bearer unknown-bearer" };
+  await withMockFetch(async () => new Response(JSON.stringify(payload), { status: 403, headers: {
+    "content-type": "application/json", "cf-ray": "trace-123", "set-cookie": "new-secret", "x-custom": "private"
+  } }), async () => {
+    await assert.rejects(() => createUnpaidOrder(session, parseSeatPage(seatHtml), ["1-6-18"]), error => {
+      const detail = JSON.parse(error.failureDetail);
+      assert.equal(detail.httpStatus, 403);
+      assert.deepEqual(detail.headers, { "content-type": "application/json", "cf-ray": "trace-123" });
+      assert.equal(detail.bodyTruncated, false);
+      assert.match(detail.responseBody, /rejected/);
+      assert.doesNotMatch(error.failureDetail, /unknown-secret|unknown-signature|unknown-bearer|test-cookie|test-csrf|test-signature|new-secret/);
+      return true;
+    });
+  });
+});
+
+test("failure detail preserves HTML diagnostics, redacts credentials and caps UTF-8 body size", async () => {
+  const html = '<title>Access Denied</title>cf-chl-captcha Cookie: arbitrary=cookie-value; another=second-value\n<token>xml-secret</token> signature="quoted secret" ' + "座".repeat(7000);
+  await withMockFetch(async () => new Response(html, { status: 403 }), async () => {
+    await assert.rejects(() => createUnpaidOrder(session, parseSeatPage(seatHtml), ["1-6-18"]), error => {
+      const detail = JSON.parse(error.failureDetail);
+      assert.equal(detail.bodyTruncated, true);
+      assert.ok(new TextEncoder().encode(detail.responseBody).length <= 16384);
+      assert.ok(detail.responseBody.length > 4000);
+      assert.match(detail.responseBody, /Access Denied.*cf-chl-captcha/);
+      assert.doesNotMatch(detail.responseBody, /cookie-value|second-value|xml-secret|quoted secret/);
+      assert.doesNotMatch(error.detail, /Access Denied|cf-chl/);
+      return true;
+    });
+  });
 });
 
 test("classifies ambiguous post-order failures as uncertain", async () => {
@@ -551,4 +714,26 @@ test("classifies ambiguous post-order failures as uncertain", async () => {
       );
     });
   }
+});
+
+test("redirect order failures retain their response diagnostics without following redirects", async () => {
+  await withMockFetch(async () => new Response("login required", { status: 302, headers: { location: "https://private.example" } }), async () => {
+    await assert.rejects(() => createUnpaidOrder(session, parseSeatPage(seatHtml), ["1-6-18"]), error => {
+      const detail = JSON.parse(error.failureDetail);
+      assert.equal(detail.httpStatus, 302);
+      assert.match(detail.responseBody, /login required/);
+      assert.doesNotMatch(error.failureDetail, /private.example/);
+      return true;
+    });
+  });
+});
+
+test("failure detail redacts HTML form credential values", async () => {
+  await withMockFetch(async () => new Response('<input value="hidden-secret" name="csrf_token"><input name="signature" value="second-secret">', { status: 403 }), async () => {
+    await assert.rejects(() => createUnpaidOrder(session, parseSeatPage(seatHtml), ["1-6-18"]), error => {
+      assert.equal(typeof error.failureDetail, "string");
+      assert.doesNotMatch(error.failureDetail, /hidden-secret|second-secret/);
+      return true;
+    });
+  });
 });

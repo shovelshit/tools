@@ -138,7 +138,7 @@ export async function handleEnrollmentApi(request, env, url, { fetchImpl = fetch
         fingerprintVersion: ENROLLMENT_FINGERPRINT_VERSION,
         turnstileSiteKey: String(env.TURNSTILE_SITE_KEY || ""),
         workerUrl: String(env.PUBLIC_WORKER_URL || new URL(request.url).origin),
-        webUrl: String(env.PUBLIC_WEB_URL || allowedOrigin(env)),
+        webUrl: String(env.PUBLIC_WEB_URL || new URL("/maoyan/", allowedOrigin(env) || new URL(request.url).origin).href),
         sourceUrl: String(env.SOURCE_URL || "https://github.com/shovelshit/tools")
       });
     }

@@ -306,6 +306,8 @@ CREATE TABLE IF NOT EXISTS notification_outbox (
   credential_version INTEGER NOT NULL,
   state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'sending', 'sent', 'failed')),
   attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+  last_error TEXT,
+  failure_detail TEXT,
   next_attempt_at INTEGER,
   lease_until INTEGER,
   created_at INTEGER NOT NULL,

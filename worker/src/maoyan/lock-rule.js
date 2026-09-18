@@ -12,6 +12,7 @@ import { lockError, lockLog } from "./log.js";
 import { lockNotification } from "./notification-copy.js";
 import { requireActiveAccount } from "./auth.js";
 import { drawLotteryKey } from "./lock-lottery.js";
+import { persistTerminalNotification, wakeNotificationDispatcher } from "./notification-outbox.js";
 
 // 这些错误会原样透传给前端(而不是笼统的"锁座参数无效")
 // 注意: 与上游(猫眼)相关的文案直接引用 lock-client 导出的常量, 避免文案漂移
@@ -257,6 +258,14 @@ export async function createLockRule(env, tokenId, input, options = {}) {
     try {
       order = await placeOrder(session, seatMap, seats.map((seat) => seat.seatNo));
     } catch (error) {
+      const failedRule = buildRule("failed", { lastError: "锁座失败，未获得有效订单" });
+      const notification = lockNotification(failedRule);
+      await persistTerminalNotification(env, {
+        userId: tokenId, rule: failedRule, ...notification,
+        failureDetail: error?.failureDetail, credentialVersion: config.version,
+        nowMs: new Date(now).getTime()
+      });
+      try { await wakeNotificationDispatcher(env); } catch {}
       if (error instanceof OrderAttemptError && !error.uncertain) {
         lockError("rule_create", { phase: "complete", state: "failed", reason: "provider_rejected" });
         // 标记为上游拒绝: 协调器与 API 边界据此返回 502 并保留原文案, 而不是降级成笼统的 500

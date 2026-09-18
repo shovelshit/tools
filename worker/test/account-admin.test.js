@@ -96,10 +96,31 @@ test("admin updates use optimistic account versions and reject arbitrary fields"
     method: "POST", body: { id: account.id, expectedVersion: account.version, patch: { state: "suspended" } }
   }), env);
   assert.equal(updated.status, 200);
+  const updatedPayload = await updated.json();
+  assert.equal(updatedPayload.adminAccount.userId, account.id);
+  assert.equal(updatedPayload.adminAccount.accountVersion, account.version + 1);
+  assert.equal(updatedPayload.adminAccount.accountStatus, "suspended");
+  assert.equal(updatedPayload.adminAccount.monitorState, "stopped");
+  assert.equal(typeof updatedPayload.capacity.used, "number");
   const stale = await worker.fetch(request("/api/admin/accounts/update", {
     method: "POST", body: { id: account.id, expectedVersion: account.version, patch: { remark: "stale" } }
   }), env);
   assert.equal(stale.status, 409);
+});
+
+test("admin remark edits reject overlong values and allow an empty remark", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  env.NOW_MS = String(NOW);
+  const { account } = await seedAccount(env, { remark: "Named", expiresAt: NOW + 10_000 });
+  const invalid = await worker.fetch(request("/api/admin/accounts/update", {
+    method: "POST", body: { id: account.id, expectedVersion: account.version, patch: { remark: "x".repeat(51) } }
+  }), env);
+  assert.equal(invalid.status, 400);
+  const clear = await worker.fetch(request("/api/admin/accounts/update", {
+    method: "POST", body: { id: account.id, expectedVersion: account.version, patch: { remark: "   " } }
+  }), env);
+  assert.equal(clear.status, 200);
+  assert.equal((await clear.json()).adminAccount.remark, "");
 });
 
 test("account revocation clears Maoyan runtime only after the state transition", async () => {

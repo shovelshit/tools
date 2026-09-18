@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { captureConsole, createDB, MemoryKV, testEncryptionKey, validSession } from "./helpers.js";
 import { userKey, cleanupUserData, putUserConfig } from "../src/maoyan/user.js";
 import { getLockRuleRow, putConfig } from "../src/maoyan/db.js";
+import { OrderAttemptError, ORDER_REJECTED_SEATS } from "../src/maoyan/lock-client.js";
 import {
   createLockRule,
   getLockRule,
@@ -13,6 +14,46 @@ import {
 } from "../src/maoyan/lock-rule.js";
 
 const now = new Date("2026-09-11T04:00:00.000Z");
+
+test("immediate order failure queues sanitized diagnostics without retaining a rule", async () => {
+  const env = await envWithConfig();
+  env.DB = await createDB({ tokens: [{ id: "token-a", token: "test-token" }], configs: { "token-a": { cinemaId: "25428", selectedMovieIds: ["7"] } } });
+  let wakes = 0;
+  let orders = 0;
+  env.NOTIFICATION_DISPATCHER = {
+    idFromName: (id) => id,
+    get: () => ({ fetch: async () => { wakes++; throw new Error("notification unavailable"); } })
+  };
+  const failureDetail = JSON.stringify({ stage: "order", status: 403 });
+  await assert.rejects(createLockRule(env, "token-a", validInput({ targetDate: "2026-09-11" }), dependencies({
+    placeOrder: async () => {
+      orders++;
+      throw Object.assign(new Error("failed"), { detail: "token=private-cookie", failureDetail });
+    }
+  })), (error) => error.kind === "upstream" && !error.message.includes("private-cookie"));
+  assert.equal(await getLockRule(env, "token-a"), null);
+  const rows = (await env.DB.prepare("SELECT * FROM notification_outbox").all()).results;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].failure_detail, failureDetail);
+  assert.equal(rows[0].last_error, null);
+  assert.doesNotMatch(rows[0].payload, /private-cookie/);
+  assert.equal(wakes, 1);
+  assert.equal(orders, 1);
+});
+
+test("immediate explicit rejection queues failure and ignores legacy raw detail", async () => {
+  const env = await envWithConfig();
+  env.DB = await createDB({ tokens: [{ id: "token-a", token: "test-token" }], configs: { "token-a": { cinemaId: "25428", selectedMovieIds: ["7"] } } });
+  await assert.rejects(createLockRule(env, "token-a", validInput({ targetDate: "2026-09-11" }), dependencies({
+    placeOrder: async () => {
+      throw Object.assign(new OrderAttemptError(ORDER_REJECTED_SEATS, false), { detail: "legacy-raw-secret" });
+    }
+  })), (error) => error.kind === "upstream" && error.message.includes("座位可能已被抢占"));
+  const row = await env.DB.prepare("SELECT failure_detail,payload FROM notification_outbox").first();
+  assert.equal(row.failure_detail, null);
+  assert.doesNotMatch(row.payload, /legacy-raw-secret/);
+  assert.equal(await getLockRule(env, "token-a"), null);
+});
 
 async function envWithConfig(config = { cinemaId: "25428", selectedMovieIds: ["7"] }) {
   const env = {
@@ -217,6 +258,7 @@ test("an immediate successful lock sends the same terminal notification after pe
     "💺 6排18座",
     "",
     "💳 已创建待支付订单，请尽快前往猫眼付款",
+    "🧾 订单号：order-1",
     "⏳ 猫眼返回剩余支付时间：600 秒"
   ].join("\n"));
 });

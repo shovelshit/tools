@@ -41,6 +41,7 @@ test("locked notification shows seats, fuzzy match and returned payment time", (
     matchMode: "fuzzy",
     timeDeltaMinutes: 10,
     seats: [{ label: "9排15座" }, { label: "9排16座" }],
+    orderId: "27812080926",
     payLeftSecond: 600
   });
 
@@ -53,6 +54,7 @@ test("locked notification shows seats, fuzzy match and returned payment time", (
     "🔄 场次匹配：18:40 → 18:50（+10分钟）",
     "",
     "💳 已创建待支付订单，请尽快前往猫眼付款",
+    "🧾 订单号：27812080926",
     "⏳ 猫眼返回剩余支付时间：600 秒"
   ].join("\n"));
 });

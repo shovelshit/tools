@@ -285,7 +285,7 @@ test("scheduled lock push renders hall row/seat instead of the internal identifi
   assert.equal(stored.state, "locked");
   assert.equal(notification.title, "✅ 锁座成功｜测试电影");
   // 实测样本: 1-12-1 是 1 区第 1 排第 12 号座 => 票面「1排12座」
-  assert.equal(notification.content, "🏢 测试影院\n📅 2026-09-12 20:00\n💺 1排12座\n\n💳 已创建待支付订单，请尽快前往猫眼付款\n⏳ 猫眼返回剩余支付时间：600 秒");
+  assert.equal(notification.content, "🏢 测试影院\n📅 2026-09-12 20:00\n💺 1排12座\n\n💳 已创建待支付订单，请尽快前往猫眼付款\n🧾 订单号：order-1\n⏳ 猫眼返回剩余支付时间：600 秒");
   assert.equal(notification.content.includes("1-12-1"), false);
 });
 
@@ -356,12 +356,13 @@ test("production order failure deletes the rule, queues failure once, and never 
   let attempts = 0;
   const options = deps(stored, {
     getConfig: async () => ({ version: 1 }),
-    createOrder: async () => { attempts++; throw new OrderAttemptError("timeout", true); }
+    createOrder: async () => { attempts++; const error = new OrderAttemptError("timeout", true); error.detail = "raw-secret"; error.failureDetail = '{"status":403}'; throw error; }
   });
   for (const key of ["getRule", "putRule", "removeRule", "notify"]) delete options[key];
   assert.equal((await runOneLockRule(env, tokenId, options)).state, "failed");
   assert.equal(await db.getLockRuleRow(DB, tokenId), null);
   assert.equal((await DB.prepare("SELECT COUNT(*) AS n FROM notification_outbox").first()).n, 1);
+  assert.equal((await DB.prepare("SELECT failure_detail FROM notification_outbox").first()).failure_detail, '{"status":403}');
   assert.equal((await runOneLockRule(env, tokenId, options)).skipped, true);
   assert.equal(attempts, 1);
 });

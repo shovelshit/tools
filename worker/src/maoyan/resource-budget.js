@@ -39,8 +39,8 @@ export async function readResourceSummary(env, nowMs = Date.now()) {
     env.DB.prepare(
       "SELECT COUNT(DISTINCT cinema_id) AS n FROM monitor_subscriptions WHERE enabled=1 AND next_due_at IS NOT NULL"
     ).first(),
-    env.DB.prepare("SELECT COUNT(*) AS n FROM notification_outbox WHERE state IN ('pending','leased')").first(),
-    env.DB.prepare("SELECT COUNT(*) AS n FROM notification_outbox WHERE state='failed'").first()
+    env.DB.prepare("SELECT COUNT(*) AS n FROM notification_outbox o JOIN users u ON u.id=o.user_id WHERE u.business_line='maoyan' AND o.state IN ('pending','sending')").first(),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM notification_outbox o JOIN users u ON u.id=o.user_id WHERE u.business_line='maoyan' AND o.state='failed'").first()
   ]);
   const raw = configuredUsage(env);
   const usage = {
@@ -71,6 +71,21 @@ export async function readResourceSummary(env, nowMs = Date.now()) {
       statusPollSeconds: 180
     }
   };
+}
+
+export async function readAdminNotificationFailures(env) {
+  const { results } = await env.DB.prepare(
+    "SELECT o.kind,o.state,o.attempts,o.last_error,o.failure_detail,o.next_attempt_at,o.lease_until " +
+    "FROM notification_outbox o JOIN users u ON u.id=o.user_id " +
+    "WHERE u.business_line='maoyan' AND (o.state='failed' OR o.last_error IS NOT NULL OR o.failure_detail IS NOT NULL) " +
+    "ORDER BY o.updated_at DESC,o.id DESC LIMIT 5"
+  ).all();
+  return (results || []).map((row) => ({
+    kind: String(row.kind), state: String(row.state), attempts: Number(row.attempts || 0),
+    lastError: row.last_error == null ? null : String(row.last_error),
+    failureDetail: row.failure_detail == null ? null : String(row.failure_detail),
+    retryEligible: row.state === "pending" && row.next_attempt_at != null || row.state === "sending"
+  }));
 }
 
 export async function allowManualOperation(storage, { userId, cinemaId = "", kind, nowMs = Date.now() }) {

@@ -60,6 +60,7 @@ function selectedSeatLabels(rule) {
 function lockActionLines(rule) {
   if (rule?.state === "locked") {
     const lines = ["", "💳 已创建待支付订单，请尽快前往猫眼付款"];
+    if (text(rule.orderId)) lines.push(`🧾 订单号：${text(rule.orderId)}`);
     if (rule.payLeftSecond !== null && rule.payLeftSecond !== undefined && Number.isFinite(Number(rule.payLeftSecond))) {
       lines.push(`⏳ 猫眼返回剩余支付时间：${Number(rule.payLeftSecond)} 秒`);
     }

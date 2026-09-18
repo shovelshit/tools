@@ -1,6 +1,11 @@
+# 本地会话文件与运行时产物(不入库)
 local/.maoyan-lock-session.json
+# H5Guard 逆向工作目录(SDK 文件 + 内嵌密钥的验证脚本, 不入库)
+local/h5guard/
 local/.maoyan-lock-profile/
 local/session.json
+local/maoyan-lock-session*.json
+local/bin/
 .wrangler/
 worker/public/
 worker/node_modules/

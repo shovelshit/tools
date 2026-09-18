@@ -1,7 +1,9 @@
 const SAFE_FIELDS = new Set([
   "phase", "state", "seatCount", "httpStatus",
   "errorName", "errorMessage", "reason", "contentType", "server",
-  "mitigation", "bodyLength", "responseHint"
+  "mitigation", "bodyLength", "responseHint",
+  "responseBody",
+  "attemptId", "endpoint", "seqNo", "durationMs", "responseType"
 ]);
 
 function clean(value, max = 160) {

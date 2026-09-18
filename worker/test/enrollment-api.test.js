@@ -7,6 +7,14 @@ const NOW = Date.parse("2026-09-16T04:00:00.000Z");
 const ORIGIN = "https://tools.example";
 const FINGERPRINT = "a".repeat(32);
 
+test("enrollment web entry defaults to Maoyan and preserves explicit deployment URLs", async () => {
+  const env = await enrollmentEnv();
+  const req = request("/api/enrollment/config");
+  assert.equal((await (await handleEnrollmentApi(req, env, new URL(req.url))).json()).webUrl, `${ORIGIN}/maoyan/`);
+  env.PUBLIC_WEB_URL = "https://custom.example/pages/maoyan/index.html";
+  assert.equal((await (await handleEnrollmentApi(req, env, new URL(req.url))).json()).webUrl, env.PUBLIC_WEB_URL);
+});
+
 async function enrollmentEnv() {
   const env = await createAccountEnv({ nowMs: NOW, maxUsers: 1 });
   env.NOW_MS = String(NOW);
