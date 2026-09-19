@@ -14,6 +14,24 @@ const RELEASE = {
   ]
 };
 
+test("source-only Gitee release falls back to GitHub installers", async () => {
+  resetReleaseCache();
+  const result = await getReleaseDownloads({}, { fetchImpl: async (url) => Response.json(
+    url.includes("gitee.com") ? { tag_name: "v1.2.4", html_url: "https://gitee.com/aka-ljf/tools/releases/tag/v1.2.4", assets: [{ name: "v1.2.4.zip", browser_download_url: "https://gitee.com/aka-ljf/tools/releases/download/v1.2.4/v1.2.4.zip" }] } : RELEASE
+  ) });
+  assert.equal(result.version, "1.2.3");
+  assert.equal(result.assets[0].name, "Maoyan-arm64.dmg");
+});
+
+test("Gitee missing html_url is reconstructed from its tag", async () => {
+  resetReleaseCache();
+  const result = await getReleaseDownloads({}, { fetchImpl: async () => Response.json({
+    tag_name: "v1.2.4", assets: [{ name: "maoyan-win-x64.exe", browser_download_url: "https://gitee.com/aka-ljf/tools/releases/download/v1.2.4/maoyan-win-x64.exe" }]
+  }) });
+  assert.equal(result.version, "1.2.4");
+  assert.equal(result.assets.length, 1);
+});
+
 test("release metadata accepts only official stable assets and pairs checksums", async () => {
   resetReleaseCache();
   const result = await getReleaseDownloads({}, {

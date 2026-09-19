@@ -12,13 +12,14 @@ export function resetReleaseCache() { cache = null; }
 function safeAsset(asset) {
   const name = String(asset?.name || "");
   const url = String(asset?.browser_download_url || "");
-  if (!/\.(?:dmg|zip|exe)$/i.test(name) || !(url.startsWith(DOWNLOAD_PREFIX) || url.startsWith(GITEE_DOWNLOAD_PREFIX))) return null;
+  if (!/\.(?:dmg|zip|exe)$/i.test(name) || !/(?:arm64|aarch64|x64|x86_64)/i.test(name) || !(url.startsWith(DOWNLOAD_PREFIX) || url.startsWith(GITEE_DOWNLOAD_PREFIX))) return null;
   return { name, url, size: Number(asset.size || 0), checksumUrl: null };
 }
 
-function normalizeRelease(release) {
+function normalizeRelease(release, apiUrl) {
   if (!release || release.draft === true || release.prerelease === true) throw new Error("release unavailable");
-  const releaseUrl = String(release.html_url || "");
+  const releaseUrl = String(release.html_url || (apiUrl === GITEE_API_URL && release.tag_name
+    ? `${GITEE_RELEASE_URL}/tag/${encodeURIComponent(release.tag_name)}` : ""));
   if (!(releaseUrl.startsWith(`${RELEASE_URL}/tag/`) || releaseUrl.startsWith(`${GITEE_RELEASE_URL}/tag/`))) throw new Error("release URL invalid");
   const rawAssets = Array.isArray(release.assets) ? release.assets : [];
   const checksums = new Map(rawAssets.filter((asset) => String(asset?.name || "").endsWith(".sha256"))
@@ -31,6 +32,7 @@ function normalizeRelease(release) {
     ...asset,
     checksumUrl: checksums.get(asset.name) || null
   }));
+  if (!assets.length) throw new Error("release has no desktop installers");
   return { releaseUrl, version: String(release.tag_name || "").replace(/^v/, ""), assets, stale: false };
 }
 
@@ -44,11 +46,14 @@ export async function getReleaseDownloads(_env, { fetchImpl = fetch, nowMs = Dat
           headers: { Accept: "application/vnd.github+json", "User-Agent": "shovelshit-tools-worker" },
           signal: AbortSignal.timeout(10_000)
         });
-        if (!response.ok) throw new Error("release request failed");
-        const value = normalizeRelease(await response.json());
+        if (!response.ok) throw new Error(`release request failed: HTTP ${response.status}`);
+        const value = normalizeRelease(await response.json(), apiUrl);
         cache = { measuredAt: nowMs, value, fetchImpl };
         return value;
-      } catch (error) { lastError = error; }
+      } catch (error) {
+        console.warn("release source unavailable", { source: new URL(apiUrl).hostname, reason: error.message });
+        lastError = error;
+      }
     }
     throw lastError || new Error("release request failed");
   } catch {
