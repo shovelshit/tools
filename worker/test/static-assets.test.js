@@ -17,6 +17,16 @@ async function walk(root, prefix = "") {
   return files.sort();
 }
 
+test("download page and its local dependencies are included in deployed assets", async () => {
+  const root = await mkdtemp(join(tmpdir(), "download-assets-"));
+  const target = join(root, "public");
+  await buildAssets({ target });
+  const files = await walk(target);
+  for (const name of ["download.html", "download.css", "download-page.js", "platform.js", "style.css"]) {
+    assert.ok(files.includes(`maoyan/${name}`), `missing download asset: ${name}`);
+  }
+});
+
 test("static asset build emits only the explicit application whitelist", async () => {
   const root = await mkdtemp(join(tmpdir(), "maoyan-assets-"));
   const target = join(root, "public");
