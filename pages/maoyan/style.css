@@ -953,7 +953,9 @@ summary:focus-visible {
 }
 
 .login-card h1 { margin-top: 3px; font-size: 19px; }
-.login-claim-link { display: block; margin-top: 10px; color: var(--success-dark); font-size: 12px; text-align: center; text-decoration: none; }
+.login-links { display: flex; justify-content: center; align-items: center; gap: 14px; margin-top: 10px; }
+.login-claim-link, .login-download-link { color: var(--success-dark); font-size: 12px; text-decoration: none; }
+.login-claim-link:hover, .login-download-link:hover { text-decoration: underline; }
 .login-claim-link:hover { text-decoration: underline; }
 .login-sub { margin: 5px 0 18px; color: var(--muted); font-size: 11px; }
 .login-grid { margin-bottom: 12px; }

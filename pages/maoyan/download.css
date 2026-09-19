@@ -1,0 +1,15 @@
+body.download-page { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+.download-shell { position: relative; z-index: 1; width: min(620px, 100%); padding: 30px; }
+.download-back { color: var(--muted); font-size: 12px; text-decoration: none; }
+.download-back:hover { color: var(--text); }
+.download-mark { display: grid; width: 42px; height: 42px; margin-top: 24px; place-items: center; border-radius: 9px; background: var(--primary); color: #fff; font-weight: 800; }
+.download-shell .eyebrow { margin: 14px 0 5px; color: var(--success-dark); font-size: 11px; letter-spacing: .08em; }
+.download-shell h1 { font-size: 28px; }
+.download-sub, .download-footnote { color: var(--muted); font-size: 13px; }
+.download-status { margin: 24px 0 10px; color: var(--muted); font-size: 12px; }
+.download-list { display: grid; gap: 8px; }
+.download-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--border-subtle); border-radius: 6px; background: rgba(7,11,14,.42); }
+.download-item strong { display: block; font-size: 13px; }.download-item small { color: var(--muted); font-size: 11px; }
+.download-item a { flex: 0 0 auto; color: var(--text); text-decoration: none; }.download-item a:hover { color: var(--success-dark); }
+.download-item.recommended { border-color: var(--primary); }.download-badge { color: var(--success-dark); font-size: 10px; }
+.download-footnote { margin-top: 18px; font-size: 11px; }
