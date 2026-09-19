@@ -130,6 +130,8 @@ jobs:
     permissions:
       actions: read
       contents: write
+    env:
+      GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
     steps:
       - name: Wait for earlier master releases
         env:
@@ -163,9 +165,8 @@ jobs:
           fi
           gh release edit "$RELEASE_TAG" --draft=false "$latest_flag" --repo "$GITHUB_REPOSITORY"
       - name: Mirror published assets to Gitee
-        if: ${{ secrets.GITEE_TOKEN != '' }}
+        if: env.GITEE_TOKEN != ''
         env:
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
           RELEASE_TAG: ${{ needs.prepare_release.outputs.tag }}
         shell: bash
         run: |
