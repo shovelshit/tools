@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getReleaseDownloads } from "../src/maoyan/releases.js";
+import { getReleaseDownloads, resetReleaseCache } from "../src/maoyan/releases.js";
 
 const RELEASE = {
   draft: false,
@@ -15,6 +15,7 @@ const RELEASE = {
 };
 
 test("release metadata accepts only official stable assets and pairs checksums", async () => {
+  resetReleaseCache();
   const result = await getReleaseDownloads({}, {
     nowMs: 1000,
     fetchImpl: async () => Response.json(RELEASE)
@@ -26,6 +27,7 @@ test("release metadata accepts only official stable assets and pairs checksums",
 });
 
 test("GitHub failure reuses the last verified list as stale", async () => {
+  resetReleaseCache();
   await getReleaseDownloads({}, { nowMs: 10_000, fetchImpl: async () => Response.json(RELEASE) });
   const stale = await getReleaseDownloads({}, {
     nowMs: 400_001,
@@ -36,6 +38,7 @@ test("GitHub failure reuses the last verified list as stale", async () => {
 });
 
 test("Gitee release is preferred when GitHub is unavailable", async () => {
+  resetReleaseCache();
   const calls = [];
   const result = await getReleaseDownloads({}, {
     nowMs: 900_000,
@@ -43,13 +46,13 @@ test("Gitee release is preferred when GitHub is unavailable", async () => {
       calls.push(url);
       if (url.includes("api.github.com")) return new Response("down", { status: 503 });
       return Response.json({ ...RELEASE,
-        html_url: "https://gitee.com/shovelshit/tools/releases/tag/v1.2.4",
+        html_url: "https://gitee.com/aka-ljf/tools/releases/tag/v1.2.4",
         tag_name: "v1.2.4",
-        assets: [{ name: "movie-monitor-win-x64.exe", browser_download_url: "https://gitee.com/shovelshit/tools/releases/download/v1.2.4/movie-monitor-win-x64.exe", size: 11 }]
+        assets: [{ name: "movie-monitor-win-x64.exe", browser_download_url: "https://gitee.com/aka-ljf/tools/releases/download/v1.2.4/movie-monitor-win-x64.exe", size: 11 }]
       });
     }
   });
   assert.equal(result.version, "1.2.4");
-  assert.equal(result.assets[0].url, "https://gitee.com/shovelshit/tools/releases/download/v1.2.4/movie-monitor-win-x64.exe");
+  assert.equal(result.assets[0].url, "https://gitee.com/aka-ljf/tools/releases/download/v1.2.4/movie-monitor-win-x64.exe");
   assert.equal(calls.length, 1);
 });

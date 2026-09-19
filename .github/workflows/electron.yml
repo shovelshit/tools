@@ -176,16 +176,16 @@ jobs:
           gitee_release_id="$(curl --fail-with-body -sS -X POST -H 'Accept: application/json' \
             -d "access_token=$GITEE_TOKEN" --data-urlencode "tag_name=$RELEASE_TAG" \
             --data-urlencode "name=Movie Monitor $RELEASE_TAG" --data-urlencode "target_commitish=$GITHUB_SHA" \
-            'https://gitee.com/api/v5/repos/shovelshit/tools/releases' | jq -r '.id // empty')"
+            'https://gitee.com/api/v5/repos/aka-ljf/tools/releases' | jq -r '.id // empty')"
           if [ -z "$gitee_release_id" ]; then
             gitee_release_id="$(curl --fail-with-body -sS -H 'Accept: application/json' \
-              "https://gitee.com/api/v5/repos/shovelshit/tools/releases/tags/$RELEASE_TAG?access_token=$GITEE_TOKEN" | jq -r '.id // empty')"
+              "https://gitee.com/api/v5/repos/aka-ljf/tools/releases/tags/$RELEASE_TAG?access_token=$GITEE_TOKEN" | jq -r '.id // empty')"
           fi
           if [ -z "$gitee_release_id" ]; then echo "Unable to create or find Gitee release $RELEASE_TAG" >&2; exit 1; fi
           for asset in "$RUNNER_TEMP/gitee-release"/*; do
             curl --fail-with-body -sS -X POST -H 'Accept: application/json' \
               -F "access_token=$GITEE_TOKEN" -F "file=@$asset" \
-              "https://gitee.com/api/v5/repos/shovelshit/tools/releases/$gitee_release_id/attach_files"
+              "https://gitee.com/api/v5/repos/aka-ljf/tools/releases/$gitee_release_id/attach_files"
           done
       - name: Mirror published assets to Gitee
         if: ${{ secrets.GITEE_TOKEN != '' }}

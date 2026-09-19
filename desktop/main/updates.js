@@ -1,5 +1,5 @@
 const GITHUB_RELEASES_API = "https://api.github.com/repos/shovelshit/tools/releases/latest";
-const GITEE_RELEASES_API = "https://gitee.com/api/v5/repos/shovelshit/tools/releases/latest";
+const GITEE_RELEASES_API = "https://gitee.com/api/v5/repos/aka-ljf/tools/releases/latest";
 const GITHUB_RELEASE_PREFIX = "/shovelshit/tools/releases/tag/";
 const GITEE_RELEASE_PREFIX = "/shovelshit/tools/releases/tag/";
 const MAX_RELEASE_NOTES_LENGTH = 4 * 1024;

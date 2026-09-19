@@ -1,11 +1,13 @@
 const API_URL = "https://api.github.com/repos/shovelshit/tools/releases/latest";
-const GITEE_API_URL = "https://gitee.com/api/v5/repos/shovelshit/tools/releases/latest";
+const GITEE_API_URL = "https://gitee.com/api/v5/repos/aka-ljf/tools/releases/latest";
 const RELEASE_URL = "https://github.com/shovelshit/tools/releases";
 const DOWNLOAD_PREFIX = "https://github.com/shovelshit/tools/releases/download/";
-const GITEE_RELEASE_URL = "https://gitee.com/shovelshit/tools/releases";
-const GITEE_DOWNLOAD_PREFIX = "https://gitee.com/shovelshit/tools/releases/download/";
+const GITEE_RELEASE_URL = "https://gitee.com/aka-ljf/tools/releases";
+const GITEE_DOWNLOAD_PREFIX = "https://gitee.com/aka-ljf/tools/releases/download/";
 const CACHE_MS = 5 * 60 * 1000;
 let cache = null;
+
+export function resetReleaseCache() { cache = null; }
 
 function safeAsset(asset) {
   const name = String(asset?.name || "");
@@ -33,7 +35,7 @@ function normalizeRelease(release) {
 }
 
 export async function getReleaseDownloads(_env, { fetchImpl = fetch, nowMs = Date.now() } = {}) {
-  if (cache && nowMs - cache.measuredAt < CACHE_MS) return { ...cache.value, stale: false };
+  if (cache && cache.fetchImpl === fetchImpl && nowMs - cache.measuredAt < CACHE_MS) return { ...cache.value, stale: false };
   try {
     let lastError;
     for (const apiUrl of [GITEE_API_URL, API_URL]) {
@@ -44,7 +46,7 @@ export async function getReleaseDownloads(_env, { fetchImpl = fetch, nowMs = Dat
         });
         if (!response.ok) throw new Error("release request failed");
         const value = normalizeRelease(await response.json());
-        cache = { measuredAt: nowMs, value };
+        cache = { measuredAt: nowMs, value, fetchImpl };
         return value;
       } catch (error) { lastError = error; }
     }
