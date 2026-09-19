@@ -5,7 +5,6 @@
   let config = null;
   let turnstileToken = "";
   let controller = null;
-  let downloadsLoaded = false;
 
   function show(name) {
     for (const view of views) $(`claim-${view}`).classList.toggle("hidden", view !== name);
@@ -48,7 +47,6 @@
       $("claim-expiry").textContent = state.expiresAt ? `有效期至 ${fmtTime(state.expiresAt)}` : "账号已生效";
       $("claim-storage-warning").classList.toggle("hidden", !state.ephemeral);
       $("claim-storage-warning").textContent = state.ephemeral ? "浏览器无法安全保存密钥，请立即复制；关闭页面后无法找回。" : "";
-      void loadDownloads();
       return;
     }
     if (state.name === "full") { show("unavailable"); return; }
@@ -62,33 +60,6 @@
       show("error");
       $("claim-error-text").textContent = "当前暂不可领取，请稍后重试";
     }
-  }
-
-  async function loadDownloads() {
-    if (downloadsLoaded || !window.selectDownloadOptions) return;
-    downloadsLoaded = true;
-    try {
-      const release = await api("/api/releases");
-      const platform = window.resolvePlatform
-        ? await window.resolvePlatform(navigator)
-        : window.detectPlatform({ userAgent: navigator.userAgent, platform: navigator.platform });
-      const selected = window.selectDownloadOptions(platform, release.assets, config?.webUrl || "");
-      const assets = [selected.recommended, ...selected.alternatives].filter(Boolean);
-      if (!assets.length) return;
-      const panel = $("claim-downloads");
-      const wrap = panel.querySelector(".claim-downloads");
-      wrap.innerHTML = "";
-      for (const [index, asset] of assets.entries()) {
-        const link = document.createElement("a");
-        link.href = asset.url;
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        const recommended = selected.recommended === asset;
-        link.textContent = `${recommended ? "推荐下载" : "桌面版本"}：${asset.name}`;
-        wrap.append(link);
-      }
-      panel.classList.remove("hidden");
-    } catch { downloadsLoaded = false; }
   }
 
   function loadTurnstile(siteKey) {
@@ -116,7 +87,6 @@
       config = await api("/api/enrollment/config");
       $("claim-subtitle").textContent = `${config.validDays} 天有效，名额有限`;
       $("claim-capacity").textContent = `剩余 ${config.capacity.remaining} / ${config.capacity.maxUsers} 个名额`;
-      void loadDownloads();
       controller = window.createClaimController({
         api,
         secureGet: window.secureGet,

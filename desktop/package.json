@@ -23,6 +23,7 @@
     "appId": "io.github.shovelshit.maoyan",
     "productName": "Movie Monitor",
     "asar": true,
+    "compression": "maximum",
     "npmRebuild": false,
     "directories": { "output": "dist", "buildResources": "assets" },
     "artifactName": "maoyan-${version}-${os}-${arch}.${ext}",
@@ -56,13 +57,13 @@
       "identity": "-",
       "icon": "icon.icns",
       "category": "public.app-category.utilities",
-      "target": [ { "target": "dmg", "arch": ["arm64", "x64"] }, { "target": "zip", "arch": ["arm64", "x64"] } ]
+      "target": [ { "target": "dmg", "arch": ["arm64", "x64"] } ]
     },
     "win": {
       "icon": "icon.ico",
       "signAndEditExecutable": true,
       "signExecutable": false,
-      "target": [ { "target": "nsis", "arch": ["x64"] }, { "target": "zip", "arch": ["x64"] } ]
+      "target": [ { "target": "nsis", "arch": ["x64"] } ]
     },
     "nsis": { "oneClick": false, "perMachine": false, "allowToChangeInstallationDirectory": true }
   }

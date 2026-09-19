@@ -22,12 +22,9 @@ body.claim-page { overflow: auto; min-height: 100vh; }
 .claim-warning { padding: 8px; border-left: 3px solid var(--warning); background: rgba(229, 171, 83, 0.1); color: #f1c778 !important; text-align: left; }
 .claim-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .claim-actions a { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
-.claim-downloads { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
-.claim-downloads-panel { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 14px; text-align: center; }
-.claim-downloads-panel h2 { margin: 0 0 4px; font-size: 16px; }
-.claim-downloads-panel p { margin: 0 0 8px; font-size: 12px; color: var(--muted); }
-.claim-downloads a { color: var(--success-dark); font-size: 11px; text-decoration: none; }
-.claim-downloads a:hover { text-decoration: underline; }
+.claim-download-link { margin: 14px 0 0; text-align: center; }
+.claim-download-link a { color: var(--success-dark); font-size: 11px; text-decoration: none; }
+.claim-download-link a:hover { text-decoration: underline; }
 .claim-existing { padding-top: 14px; border-top: 1px solid var(--border-subtle); }
 .claim-existing label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 11px; }
 .claim-existing > div { display: grid; grid-template-columns: 1fr auto; gap: 8px; }

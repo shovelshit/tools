@@ -7,7 +7,9 @@
     const release = await response.json();
     const platform = await window.resolvePlatform(navigator);
     const selected = window.selectDownloadOptions(platform, release.assets, "");
-    const assets = [selected.recommended, ...selected.alternatives].filter(Boolean);
+    const assets = [selected.recommended, ...selected.alternatives]
+      .filter(Boolean)
+      .filter((asset) => /\.(?:dmg|exe)$/i.test(asset.name));
     if (!assets.length) throw new Error("no assets");
     status.textContent = `当前版本 v${release.version || "最新"} · 已识别为 ${platform.os}${platform.arch !== "unknown" ? ` · ${platform.arch}` : ""}`;
     for (const asset of assets) {

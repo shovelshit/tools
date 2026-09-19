@@ -176,6 +176,7 @@ test("claim page stays compact and loads fingerprint code locally", () => {
   const html = fs.readFileSync(path.join(__dirname, "claim.html"), "utf8");
   const css = fs.readFileSync(path.join(__dirname, "claim.css"), "utf8");
   assert.match(html, /\/api\/assets\/thumbmark\.umd\.js\?v=1\.11\.0/);
+  assert.doesNotMatch(html, /claim-downloads/);
   assert.doesNotMatch(html, /src="vendor\/thumbmark\.umd\.js/);
   assert.doesNotMatch(html, /cdn\.jsdelivr|unpkg/);
   assert.match(css, /width:\s*min\(520px, calc\(100% - 32px\)\)/);

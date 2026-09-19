@@ -94,20 +94,20 @@ jobs:
         if: runner.os == 'macOS'
         working-directory: desktop/dist
         run: |
-          for asset in maoyan-*.dmg maoyan-*.zip; do
+          for asset in maoyan-*.dmg; do
             shasum -a 256 "$asset" > "$asset.sha256"
           done
       - name: Upload macOS release assets
         if: runner.os == 'macOS'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$RELEASE_TAG" desktop/dist/maoyan-*.dmg desktop/dist/maoyan-*.zip desktop/dist/maoyan-*.sha256 --clobber --repo "$GITHUB_REPOSITORY"
+        run: gh release upload "$RELEASE_TAG" desktop/dist/maoyan-*.dmg desktop/dist/maoyan-*.sha256 --clobber --repo "$GITHUB_REPOSITORY"
       - name: SHA-256 Windows release assets
         if: runner.os == 'Windows'
         shell: pwsh
         working-directory: desktop/dist
         run: |
-          Get-ChildItem -File | Where-Object { $_.Name -match '^maoyan-.*\.(exe|zip)$' } | ForEach-Object {
+          Get-ChildItem -File | Where-Object { $_.Name -match '^maoyan-.*\.exe$' } | ForEach-Object {
             $hashOutput = & certutil -hashfile $_.FullName SHA256
             if ($LASTEXITCODE -ne 0) { throw "certutil failed for $($_.Name)" }
             $hash = $hashOutput | Where-Object { $_ -match '^[0-9a-fA-F]{64}$' }
@@ -120,7 +120,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $assets = Get-ChildItem desktop/dist/maoyan-*.exe, desktop/dist/maoyan-*.zip, desktop/dist/maoyan-*.sha256 | ForEach-Object { $_.FullName }
+          $assets = Get-ChildItem desktop/dist/maoyan-*.exe, desktop/dist/maoyan-*.sha256 | ForEach-Object { $_.FullName }
           if (@($assets).Count -eq 0) { throw "No Windows release assets found" }
           gh release upload $env:RELEASE_TAG $assets --clobber --repo $env:GITHUB_REPOSITORY
 

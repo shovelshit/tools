@@ -49,9 +49,17 @@ test("release workflow never stores installers as Actions artifacts", () => {
   assert.match(packageJob, /Upload macOS release assets[\s\S]*?GH_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}/);
   assert.match(packageJob, /Upload Windows release assets[\s\S]*?GH_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}/);
   assert.match(workflow, /permissions:\s*\n\s+contents: read/);
+  assert.doesNotMatch(workflow, /maoyan-\*\.zip/);
   assert.match(workflow, /prepare_release:[\s\S]*?permissions:\s*\n\s+contents: write/);
   assert.match(workflow, /package_release:[\s\S]*?permissions:\s*\n\s+contents: write/);
   assert.match(workflow, /publish_release:[\s\S]*?permissions:\s*\n\s+contents: write/);
+});
+
+test("release page exposes only installable macOS and Windows packages", () => {
+  assert.equal(packageJson.build.compression, "maximum");
+  assert.match(workflow, /maoyan-\*\.dmg/);
+  assert.match(workflow, /maoyan-\*\.exe/);
+  assert.doesNotMatch(workflow, /\.zip/);
 });
 
 test("release verification runs every shared browser unit test", () => {
