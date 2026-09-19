@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>电影场次监控</title>
-  <link rel="stylesheet" href="style.css?v=20260917b" />
+  <link rel="stylesheet" href="style.css?v=20260920a" />
 </head>
 <body>
   <div id="ambient-background" class="ambient-background" aria-hidden="true">
@@ -32,7 +32,11 @@
       <button id="btn-connect" class="btn primary block" type="button">连接服务</button>
       <div class="login-links">
         <a class="login-claim-link enrollment-link" href="https://ltools.asia/maoyan/claim.html">没有访问密钥？前往领取</a>
-        <a class="login-download-link web-download-link" href="download.html">下载客户端</a>
+        <a class="login-download-link web-download-link" data-runtime-capability="downloads" href="download.html">下载客户端</a>
+      </div>
+      <div id="login-update-status" class="update-status hidden" data-runtime-capability="updates">
+        <span id="login-update-text" role="status"></span>
+        <button id="btn-login-check-update" class="btn small ghost" type="button">检查更新</button>
       </div>
     </section>
   </div>
@@ -50,13 +54,12 @@
           <div id="worker-profile" class="connection-state">配置：未连接</div>
           <div id="worker-security" class="connection-state">未连接</div>
         </div>
-        <div id="update-status" class="update-status"><span id="update-text">检查客户端更新</span><button id="btn-open-update" class="btn small ghost" type="button">检查更新</button></div>
-        <div id="update-result" class="update-result hidden" role="status"></div>
+        <div id="update-status" class="update-status hidden" data-runtime-capability="updates"><span id="update-text" role="status"></span><button id="btn-open-update" class="btn small ghost" type="button">检查更新</button></div>
         <div class="header-actions">
           <button id="btn-renew-account" class="btn small primary hidden" type="button">续期账号</button>
           <button id="btn-logout" class="btn small ghost" type="button">切换连接</button>
-          <a class="btn small ghost web-download-link" href="download.html">下载客户端</a>
-          <a class="btn small ghost" href="../">工具箱</a>
+          <a class="btn small ghost web-download-link" data-runtime-capability="downloads" href="download.html">下载客户端</a>
+          <a class="btn small ghost" data-runtime-capability="toolbox" href="../">工具箱</a>
         </div>
       </header>
 
@@ -333,12 +336,12 @@
       <script src="account.js?v=20260916b"></script>
       <script src="connection-profile.js?v=20260916a"></script>
       <script src="platform.js?v=20260916a"></script>
-      <script src="runtime.js?v=20260917b"></script>
+      <script src="runtime.js?v=20260920a"></script>
   <script src="secure-store.js?v=20260912b"></script>
   <script src="ui.js?v=20260915c"></script>
   <script src="workflow.js?v=20260916a"></script>
   <script src="polling.js?v=20260916a"></script>
   <script src="lock.js?v=20260917c"></script>
-  <script src="app.js?v=20260917b"></script>
+  <script src="app.js?v=20260920a"></script>
 </body>
 </html>

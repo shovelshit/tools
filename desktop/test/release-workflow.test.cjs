@@ -22,9 +22,7 @@ test("master pushes publish installers directly to a GitHub Release", () => {
   assert.match(workflow, /gh release create[^\n]*--draft/);
   assert.match(workflow, /npm --prefix desktop pkg set version=/);
   assert.match(workflow, /gh release upload/);
-  assert.match(workflow, /Mirror published assets to Gitee/);
-  assert.match(workflow, /secrets\.GITEE_TOKEN/);
-  assert.match(workflow, /gitee\.com\/api\/v5\/repos\/aka-ljf\/tools\/releases/);
+  assert.doesNotMatch(workflow, /gitee|GITEE|Gitee|R2/);
   assert.match(workflow, /gh release edit[^\n]*--draft=false[^\n]*"\$latest_flag"/);
   assert.match(workflow, /Set application version[\s\S]*?shell: bash[\s\S]*?npm --prefix desktop pkg set version=/);
   assert.match(workflow, /publish_release:[\s\S]*?permissions:\s*\n\s+actions: read\s*\n\s+contents: write/);

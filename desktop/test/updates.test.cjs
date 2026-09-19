@@ -5,7 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const { checkForUpdates, GITEE_RELEASES_API, isOfficialReleaseUrl, openExternal } = require("../main/updates");
+const { checkForUpdates, GITHUB_RELEASES_API, isOfficialReleaseUrl, openExternal } = require("../main/updates");
 
 function loadMain(electron = {
   app: { whenReady: () => new Promise(() => {}), on() {} },
@@ -96,7 +96,10 @@ test("update check accepts only the fixed GitHub release endpoint", async () => 
     notes: "notes",
     releaseUrl: "https://github.com/shovelshit/tools/releases/tag/v1.1.0"
   });
-  assert.deepEqual(calls, [{ url: GITEE_RELEASES_API, options: { redirect: "error" } }]);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, GITHUB_RELEASES_API);
+  assert.equal(calls[0].options.redirect, "error");
+  assert.ok(calls[0].options.signal instanceof AbortSignal);
 });
 
 test("update check rejects redirected or non-official releases without exposing failures", async () => {
@@ -109,7 +112,7 @@ test("update check rejects redirected or non-official releases without exposing 
     })
   });
 
-  assert.deepEqual(result, { available: false });
+  assert.deepEqual(result, { available: false, error: "unavailable" });
   assert.equal(isOfficialReleaseUrl("https://github.com/shovelshit/tools/releases/tag/v1.1.0"), true);
   assert.equal(isOfficialReleaseUrl("http://github.com/shovelshit/tools/releases/tag/v1.1.0"), false);
   assert.equal(isOfficialReleaseUrl("https://github.com/shovelshit/other/releases/tag/v1.1.0"), false);
@@ -321,4 +324,13 @@ test("automatic update checks persist their 24-hour timestamp across main instan
   now += 60 * 60 * 1000 + 1;
   await makeHandler()(event);
   assert.equal(checked, 2);
+  const manual = makeHandler();
+  await manual(event, { manual: true });
+  assert.equal(checked, 3, "manual checks must bypass the daily throttle");
+});
+
+test("failed update requests are not reported as latest", async () => {
+  const result = await checkForUpdates({ currentVersion: "1.0.0", fetchImpl: async () => { throw Error("network"); } });
+  assert.equal(result.error, "unavailable");
+  assert.equal(isOfficialReleaseUrl("https://gitee.com/shovelshit/tools/releases/tag/v1.0.0"), false);
 });

@@ -4,7 +4,7 @@
 
 ## 安装与首次连接
 
-从 [GitHub Releases](https://github.com/shovelshit/tools/releases) 下载与你的系统和架构相符的 DMG / ZIP，或 Windows 安装程序。所有发行包均未签名、未公证，macOS Gatekeeper 或 Windows SmartScreen 可能显示警告。核对发布者、版本和 SHA-256 后，再根据系统提示决定是否运行。
+从 [GitHub Releases](https://github.com/shovelshit/tools/releases) 下载与你的系统和架构相符的 macOS DMG 或 Windows EXE 安装程序，不再发布 ZIP。所有发行包均未经过开发者证书签名或公证，macOS Gatekeeper 或 Windows SmartScreen 可能显示警告。核对发布者、版本和 SHA-256 后，再根据系统提示决定是否运行。
 
 同一版本的 Assets 中应同时提供安装包和对应的 `.sha256` 文件。macOS 在下载目录执行 `shasum -a 256 -c <安装包名称>.sha256`；Windows 使用 `certutil -hashfile <安装包名称> SHA256`，将结果与 `.sha256` 文件中的摘要比较。摘要相同表示文件与发布附件一致，不能替代发行者身份验证。
 
@@ -24,13 +24,23 @@
 
 ## 更新
 
-客户端最多每天检查一次固定 GitHub 仓库的新版本，只显示提示和发行说明。点击更新链接后手动下载、校验并安装；不会后台下载、自动安装或修改当前应用。新版本同样可能触发未签名警告。
+登录页和主页面顶栏均显示当前版本与更新入口。客户端自动检查每天最多一次；手动“检查更新”不受每日缓存限制，同时发起的检查合并为一次请求。网络失败显示检查失败，不会误报最新版本。唯一来源是固定 GitHub 仓库，无镜像或对象存储依赖。
+
+点击“查看更新”确认后进入官方发行页，手动下载、校验并安装；不会后台下载、自动安装或修改当前应用。新版本同样可能触发未签名警告。
+
+## 两端边界
+
+`pages/maoyan/runtime.js` 适配 Web 与 Electron，`capabilities` 决定下载、更新和工具箱入口。业务页面不直接调用 IPC；特权操作经 `desktop/preload` 白名单交给主进程。可选桥接接口缺失时应降级，不影响核心监控功能。
+
+领取密钥在独立、隔离会话的 HTTPS 窗口进行，只允许领取页导航，没有特权 preload 或 Node 权限。重复点击聚焦同一窗口。领取后复制密钥、关闭窗口并回主页面连接；不自动传递密钥。客户端领取页隐藏已有密钥输入、下载链接和进入 Web 按钮；旧客户端没有领取窗口接口时回退系统浏览器。
+
+Web 静态资源和 Electron 包都从同一份页面源文件构建。Web 更新不会改变已安装客户端的本地页面；修改共享页面或主进程接口后，需要发布新客户端。在线领取页则随 Worker 部署更新。
 
 ## 开发与发行
 
 使用 Node.js 22.23.2，先执行 `npm --prefix desktop ci`。`npm --prefix desktop start` 启动本地客户端；`npm --prefix desktop test` 运行桌面单元和集成测试；`npm --prefix desktop run test:smoke` 使用临时用户配置启动真实 Electron 并连接本机模拟 Worker。浏览器跨视口验收使用 `npm --prefix desktop run test:e2e -- --output <仓库外绝对目录>`，需要 Chrome/Chromium，并将截图与检查结果写入指定目录。
 
-macOS 上执行 `npm --prefix desktop run package:mac` 生成 arm64 / x64 DMG 和 ZIP；Windows 上执行 `npm --prefix desktop run package:win` 生成 x64 NSIS 安装程序和 ZIP。追加 `-- --dir` 只构建应用目录。产物位于 `desktop/dist/`。构建后执行 `npm --prefix desktop run test:smoke -- --packaged`，检查本机架构的应用、asar 白名单、共享页面加载和 Worker 地址显示。
+macOS 上执行 `npm --prefix desktop run package:mac` 生成 arm64 / x64 DMG；Windows 上执行 `npm --prefix desktop run package:win` 生成 x64 NSIS 安装程序。追加 `-- --dir` 只构建应用目录。产物位于 `desktop/dist/`。构建后执行 `npm --prefix desktop run test:smoke -- --packaged`，检查本机架构的应用、asar 白名单、共享页面加载和 Worker 地址显示。
 
 CI 先运行 Worker、共享页面、桌面和浏览器跨视口验收。`master` 推送验证通过后创建草稿 Release，在 macOS 和 Windows runner 分别构建并启动本机架构应用，生成 SHA-256 并直接上传到该 Release；全部平台成功后才发布，失败则清理未完成草稿和标签。安装包不会上传为 Actions artifact，也不会自动安装到用户机器。
 

@@ -7,6 +7,7 @@ const { createWorkerClient } = require("./worker-client");
 const { createMaoyanLogin } = require("./maoyan-login");
 const { captureSession, normalizeUploadedSession, sanitizeError, safeError, publicLoginResult, publicSessionStatus } = require("./session-validation");
 const { checkForUpdates, openExternal } = require("./updates");
+const { createEnrollmentWindow } = require("./enrollment-window");
 
 // Keep installed profiles across the product rename; explicit test profiles take precedence.
 if (app.isPackaged && !app.commandLine.hasSwitch("user-data-dir")) {
@@ -120,11 +121,13 @@ async function uploadSessionFile({ dialog: fileDialog = dialog, workerClient, fs
 function registerIpcHandlers({ workerClient, createLogin = createMaoyanLogin, updateChecker = checkForUpdates, updatePreference, clock = Date.now } = {}) {
   const client = workerClient ?? createWorkerClient({ app, safeStorage, confirmHttp: confirmRemoteHttp });
   const logins = new Map();
+  const openEnrollment = createEnrollmentWindow({ BrowserWindow, session });
   const preference = updatePreference ?? (typeof app.getPath === "function"
     ? createUpdatePreference({ filePath: path.join(app.getPath("userData"), "update-preferences.json") }) : null);
   let latestReleaseUrl = "";
   let lastUpdateCheckAt = preference?.read?.() || 0;
-  let lastUpdateResult = { available: false };
+  let lastUpdateResult = { available: false, skipped: true };
+  let updateInFlight = null;
   let quitting = false;
   let cleanupComplete = false;
   const localPageUrl = pathToFileURL(pagePath).toString();
@@ -173,28 +176,28 @@ function registerIpcHandlers({ workerClient, createLogin = createMaoyanLogin, up
     if (!trustedSender(event)) return sanitizeError(safeError("unavailable"));
     return uploadSessionFile({ workerClient: client });
   });
-  ipcMain.handle("updates:check", async (event) => {
-    if (!trustedSender(event)) return { available: false };
+  ipcMain.handle("updates:check", async (event, options) => {
+    if (!trustedSender(event)) return { available: false, error: "unavailable" };
+    if (updateInFlight) return updateInFlight;
     const currentTime = clock();
-    if (!lastUpdateCheckAt || currentTime - lastUpdateCheckAt >= UPDATE_CHECK_INTERVAL_MS) {
-      lastUpdateCheckAt = currentTime;
-      preference?.write?.(lastUpdateCheckAt);
-      lastUpdateResult = await updateChecker({ currentVersion: app.getVersion?.() || "0.0.0" });
-      latestReleaseUrl = lastUpdateResult.available === true ? lastUpdateResult.releaseUrl : "";
+    if (options?.manual === true || !lastUpdateCheckAt || currentTime - lastUpdateCheckAt >= UPDATE_CHECK_INTERVAL_MS) {
+      updateInFlight = (async () => {
+        try { lastUpdateResult = await updateChecker({ currentVersion: app.getVersion?.() || "0.0.0" }); }
+        catch { lastUpdateResult = { available: false, error: "unavailable" }; }
+        if (!lastUpdateResult.error) {
+          lastUpdateCheckAt = currentTime;
+          preference?.write?.(lastUpdateCheckAt);
+        }
+        latestReleaseUrl = lastUpdateResult.available === true ? lastUpdateResult.releaseUrl : "";
+        return lastUpdateResult;
+      })();
+      try { return await updateInFlight; } finally { updateInFlight = null; }
     }
     return lastUpdateResult;
   });
   ipcMain.handle("enrollment:open", async (event) => {
     if (quitting || !trustedSender(event)) return { opened: false };
-    const enrollment = new BrowserWindow({
-      width: 620, height: 820, minWidth: 480, minHeight: 680,
-      parent: BrowserWindow.fromWebContents(event.sender),
-      title: "领取访问密钥",
-      webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true }
-    });
-    enrollment.setMenuBarVisibility(false);
-    enrollment.loadURL("https://ltools.asia/maoyan/claim.html");
-    return { opened: true };
+    return openEnrollment(BrowserWindow.fromWebContents(event.sender));
   });
   ipcMain.handle("external:open", async (event, input) => {
     if (!trustedSender(event)) return { opened: false };

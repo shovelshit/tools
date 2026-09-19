@@ -1,7 +1,5 @@
 const GITHUB_RELEASES_API = "https://api.github.com/repos/shovelshit/tools/releases/latest";
-const GITEE_RELEASES_API = "https://gitee.com/api/v5/repos/aka-ljf/tools/releases/latest";
 const GITHUB_RELEASE_PREFIX = "/shovelshit/tools/releases/tag/";
-const GITEE_RELEASE_PREFIX = "/shovelshit/tools/releases/tag/";
 const MAX_RELEASE_NOTES_LENGTH = 4 * 1024;
 const CLAIM_URL = "https://ltools.asia/maoyan/claim.html";
 const SETUP_URLS = new Set(["https://apps.apple.com/cn/app/id1403753865", "https://sct.ftqq.com/sendkey", CLAIM_URL]);
@@ -23,8 +21,7 @@ function isOfficialReleaseUrl(value) {
   try {
     const url = new URL(value);
     return url.protocol === "https:" && !url.username && !url.password && !url.search && !url.hash &&
-      ((url.hostname === "github.com" && url.pathname.startsWith(GITHUB_RELEASE_PREFIX)) ||
-       (url.hostname === "gitee.com" && url.pathname.startsWith(GITEE_RELEASE_PREFIX))) &&
+      (url.origin === "https://github.com" && url.pathname.startsWith(GITHUB_RELEASE_PREFIX)) &&
       url.pathname.length > GITHUB_RELEASE_PREFIX.length;
   } catch {
     return false;
@@ -36,7 +33,7 @@ function isFixedApiResponse(response) {
   try {
     const finalUrl = new URL(response.url);
     return finalUrl.protocol === "https:" && !finalUrl.username && !finalUrl.password &&
-      finalUrl.hostname === "api.github.com" && finalUrl.pathname === "/repos/shovelshit/tools/releases/latest" && !finalUrl.search && !finalUrl.hash;
+      finalUrl.origin === "https://api.github.com" && finalUrl.pathname === "/repos/shovelshit/tools/releases/latest" && !finalUrl.search && !finalUrl.hash;
   } catch {
     return false;
   }
@@ -45,22 +42,17 @@ function isFixedApiResponse(response) {
 async function checkForUpdates({ currentVersion, fetchImpl = globalThis.fetch } = {}) {
   try {
     const current = normalizeVersion(currentVersion);
-    if (!current || typeof fetchImpl !== "function") return { available: false };
-    for (const apiUrl of [GITEE_RELEASES_API, GITHUB_RELEASES_API]) {
-      try {
-        const response = await fetchImpl(apiUrl, { redirect: "error" });
-        if (!response?.ok || (apiUrl === GITHUB_RELEASES_API && !isFixedApiResponse(response))) continue;
-        const release = await response.json();
-        const version = normalizeVersion(release?.tag_name);
-        const releaseUrl = typeof release?.html_url === "string" ? release.html_url : "";
-        if (!version || !isOfficialReleaseUrl(releaseUrl)) continue;
-        if (compareVersions(version, current) <= 0) return { available: false };
-        return { available: true, version: version.join("."), notes: typeof release.body === "string" ? release.body.slice(0, MAX_RELEASE_NOTES_LENGTH) : "", releaseUrl };
-      } catch { /* Try the next official mirror. */ }
-    }
-    return { available: false };
+    if (!current || typeof fetchImpl !== "function") throw new Error("invalid version");
+    const response = await fetchImpl(GITHUB_RELEASES_API, { redirect: "error", signal: AbortSignal.timeout(10_000) });
+    if (!response?.ok || !isFixedApiResponse(response)) throw new Error("request failed");
+    const release = await response.json();
+    const version = normalizeVersion(release?.tag_name);
+    const releaseUrl = typeof release?.html_url === "string" ? release.html_url : "";
+    if (!version || !isOfficialReleaseUrl(releaseUrl) || release.draft || release.prerelease) throw new Error("invalid release");
+    if (compareVersions(version, current) <= 0) return { available: false };
+    return { available: true, version: version.join("."), notes: typeof release.body === "string" ? release.body.slice(0, MAX_RELEASE_NOTES_LENGTH) : "", releaseUrl };
   } catch {
-    return { available: false };
+    return { available: false, error: "unavailable" };
   }
 }
 
@@ -89,7 +81,6 @@ async function openExternal(url, { shell, approvedUrls, workerProfile } = {}) {
 
 module.exports = {
   GITHUB_RELEASES_API,
-  GITEE_RELEASES_API,
   checkForUpdates,
   isOfficialReleaseUrl,
   normalizeVersion,

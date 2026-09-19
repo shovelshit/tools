@@ -1,5 +1,9 @@
 (async function () {
   const $ = (id) => document.getElementById(id);
+  const desktop = new URL(location.href).searchParams.get("client") === "desktop";
+  for (const id of ["claim-existing", "claim-download-link", "btn-enter-web"]) {
+    $(id)?.classList.toggle("hidden", desktop);
+  }
   const workerUrl = location.origin.replace(/\/$/, "");
   const views = ["loading", "idle", "working", "active", "unavailable", "error"];
   let config = null;

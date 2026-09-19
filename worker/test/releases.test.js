@@ -14,22 +14,16 @@ const RELEASE = {
   ]
 };
 
-test("source-only Gitee release falls back to GitHub installers", async () => {
+test("downloads query only GitHub and reject source-only releases", async () => {
   resetReleaseCache();
-  const result = await getReleaseDownloads({}, { fetchImpl: async (url) => Response.json(
-    url.includes("gitee.com") ? { tag_name: "v1.2.4", html_url: "https://gitee.com/aka-ljf/tools/releases/tag/v1.2.4", assets: [{ name: "v1.2.4.zip", browser_download_url: "https://gitee.com/aka-ljf/tools/releases/download/v1.2.4/v1.2.4.zip" }] } : RELEASE
-  ) });
-  assert.equal(result.version, "1.2.3");
-  assert.equal(result.assets[0].name, "Maoyan-arm64.dmg");
-});
-
-test("Gitee missing html_url is reconstructed from its tag", async () => {
-  resetReleaseCache();
-  const result = await getReleaseDownloads({}, { fetchImpl: async () => Response.json({
-    tag_name: "v1.2.4", assets: [{ name: "maoyan-win-x64.exe", browser_download_url: "https://gitee.com/aka-ljf/tools/releases/download/v1.2.4/maoyan-win-x64.exe" }]
-  }) });
-  assert.equal(result.version, "1.2.4");
-  assert.equal(result.assets.length, 1);
+  const calls = [];
+  const result = await getReleaseDownloads({}, { fetchImpl: async url => {
+    calls.push(url);
+    return Response.json({ ...RELEASE, assets: [] });
+  } });
+  assert.deepEqual(calls, ["https://api.github.com/repos/shovelshit/tools/releases/latest"]);
+  assert.equal(result.stale, true);
+  assert.equal(result.assets.length, 0);
 });
 
 test("release metadata accepts only official stable assets and pairs checksums", async () => {
@@ -55,22 +49,17 @@ test("GitHub failure reuses the last verified list as stale", async () => {
   assert.equal(stale.assets.length, 1);
 });
 
-test("Gitee release is preferred when GitHub is unavailable", async () => {
+test("GitHub outage returns a release-page fallback without alternate providers", async () => {
   resetReleaseCache();
   const calls = [];
   const result = await getReleaseDownloads({}, {
     nowMs: 900_000,
     fetchImpl: async (url) => {
       calls.push(url);
-      if (url.includes("api.github.com")) return new Response("down", { status: 503 });
-      return Response.json({ ...RELEASE,
-        html_url: "https://gitee.com/aka-ljf/tools/releases/tag/v1.2.4",
-        tag_name: "v1.2.4",
-        assets: [{ name: "movie-monitor-win-x64.exe", browser_download_url: "https://gitee.com/aka-ljf/tools/releases/download/v1.2.4/movie-monitor-win-x64.exe", size: 11 }]
-      });
+      return new Response("down", { status: 503 });
     }
   });
-  assert.equal(result.version, "1.2.4");
-  assert.equal(result.assets[0].url, "https://gitee.com/aka-ljf/tools/releases/download/v1.2.4/movie-monitor-win-x64.exe");
+  assert.equal(result.version, null);
+  assert.equal(result.releaseUrl, "https://github.com/shovelshit/tools/releases");
   assert.equal(calls.length, 1);
 });

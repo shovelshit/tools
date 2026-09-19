@@ -12,6 +12,20 @@ function loadRuntime(windowOverrides = {}) {
   return window;
 }
 
+test("runtime capabilities isolate downloads and native controls with old-bridge fallback", async () => {
+  const opened = [];
+  const scope = loadRuntime({ location: { href: "" } });
+  const web = scope.createWebRuntime();
+  assert.equal(web.capabilities.downloads, true);
+  assert.equal(web.capabilities.updates, false);
+  await web.openEnrollment();
+  assert.equal(scope.location.href, "https://ltools.asia/maoyan/claim.html");
+  const native = scope.createElectronRuntime({ bridge: { openExternal: async url => { opened.push(url); return { opened: true }; } } });
+  assert.equal(native.capabilities.downloads, false);
+  await native.openEnrollment();
+  assert.deepEqual(opened, ["https://ltools.asia/maoyan/claim.html"]);
+});
+
 test("web runtime sends relative API requests with the token header", async () => {
   const { createWebRuntime } = loadRuntime();
   const requests = [];

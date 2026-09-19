@@ -219,6 +219,9 @@ async function main() {
     page.on("pageerror", (error) => errors.push(error.message));
     page.on("dialog", (dialog) => dialog.accept());
     await page.goto(`${web.url}/maoyan/index.html`);
+    await page.waitForFunction(() => window.maoyanRuntime?.kind === "web");
+    assert.equal(await page.locator("#login-update-status").isVisible(), false);
+    assert.equal(await page.locator('.login-links [data-runtime-capability="downloads"]').isVisible(), true);
     await page.locator("#worker-url").fill(`${web.url}/one`);
     await page.locator("#token-input").fill("one-token");
     await page.locator("#btn-connect").click();

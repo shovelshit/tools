@@ -344,7 +344,7 @@ summary {
 }
 
 html[data-runtime="web"] .update-status { display: none; }
-.update-result { color: var(--muted); font-size: 10px; }
+#login-update-status { margin-top: 12px; justify-content: center; flex-wrap: wrap; }
 
 .header-actions a {
   text-decoration: none;

@@ -20,7 +20,6 @@ const els = {
   updateStatus: $("update-status"),
   updateText: $("update-text"),
   btnOpenUpdate: $("btn-open-update"),
-  updateResult: $("update-result"),
   btnRenewAccount: $("btn-renew-account"),
   btnLogout: $("btn-logout"),
   // 影院设置
@@ -298,53 +297,63 @@ function setConnectionState({ profileKey = "", workerUrl = "" } = {}) {
 }
 
 function renderDesktopUpdate(update) {
-  if (!els.updateStatus || !els.updateText || !els.btnOpenUpdate) return;
-  const electron = runtimeInfo.kind === "electron";
-  els.updateStatus.classList.toggle("hidden", !electron);
-  if (!electron) return;
-  if (update?.available === true && typeof update.releaseUrl === "string") {
-    els.updateText.textContent = `发现新版本 v${update.version}`;
-    els.btnOpenUpdate.textContent = "查看更新";
-    els.btnOpenUpdate.dataset.releaseUrl = update.releaseUrl;
-  } else {
-    els.updateText.textContent = "已是最新版本";
-    els.btnOpenUpdate.textContent = "检查更新";
-    delete els.btnOpenUpdate.dataset.releaseUrl;
+  const supported = window.maoyanRuntime.capabilities?.updates === true;
+  const available = update?.available === true && typeof update.releaseUrl === "string";
+  for (const [panelId, textId, buttonId] of [
+    ["update-status", "update-text", "btn-open-update"],
+    ["login-update-status", "login-update-text", "btn-login-check-update"]
+  ]) {
+    const panel = $(panelId), label = $(textId), button = $(buttonId);
+    if (!panel || !label || !button) continue;
+    panel.classList.toggle("hidden", !supported);
+    label.textContent = available ? `发现新版本 v${update.version}` : update?.error
+      ? "检查失败，请稍后重试" : update?.skipped ? "可手动检查更新" : "已是最新版本";
+    button.textContent = available ? "查看更新" : "检查更新";
+    if (available) button.dataset.releaseUrl = update.releaseUrl;
+    else delete button.dataset.releaseUrl;
   }
 }
 
-async function checkForDesktopUpdate() {
-  if (runtimeInfo.kind !== "electron") return;
+let updateCheckInFlight = false;
+async function checkForDesktopUpdate(manual = false) {
+  if (!window.maoyanRuntime.capabilities?.updates || updateCheckInFlight) return;
+  updateCheckInFlight = true;
+  const buttons = [$("btn-open-update"), $("btn-login-check-update")].filter(Boolean);
+  buttons.forEach(button => { button.disabled = true; });
   try {
-    renderDesktopUpdate(await window.maoyanRuntime.checkForUpdates());
+    renderDesktopUpdate(await window.maoyanRuntime.checkForUpdates({ manual }));
   } catch {
-    renderDesktopUpdate({ available: false });
+    renderDesktopUpdate({ available: false, error: "unavailable" });
+  } finally {
+    updateCheckInFlight = false;
+    buttons.forEach(button => { button.disabled = false; });
   }
 }
 
-els.btnOpenUpdate?.addEventListener("click", async () => {
-  if (runtimeInfo.kind !== "electron") return;
-  const update = await window.maoyanRuntime.checkForUpdates();
-  renderDesktopUpdate(update);
-  const releaseUrl = update?.releaseUrl || els.btnOpenUpdate.dataset.releaseUrl;
-  if (!releaseUrl) {
-    els.updateResult?.classList.remove("hidden");
-    if (els.updateResult) els.updateResult.textContent = "当前已是最新版本";
-    return;
-  }
+async function onUpdateClick(event) {
+  if (!window.maoyanRuntime.capabilities?.updates) return;
+  const releaseUrl = event.currentTarget.dataset.releaseUrl;
+  if (!releaseUrl) return checkForDesktopUpdate(true);
   const accepted = await window.showConfirm("本应用未经签名验证；请仅从官方 GitHub Releases 页面下载更新。", {
     title: "查看更新", okText: "打开官方页面", cancelText: "取消"
   });
-  if (accepted) await window.maoyanRuntime.openExternal(releaseUrl);
-});
+  if (accepted) {
+    try { await window.maoyanRuntime.openExternal(releaseUrl); }
+    catch { showToast("无法打开更新页面", "error"); }
+  }
+}
+els.btnOpenUpdate?.addEventListener("click", onUpdateClick);
+$("btn-login-check-update")?.addEventListener("click", onUpdateClick);
 
 function bindSetupLinks() {
   document.querySelectorAll("a.enrollment-link").forEach((link) => {
     link.addEventListener("click", async (event) => {
-      if (runtimeInfo.kind !== "electron" || typeof window.maoyanRuntime.openEnrollment !== "function") return;
+      if (typeof window.maoyanRuntime.openEnrollment !== "function") return;
       event.preventDefault();
-      const result = await window.maoyanRuntime.openEnrollment();
-      if (result?.opened === false) showToast("无法打开领取页面", "error");
+      try {
+        const result = await window.maoyanRuntime.openEnrollment();
+        if (result?.opened === false) showToast("无法打开领取页面", "error");
+      } catch { showToast("无法打开领取页面", "error"); }
     });
   });
   document.querySelectorAll("a[data-external-link]").forEach((link) => {
@@ -1458,6 +1467,10 @@ function syncCronInfo(data) {
     if (typeof setRuntimeDataset === "function") setRuntimeDataset(runtimeInfo.kind);
   }
   bindSetupLinks();
+  document.querySelectorAll("[data-runtime-capability]").forEach(element => {
+    element.classList.toggle("hidden", window.maoyanRuntime.capabilities?.[element.dataset.runtimeCapability] !== true);
+  });
+  renderDesktopUpdate({ skipped: true });
   void checkForDesktopUpdate();
   // 排查"刷新后回到登录页": 本机存储 / WebCrypto / 安全上下文 是否可用
   function probeEnv() {

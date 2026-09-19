@@ -29,6 +29,10 @@ async function main() {
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.waitForFunction(() => window.maoyanRuntime?.kind === "electron");
+    await page.waitForFunction(() => document.querySelector("#app-version")?.textContent.includes("v"));
+    assert.equal(await page.locator("#login-update-status").isVisible(), true);
+    assert.equal(await page.locator("#btn-login-check-update").isVisible(), true);
+    assert.equal(await page.locator('.login-links [data-runtime-capability="downloads"]').isVisible(), false);
     assert.equal(await page.title(), "电影场次监控");
     const mainPageUrl = page.url();
     assert.match(page.url(), /file:.*\/pages\/maoyan\/index\.html$/);
@@ -40,6 +44,8 @@ async function main() {
     await page.waitForFunction(() => /one-user|127\.0\.0\.1/.test(document.querySelector("#worker-profile")?.textContent || ""));
     await page.waitForFunction(() => document.querySelector("#block-overlay")?.classList.contains("hidden") ?? true);
     assert.equal(await page.locator("#main-page").isVisible(), true);
+    assert.equal(await page.locator("#update-status").isVisible(), true);
+    assert.equal(await page.locator('[data-runtime-capability="toolbox"]').isVisible(), false);
     assert.equal(await page.locator("#ambient-background").count(), 1);
     assert.equal(await page.locator("[data-workflow-step]").count(), 4);
     assert.equal(await page.locator(".workflow-shell > .glass-panel").count(), 2);

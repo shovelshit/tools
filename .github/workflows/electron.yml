@@ -130,14 +130,13 @@ jobs:
     permissions:
       actions: read
       contents: write
-    env:
-      GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
       - name: Wait for earlier master releases
+        timeout-minutes: 30
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
@@ -168,43 +167,6 @@ jobs:
             latest_flag="--latest=false"
           fi
           gh release edit "$RELEASE_TAG" --draft=false "$latest_flag" --repo "$GITHUB_REPOSITORY"
-      - name: Mirror published assets to Gitee
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ needs.prepare_release.outputs.tag }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -z "$GITEE_TOKEN" ]; then echo "GITEE_TOKEN is not configured; skipping Gitee mirror"; exit 0; fi
-          # Push only this immutable release tag, never overwrite Gitee branches.
-          gitee_auth="$(printf 'oauth2:%s' "$GITEE_TOKEN" | base64 | tr -d '\n')"
-          echo "::add-mask::$gitee_auth"
-          git -c "http.https://gitee.com/.extraheader=Authorization: Basic $gitee_auth" \
-            push https://gitee.com/aka-ljf/tools.git "$GITHUB_SHA:refs/tags/$RELEASE_TAG"
-          mkdir -p "$RUNNER_TEMP/gitee-release"
-          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/gitee-release" --clobber
-          gitee_release_id=""
-          if response="$(curl --fail-with-body -sS -H 'Accept: application/json' \
-            "https://gitee.com/api/v5/repos/aka-ljf/tools/releases/tags/$RELEASE_TAG?access_token=$GITEE_TOKEN")"; then
-            gitee_release_id="$(printf '%s' "$response" | jq -r '.id // empty')"
-          fi
-          if [ -z "$gitee_release_id" ]; then
-            if ! response="$(curl --fail-with-body -sS -X POST -H 'Accept: application/json' \
-              -d "access_token=$GITEE_TOKEN" --data-urlencode "tag_name=$RELEASE_TAG" \
-              --data-urlencode "name=Movie Monitor $RELEASE_TAG" --data-urlencode "body=Movie Monitor desktop release $RELEASE_TAG" \
-              --data-urlencode "target_commitish=$GITHUB_SHA" \
-              'https://gitee.com/api/v5/repos/aka-ljf/tools/releases')"; then
-              printf 'Gitee release creation failed: %s\n' "$response" >&2
-              exit 1
-            fi
-            gitee_release_id="$(printf '%s' "$response" | jq -r '.id // empty')"
-          fi
-          if [ -z "$gitee_release_id" ]; then echo "Unable to create or find Gitee release $RELEASE_TAG" >&2; exit 1; fi
-          for asset in "$RUNNER_TEMP/gitee-release"/*; do
-            curl --fail-with-body -sS -X POST -H 'Accept: application/json' \
-              -F "access_token=$GITEE_TOKEN" -F "file=@$asset" \
-              "https://gitee.com/api/v5/repos/aka-ljf/tools/releases/$gitee_release_id/attach_files"
-          done
   cleanup_release:
     needs: [prepare_release, package_release, publish_release]
     if: ${{ always() && needs.prepare_release.result != 'skipped' && needs.prepare_release.outputs.tag != '' && needs.publish_release.result != 'success' }}

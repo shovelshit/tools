@@ -53,8 +53,8 @@ async function startWebApp({ savedWorker, requestedWorker, savedToken = "token-a
   window.maoyanRuntime.openExternal = async (url) => { opened.push(url); return { opened: true }; };
   const context = {
     window, URL, URLSearchParams, location, els, DEFAULT_WORKER: "https://ltools.asia", SAME_ORIGIN: false,
-    document: { querySelectorAll: () => links },
-    runtimeInfo: { kind: "web" }, tokenProfileKey: "", updateBatchTip() {}, checkForDesktopUpdate() {}, showLoginHint() {},
+    document: { querySelectorAll: (selector) => selector === "a[data-external-link]" ? links : [] },
+    runtimeInfo: { kind: "web" }, tokenProfileKey: "", updateBatchTip() {}, checkForDesktopUpdate() {}, renderDesktopUpdate() {}, showLoginHint() {},
     console: { warn() {} },
     localStorage: { getItem: (key) => entries.get(key) ?? null, setItem: (key, value) => entries.set(key, value), removeItem: (key) => entries.delete(key) },
     secureGet: async (key) => entries.get(key) ?? "",
@@ -480,9 +480,37 @@ test("Electron shows an official update affordance and keeps the HTTP warning vi
   const html = readSource("index.html");
   assert.match(html, /id="update-status"/);
   assert.match(html, /id="btn-open-update"/);
-  assert.match(source, /async function checkForDesktopUpdate\(\)/);
-  assert.match(source, /window\.maoyanRuntime\.checkForUpdates\(\)/);
+  assert.match(source, /async function checkForDesktopUpdate\(manual = false\)/);
+  assert.match(source, /window\.maoyanRuntime\.checkForUpdates\(\{ manual \}\)/);
   assert.match(source, /未经签名验证/);
   assert.match(source, /window\.maoyanRuntime\.openExternal\(releaseUrl\)/);
   assert.match(source, /不安全 HTTP 连接/);
+});
+
+test("both update controls distinguish failure, skipped, current and new releases", async () => {
+  const source = readSource("app.js");
+  const elements = new Map();
+  const $ = (id) => {
+    if (!elements.has(id)) elements.set(id, { dataset: {}, classList: { toggle(_key, value) { this.hidden = value; } } });
+    return elements.get(id);
+  };
+  const requests = [];
+  const runtime = { capabilities: { updates: true }, checkForUpdates: async options => { requests.push(options); return { error: "unavailable" }; } };
+  const context = { $, window: { maoyanRuntime: runtime } };
+  require("node:vm").runInNewContext(source.slice(source.indexOf("function renderDesktopUpdate("), source.indexOf("async function onUpdateClick(")), context);
+  for (const [result, label] of [
+    [{ skipped: true }, "可手动检查更新"], [{ error: "unavailable" }, "检查失败，请稍后重试"],
+    [{ available: false }, "已是最新版本"], [{ available: true, version: "1.2.3", releaseUrl: "https://github.com/shovelshit/tools/releases/tag/v1.2.3" }, "发现新版本 v1.2.3"]
+  ]) {
+    context.renderDesktopUpdate(result);
+    assert.equal($("update-text").textContent, label);
+    assert.equal($("login-update-text").textContent, label);
+  }
+  await context.checkForDesktopUpdate(true);
+  assert.equal(requests[0].manual, true);
+  assert.equal($("btn-open-update").dataset.releaseUrl, undefined);
+  assert.equal($("btn-login-check-update").disabled, false);
+  runtime.capabilities.updates = false;
+  context.renderDesktopUpdate({});
+  assert.equal($("login-update-status").classList.hidden, true);
 });

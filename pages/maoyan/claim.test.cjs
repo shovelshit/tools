@@ -20,7 +20,7 @@ function fakeElement() {
   };
 }
 
-async function loadClaimPage(config, { restorePending = async () => false, fetchError = null } = {}) {
+async function loadClaimPage(config, { restorePending = async () => false, fetchError = null, desktop = false } = {}) {
   const elements = new Map();
   const turnstileScripts = [];
   const document = {
@@ -43,7 +43,7 @@ async function loadClaimPage(config, { restorePending = async () => false, fetch
   };
   const context = {
     window, document,
-    location: { origin: "https://worker.test", href: "https://worker.test/maoyan/claim.html", reload() {} },
+    location: { origin: "https://worker.test", href: `https://worker.test/maoyan/claim.html${desktop ? '?client=desktop' : ''}`, reload() {} },
     fetch: async () => {
       if (fetchError) throw fetchError;
       return { ok: true, json: async () => config };
@@ -55,6 +55,15 @@ async function loadClaimPage(config, { restorePending = async () => false, fetch
   await vm.runInNewContext(source, context, { filename: "claim-page.js" });
   return { elements, turnstileScripts };
 }
+
+test("desktop enrollment hides existing-key, download and web navigation", async () => {
+  for (const desktop of [false, true]) {
+    const page = await loadClaimPage(null, { desktop, fetchError: new Error("offline") });
+    for (const id of ["claim-existing", "claim-download-link", "btn-enter-web"]) {
+      assert.equal(page.elements.get(id)?.classList.contains("hidden"), desktop);
+    }
+  }
+});
 
 function fixture(overrides = {}) {
   const values = new Map();
