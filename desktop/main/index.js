@@ -146,7 +146,7 @@ function registerIpcHandlers({ workerClient, createLogin = createMaoyanLogin, up
     logins.set(sender, entry);
     return entry;
   }
-  ipcMain.handle("runtime:get-info", () => ({ kind: "electron", canLoginMaoyan: true, status: "ready" }));
+  ipcMain.handle("runtime:get-info", () => ({ kind: "electron", canLoginMaoyan: true, status: "ready", version: app.getVersion?.() || "0.0.0" }));
   ipcMain.handle("worker:connect", (_event, input) => client.connectWorker(input));
   ipcMain.handle("worker:request", (_event, input) => {
     if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("请求参数无效");

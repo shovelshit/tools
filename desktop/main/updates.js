@@ -1,7 +1,10 @@
 const GITHUB_RELEASES_API = "https://api.github.com/repos/shovelshit/tools/releases/latest";
+const GITEE_RELEASES_API = "https://gitee.com/api/v5/repos/shovelshit/tools/releases/latest";
 const GITHUB_RELEASE_PREFIX = "/shovelshit/tools/releases/tag/";
+const GITEE_RELEASE_PREFIX = "/shovelshit/tools/releases/tag/";
 const MAX_RELEASE_NOTES_LENGTH = 4 * 1024;
-const SETUP_URLS = new Set(["https://apps.apple.com/cn/app/id1403753865", "https://sct.ftqq.com/sendkey"]);
+const CLAIM_URL = "https://ltools.asia/maoyan/claim.html";
+const SETUP_URLS = new Set(["https://apps.apple.com/cn/app/id1403753865", "https://sct.ftqq.com/sendkey", CLAIM_URL]);
 
 function normalizeVersion(value) {
   const match = typeof value === "string" && value.trim().match(/^v?(\d+)\.(\d+)\.(\d+)$/i);
@@ -19,9 +22,10 @@ function compareVersions(left, right) {
 function isOfficialReleaseUrl(value) {
   try {
     const url = new URL(value);
-    return url.protocol === "https:" && !url.username && !url.password &&
-      url.hostname === "github.com" && !url.search && !url.hash &&
-      url.pathname.startsWith(GITHUB_RELEASE_PREFIX) && url.pathname.length > GITHUB_RELEASE_PREFIX.length;
+    return url.protocol === "https:" && !url.username && !url.password && !url.search && !url.hash &&
+      ((url.hostname === "github.com" && url.pathname.startsWith(GITHUB_RELEASE_PREFIX)) ||
+       (url.hostname === "gitee.com" && url.pathname.startsWith(GITEE_RELEASE_PREFIX))) &&
+      url.pathname.length > GITHUB_RELEASE_PREFIX.length;
   } catch {
     return false;
   }
@@ -42,18 +46,19 @@ async function checkForUpdates({ currentVersion, fetchImpl = globalThis.fetch } 
   try {
     const current = normalizeVersion(currentVersion);
     if (!current || typeof fetchImpl !== "function") return { available: false };
-    const response = await fetchImpl(GITHUB_RELEASES_API, { redirect: "error" });
-    if (!response?.ok || !isFixedApiResponse(response)) return { available: false };
-    const release = await response.json();
-    const version = normalizeVersion(release?.tag_name);
-    const releaseUrl = typeof release?.html_url === "string" ? release.html_url : "";
-    if (!version || !isOfficialReleaseUrl(releaseUrl) || compareVersions(version, current) <= 0) return { available: false };
-    return {
-      available: true,
-      version: version.join("."),
-      notes: typeof release.body === "string" ? release.body.slice(0, MAX_RELEASE_NOTES_LENGTH) : "",
-      releaseUrl
-    };
+    for (const apiUrl of [GITEE_RELEASES_API, GITHUB_RELEASES_API]) {
+      try {
+        const response = await fetchImpl(apiUrl, { redirect: "error" });
+        if (!response?.ok || (apiUrl === GITHUB_RELEASES_API && !isFixedApiResponse(response))) continue;
+        const release = await response.json();
+        const version = normalizeVersion(release?.tag_name);
+        const releaseUrl = typeof release?.html_url === "string" ? release.html_url : "";
+        if (!version || !isOfficialReleaseUrl(releaseUrl)) continue;
+        if (compareVersions(version, current) <= 0) return { available: false };
+        return { available: true, version: version.join("."), notes: typeof release.body === "string" ? release.body.slice(0, MAX_RELEASE_NOTES_LENGTH) : "", releaseUrl };
+      } catch { /* Try the next official mirror. */ }
+    }
+    return { available: false };
   } catch {
     return { available: false };
   }
@@ -66,7 +71,7 @@ function validateExternalUrl(value, { approvedUrls = [], workerProfile } = {}) {
   const normalized = url.toString();
   const approved = isOfficialReleaseUrl(normalized) || SETUP_URLS.has(normalized) || approvedUrls.includes(normalized);
   if (!approved) return null;
-  if (workerProfile?.baseUrl) {
+  if (workerProfile?.baseUrl && normalized !== CLAIM_URL) {
     try {
       const workerUrl = new URL(workerProfile.baseUrl);
       if (url.origin === workerUrl.origin && (url.pathname === workerUrl.pathname || url.pathname.startsWith(`${workerUrl.pathname.replace(/\/$/, "")}/`))) return null;
@@ -84,6 +89,7 @@ async function openExternal(url, { shell, approvedUrls, workerProfile } = {}) {
 
 module.exports = {
   GITHUB_RELEASES_API,
+  GITEE_RELEASES_API,
   checkForUpdates,
   isOfficialReleaseUrl,
   normalizeVersion,

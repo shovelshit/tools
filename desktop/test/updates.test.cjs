@@ -5,7 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const { checkForUpdates, GITHUB_RELEASES_API, isOfficialReleaseUrl, openExternal } = require("../main/updates");
+const { checkForUpdates, GITEE_RELEASES_API, isOfficialReleaseUrl, openExternal } = require("../main/updates");
 
 function loadMain(electron = {
   app: { whenReady: () => new Promise(() => {}), on() {} },
@@ -96,7 +96,7 @@ test("update check accepts only the fixed GitHub release endpoint", async () => 
     notes: "notes",
     releaseUrl: "https://github.com/shovelshit/tools/releases/tag/v1.1.0"
   });
-  assert.deepEqual(calls, [{ url: GITHUB_RELEASES_API, options: { redirect: "error" } }]);
+  assert.deepEqual(calls, [{ url: GITEE_RELEASES_API, options: { redirect: "error" } }]);
 });
 
 test("update check rejects redirected or non-official releases without exposing failures", async () => {

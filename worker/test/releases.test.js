@@ -34,3 +34,22 @@ test("GitHub failure reuses the last verified list as stale", async () => {
   assert.equal(stale.stale, true);
   assert.equal(stale.assets.length, 1);
 });
+
+test("Gitee release is preferred when GitHub is unavailable", async () => {
+  const calls = [];
+  const result = await getReleaseDownloads({}, {
+    nowMs: 900_000,
+    fetchImpl: async (url) => {
+      calls.push(url);
+      if (url.includes("api.github.com")) return new Response("down", { status: 503 });
+      return Response.json({ ...RELEASE,
+        html_url: "https://gitee.com/shovelshit/tools/releases/tag/v1.2.4",
+        tag_name: "v1.2.4",
+        assets: [{ name: "movie-monitor-win-x64.exe", browser_download_url: "https://gitee.com/shovelshit/tools/releases/download/v1.2.4/movie-monitor-win-x64.exe", size: 11 }]
+      });
+    }
+  });
+  assert.equal(result.version, "1.2.4");
+  assert.equal(result.assets[0].url, "https://gitee.com/shovelshit/tools/releases/download/v1.2.4/movie-monitor-win-x64.exe");
+  assert.equal(calls.length, 1);
+});

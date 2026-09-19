@@ -66,6 +66,11 @@ function setRuntimeDataset(kind) {
   document.documentElement.dataset.runtime = kind === "electron" ? "electron" : "web";
 }
 
+function renderRuntimeVersion(info) {
+  const target = $("app-version");
+  if (target && info?.version) target.textContent = `v${info.version}`;
+}
+
 let cinemaMovies = []; // [{id, nm, showCount, checked}]
 let connected = false;
 const profileGeneration = window.createProfileGeneration();
@@ -1420,6 +1425,7 @@ function syncCronInfo(data) {
   updateBatchTip();
   try {
     runtimeInfo = await window.maoyanRuntime.getRuntimeInfo();
+    renderRuntimeVersion(runtimeInfo);
     if (typeof setRuntimeDataset === "function") setRuntimeDataset(runtimeInfo.kind);
   } catch {
     runtimeInfo = { kind: window.maoyanRuntime?.kind || "web", canLoginMaoyan: false, persistentTokenStorage: false };
