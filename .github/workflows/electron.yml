@@ -175,7 +175,8 @@ jobs:
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/gitee-release"
           gitee_release_id="$(curl --fail-with-body -sS -X POST -H 'Accept: application/json' \
             -d "access_token=$GITEE_TOKEN" --data-urlencode "tag_name=$RELEASE_TAG" \
-            --data-urlencode "name=Movie Monitor $RELEASE_TAG" --data-urlencode "target_commitish=$GITHUB_SHA" \
+            --data-urlencode "name=Movie Monitor $RELEASE_TAG" --data-urlencode "body=Movie Monitor desktop release $RELEASE_TAG" \
+            --data-urlencode "target_commitish=$GITHUB_SHA" \
             'https://gitee.com/api/v5/repos/aka-ljf/tools/releases' | jq -r '.id // empty')"
           if [ -z "$gitee_release_id" ]; then
             gitee_release_id="$(curl --fail-with-body -sS -H 'Accept: application/json' \
