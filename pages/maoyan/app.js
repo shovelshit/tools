@@ -20,6 +20,7 @@ const els = {
   updateStatus: $("update-status"),
   updateText: $("update-text"),
   btnOpenUpdate: $("btn-open-update"),
+  updateResult: $("update-result"),
   btnRenewAccount: $("btn-renew-account"),
   btnLogout: $("btn-logout"),
   // 影院设置
@@ -68,7 +69,10 @@ function setRuntimeDataset(kind) {
 
 function renderRuntimeVersion(info) {
   const target = $("app-version");
-  if (target && info?.version) target.textContent = `v${info.version}`;
+  const headerTarget = $("header-app-version");
+  const text = info?.version ? `v${info.version}` : "";
+  if (target) target.textContent = text;
+  if (headerTarget) headerTarget.textContent = text;
 }
 
 let cinemaMovies = []; // [{id, nm, showCount, checked}]
@@ -295,11 +299,18 @@ function setConnectionState({ profileKey = "", workerUrl = "" } = {}) {
 
 function renderDesktopUpdate(update) {
   if (!els.updateStatus || !els.updateText || !els.btnOpenUpdate) return;
-  const available = runtimeInfo.kind === "electron" && update?.available === true && typeof update.releaseUrl === "string";
-  els.updateStatus.classList.toggle("hidden", !available);
-  if (!available) return;
-  els.updateText.textContent = `发现新版本 v${update.version}`;
-  els.btnOpenUpdate.dataset.releaseUrl = update.releaseUrl;
+  const electron = runtimeInfo.kind === "electron";
+  els.updateStatus.classList.toggle("hidden", !electron);
+  if (!electron) return;
+  if (update?.available === true && typeof update.releaseUrl === "string") {
+    els.updateText.textContent = `发现新版本 v${update.version}`;
+    els.btnOpenUpdate.textContent = "查看更新";
+    els.btnOpenUpdate.dataset.releaseUrl = update.releaseUrl;
+  } else {
+    els.updateText.textContent = "已是最新版本";
+    els.btnOpenUpdate.textContent = "检查更新";
+    delete els.btnOpenUpdate.dataset.releaseUrl;
+  }
 }
 
 async function checkForDesktopUpdate() {
@@ -312,8 +323,15 @@ async function checkForDesktopUpdate() {
 }
 
 els.btnOpenUpdate?.addEventListener("click", async () => {
-  const releaseUrl = els.btnOpenUpdate.dataset.releaseUrl;
-  if (!releaseUrl) return;
+  if (runtimeInfo.kind !== "electron") return;
+  const update = await window.maoyanRuntime.checkForUpdates();
+  renderDesktopUpdate(update);
+  const releaseUrl = update?.releaseUrl || els.btnOpenUpdate.dataset.releaseUrl;
+  if (!releaseUrl) {
+    els.updateResult?.classList.remove("hidden");
+    if (els.updateResult) els.updateResult.textContent = "当前已是最新版本";
+    return;
+  }
   const accepted = await window.showConfirm("本应用未经签名验证；请仅从官方 GitHub Releases 页面下载更新。", {
     title: "查看更新", okText: "打开官方页面", cancelText: "取消"
   });
@@ -321,6 +339,14 @@ els.btnOpenUpdate?.addEventListener("click", async () => {
 });
 
 function bindSetupLinks() {
+  document.querySelectorAll("a.enrollment-link").forEach((link) => {
+    link.addEventListener("click", async (event) => {
+      if (runtimeInfo.kind !== "electron" || typeof window.maoyanRuntime.openEnrollment !== "function") return;
+      event.preventDefault();
+      const result = await window.maoyanRuntime.openEnrollment();
+      if (result?.opened === false) showToast("无法打开领取页面", "error");
+    });
+  });
   document.querySelectorAll("a[data-external-link]").forEach((link) => {
     link.addEventListener("click", async (event) => {
       event.preventDefault();

@@ -31,7 +31,7 @@
       <div id="login-hint" class="login-hint hidden"></div>
       <button id="btn-connect" class="btn primary block" type="button">连接服务</button>
       <div class="login-links">
-        <a class="login-claim-link" href="https://ltools.asia/maoyan/claim.html" data-external-link>没有访问密钥？前往领取</a>
+        <a class="login-claim-link enrollment-link" href="https://ltools.asia/maoyan/claim.html">没有访问密钥？前往领取</a>
         <a class="login-download-link web-download-link" href="download.html">下载客户端</a>
       </div>
     </section>
@@ -42,7 +42,7 @@
       <header class="scene-bar">
         <div class="brand-mark" aria-hidden="true">M</div>
         <div class="title-block">
-          <h1>电影场次监控</h1>
+          <h1>电影场次监控 <span id="header-app-version" class="app-version"></span></h1>
           <span class="subtitle" id="page-sub">监控配置</span>
         </div>
         <div class="scene-status">
@@ -50,7 +50,8 @@
           <div id="worker-profile" class="connection-state">配置：未连接</div>
           <div id="worker-security" class="connection-state">未连接</div>
         </div>
-        <div id="update-status" class="update-status hidden"><span id="update-text"></span><button id="btn-open-update" class="btn small ghost" type="button">查看更新</button></div>
+        <div id="update-status" class="update-status"><span id="update-text">检查客户端更新</span><button id="btn-open-update" class="btn small ghost" type="button">检查更新</button></div>
+        <div id="update-result" class="update-result hidden" role="status"></div>
         <div class="header-actions">
           <button id="btn-renew-account" class="btn small primary hidden" type="button">续期账号</button>
           <button id="btn-logout" class="btn small ghost" type="button">切换连接</button>

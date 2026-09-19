@@ -184,6 +184,18 @@ function registerIpcHandlers({ workerClient, createLogin = createMaoyanLogin, up
     }
     return lastUpdateResult;
   });
+  ipcMain.handle("enrollment:open", async (event) => {
+    if (quitting || !trustedSender(event)) return { opened: false };
+    const enrollment = new BrowserWindow({
+      width: 620, height: 820, minWidth: 480, minHeight: 680,
+      parent: BrowserWindow.fromWebContents(event.sender),
+      title: "领取访问密钥",
+      webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true }
+    });
+    enrollment.setMenuBarVisibility(false);
+    enrollment.loadURL("https://ltools.asia/maoyan/claim.html");
+    return { opened: true };
+  });
   ipcMain.handle("external:open", async (event, input) => {
     if (!trustedSender(event)) return { opened: false };
     return openExternal(input?.url, { shell, approvedUrls: latestReleaseUrl ? [latestReleaseUrl] : [], workerProfile: client.getProfile?.() });

@@ -8,5 +8,6 @@ contextBridge.exposeInMainWorld("maoyanElectron", {
   cancelMaoyanLogin: () => ipcRenderer.invoke("maoyan:cancel"),
   uploadSessionFile: () => ipcRenderer.invoke("maoyan:upload-file"),
   checkForUpdates: () => ipcRenderer.invoke("updates:check"),
+  openEnrollment: () => ipcRenderer.invoke("enrollment:open"),
   openExternal: (url) => ipcRenderer.invoke("external:open", { url })
 });

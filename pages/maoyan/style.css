@@ -343,6 +343,9 @@ summary {
   gap: 5px;
 }
 
+html[data-runtime="web"] .update-status { display: none; }
+.update-result { color: var(--muted); font-size: 10px; }
+
 .header-actions a {
   text-decoration: none;
 }
