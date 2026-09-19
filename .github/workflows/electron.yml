@@ -165,12 +165,12 @@ jobs:
           fi
           gh release edit "$RELEASE_TAG" --draft=false "$latest_flag" --repo "$GITHUB_REPOSITORY"
       - name: Mirror published assets to Gitee
-        if: ${{ env.GITEE_TOKEN != '' }}
         env:
           RELEASE_TAG: ${{ needs.prepare_release.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
+          if [ -z "$GITEE_TOKEN" ]; then echo "GITEE_TOKEN is not configured; skipping Gitee mirror"; exit 0; fi
           mkdir -p "$RUNNER_TEMP/gitee-release"
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/gitee-release"
           gitee_release_id="$(curl --fail-with-body -sS -X POST -H 'Accept: application/json' \
