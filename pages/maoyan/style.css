@@ -550,6 +550,8 @@ summary {
   font-weight: 600;
 }
 
+html[data-runtime="electron"] .web-download-link { display: none; }
+
 .panel-heading h2 {
   margin-top: 2px;
   font-size: 18px;
