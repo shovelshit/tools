@@ -41,7 +41,6 @@
           <button id="btn-copy-key" class="btn ghost claim-control" type="button">复制密钥</button>
           <button id="btn-enter-web" class="btn primary claim-control" type="button">进入 Web 版</button>
         </div>
-        <div id="claim-downloads" class="claim-downloads hidden"></div>
       </div>
 
       <div id="claim-unavailable" class="claim-state hidden"><h2>当前暂不可领取</h2></div>
@@ -55,6 +54,9 @@
         <label for="existing-key">已有访问密钥</label>
         <div><input id="existing-key" type="password" autocomplete="off" placeholder="输入后直接进入" /><button id="btn-use-existing" class="btn ghost claim-control" type="button">使用</button></div>
       </footer>
+      <section id="claim-downloads" class="claim-downloads-panel hidden" aria-label="客户端下载">
+        <h2>客户端下载</h2><p>桌面版支持 Windows 与 macOS。</p><div class="claim-downloads"></div>
+      </section>
     </section>
   </main>
   <script src="/api/assets/thumbmark.umd.js?v=1.11.0"></script>

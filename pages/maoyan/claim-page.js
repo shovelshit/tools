@@ -75,7 +75,8 @@
       const selected = window.selectDownloadOptions(platform, release.assets, config?.webUrl || "");
       const assets = [selected.recommended, ...selected.alternatives].filter(Boolean);
       if (!assets.length) return;
-      const wrap = $("claim-downloads");
+      const panel = $("claim-downloads");
+      const wrap = panel.querySelector(".claim-downloads");
       wrap.innerHTML = "";
       for (const [index, asset] of assets.entries()) {
         const link = document.createElement("a");
@@ -86,7 +87,7 @@
         link.textContent = `${recommended ? "推荐下载" : "桌面版本"}：${asset.name}`;
         wrap.append(link);
       }
-      wrap.classList.remove("hidden");
+      panel.classList.remove("hidden");
     } catch { downloadsLoaded = false; }
   }
 
@@ -115,6 +116,7 @@
       config = await api("/api/enrollment/config");
       $("claim-subtitle").textContent = `${config.validDays} 天有效，名额有限`;
       $("claim-capacity").textContent = `剩余 ${config.capacity.remaining} / ${config.capacity.maxUsers} 个名额`;
+      void loadDownloads();
       controller = window.createClaimController({
         api,
         secureGet: window.secureGet,
