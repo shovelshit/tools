@@ -2,7 +2,8 @@
   const status = document.getElementById("download-status");
   const list = document.getElementById("download-list");
   try {
-    const response = await fetch("/api/releases");
+    const apiBase = location.protocol === "file:" ? "https://ltools.asia" : location.origin;
+    const response = await fetch(`${apiBase}/api/releases`);
     if (!response.ok) throw new Error("release unavailable");
     const release = await response.json();
     const platform = await window.resolvePlatform(navigator);

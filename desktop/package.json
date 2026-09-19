@@ -37,6 +37,9 @@
         "to": "pages/maoyan",
         "filter": [
           "index.html",
+          "download.html",
+          "download.css",
+          "download-page.js",
           "style.css",
           "assets/cinema-background.webp",
           "maoyan-seat.css",

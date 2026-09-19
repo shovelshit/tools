@@ -543,6 +543,13 @@ summary {
   font-weight: 750;
 }
 
+.app-version {
+  margin-left: 5px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 600;
+}
+
 .panel-heading h2 {
   margin-top: 2px;
   font-size: 18px;

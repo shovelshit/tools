@@ -74,7 +74,7 @@ test("desktop package uses an explicit monitor-only shared asset whitelist", () 
   const shared = packageJson.build.files.find((entry) => entry && typeof entry === "object" && entry.from === "../pages/maoyan");
   assert.ok(shared);
   const required = [
-    "index.html", "style.css", "maoyan-seat.css", "assets/cinema-background.webp", "account.js", "app.js", "connection-profile.js",
+    "index.html", "style.css", "download.html", "download.css", "download-page.js", "maoyan-seat.css", "assets/cinema-background.webp", "account.js", "app.js", "connection-profile.js",
     "lock.js", "platform.js", "polling.js", "runtime.js", "secure-store.js", "ui.js", "workflow.js"
   ];
   assert.deepEqual([...shared.filter].sort(), [...required].sort());
