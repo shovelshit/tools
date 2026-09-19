@@ -165,7 +165,7 @@ jobs:
           fi
           gh release edit "$RELEASE_TAG" --draft=false "$latest_flag" --repo "$GITHUB_REPOSITORY"
       - name: Mirror published assets to Gitee
-        if: env.GITEE_TOKEN != ''
+        if: ${{ env.GITEE_TOKEN != '' }}
         env:
           RELEASE_TAG: ${{ needs.prepare_release.outputs.tag }}
         shell: bash
