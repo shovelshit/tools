@@ -30,6 +30,19 @@ test("dashboard module uses the authenticated request callback and safe text ren
   assert.doesNotMatch(dashboardSource, /innerHTML\s*=/);
 });
 
+test("dashboard layout stays bounded on desktop and narrow mobile viewports", () => {
+  assert.match(style, /\.dashboard-view\s*\{[^}]*min-width:\s*0/);
+  assert.match(style, /\.dashboard-grid\s*\{[^}]*min-width:\s*0/);
+  assert.match(style, /\.dashboard-panel\s*\{[^}]*min-width:\s*0/);
+  assert.match(style, /\.dashboard-metric\s*\{[^}]*min-width:\s*0/);
+  assert.match(style, /\.dashboard-table-wrap\s*\{[^}]*overflow-x:\s*auto/);
+  assert.match(style, /\.dashboard-table\s*\{[^}]*min-width:\s*560px/);
+  assert.match(style, /\.dashboard-status-list\s*\{[^}]*max-height:\s*190px[^}]*overflow:\s*auto/);
+  assert.match(style, /\.dashboard-status-list p\s*\{[^}]*overflow-wrap:\s*anywhere/);
+  assert.match(style, /@media \(max-width: 760px\)[\s\S]*\.dashboard-summary \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); \}/);
+  assert.match(style, /@media \(max-width: 760px\)[\s\S]*\.dashboard-grid, \.dashboard-grid-bottom \{ grid-template-columns: 1fr; \}/);
+});
+
 test("failure diagnostics start collapsed and have a bounded scrolling area", () => {
   assert.match(html, /<details class="notification-diagnostics">/);
   assert.doesNotMatch(html, /<details[^>]*\bopen\b/);
