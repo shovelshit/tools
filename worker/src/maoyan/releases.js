@@ -36,7 +36,7 @@ export async function getReleaseDownloads(_env, { fetchImpl = fetch, nowMs = Dat
   if (cache && cache.fetchImpl === fetchImpl && nowMs - cache.measuredAt < CACHE_MS) return { ...cache.value, stale: false };
   try {
     const response = await fetchImpl(API_URL, {
-      redirect: "error",
+      redirect: "manual",
       headers: { Accept: "application/vnd.github+json", "User-Agent": "shovelshit-tools-worker" },
       signal: AbortSignal.timeout(10_000)
     });

@@ -14,6 +14,34 @@ const RELEASE = {
   ]
 };
 
+test("release fetch uses the Workers-supported manual redirect mode", async () => {
+  resetReleaseCache();
+  let redirect;
+  const result = await getReleaseDownloads({}, { fetchImpl: async (_url, options) => {
+    redirect = options.redirect;
+    if (!["follow", "manual"].includes(redirect)) throw new TypeError("Invalid redirect value");
+    return Response.json(RELEASE);
+  } });
+  assert.equal(result.version, "1.2.3");
+  assert.equal(result.stale, false);
+  assert.equal(redirect, "manual");
+});
+
+test("release fetch rejects redirects without following or parsing their body", async () => {
+  for (const status of [301, 302, 303, 307, 308]) {
+    resetReleaseCache();
+    let calls = 0;
+    const result = await getReleaseDownloads({}, { fetchImpl: async () => {
+      calls += 1;
+      return Response.json(RELEASE, { status, headers: { Location: "https://evil.example/release" } });
+    } });
+    assert.equal(calls, 1);
+    assert.equal(result.version, null);
+    assert.deepEqual(result.assets, []);
+    assert.equal(result.stale, true);
+  }
+});
+
 test("downloads query only GitHub and reject source-only releases", async () => {
   resetReleaseCache();
   const calls = [];
