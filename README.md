@@ -158,6 +158,7 @@ npm --prefix desktop run test:e2e -- --output /absolute/path/to/ui-verification
 - **E2E**：本地 mock Worker + 无头 Chrome 覆盖 1440/1200/1024/768/390/320 视口、监控配置、锁座状态、官方图按需加载和公开申请满额页；截图和结果只写入命令指定的仓库外目录
 - **独立部署**：按 [worker/DEPLOY-D1.md](worker/DEPLOY-D1.md) 创建自己的 D1/KV、配置 secret、使用 `schema.sql` 初始化全新数据库并构建，再部署 Worker；不支持旧 D1 schema 原地升级，模板默认关闭公开申请
 - **发布**：合入 `master` 后 GitHub Actions 先执行 Worker/Web/Electron 验证，再创建 GitHub Release 并由各平台任务直接上传安装包；不上传 Actions artifact
+- **Admin 运营看板**：管理员登录 `/maoyan/admin.html` 后可进入“运营看板”。看板仅支持 `maoyan`、固定统计窗口为最近 24 小时，数据来自现有 D1 表的只读聚合，不新增表、写入或轮询；无数据时显示 `0`/`暂无`，失败详情仅返回现有截断字段。
 - **前端发布惯例**：修改 `pages/maoyan/*.js`、`style.css` 等静态资源后，必须同步 bump `index.html` 中对应的 `?v=` 版本参数（格式 `v=YYYYMMDDx`），否则老用户会命中边缘缓存旧版
 - **注意**：Worker 的监控批次在北京时间 23:00~06:59 整体跳过（代码内窗口过滤，cron 表达式保持分钟步进型），相关测试需 mock 时钟
 
