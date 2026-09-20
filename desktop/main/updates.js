@@ -2,7 +2,8 @@ const GITHUB_RELEASES_API = "https://api.github.com/repos/shovelshit/tools/relea
 const GITHUB_RELEASE_PREFIX = "/shovelshit/tools/releases/tag/";
 const MAX_RELEASE_NOTES_LENGTH = 4 * 1024;
 const CLAIM_URL = "https://ltools.asia/maoyan/claim.html";
-const SETUP_URLS = new Set(["https://apps.apple.com/cn/app/id1403753865", "https://sct.ftqq.com/sendkey", CLAIM_URL]);
+const DOWNLOAD_URL = "https://ltools.asia/maoyan/download";
+const SETUP_URLS = new Set(["https://apps.apple.com/cn/app/id1403753865", "https://sct.ftqq.com/sendkey", CLAIM_URL, DOWNLOAD_URL]);
 
 function normalizeVersion(value) {
   const match = typeof value === "string" && value.trim().match(/^v?(\d+)\.(\d+)\.(\d+)$/i);
@@ -63,7 +64,7 @@ function validateExternalUrl(value, { approvedUrls = [], workerProfile } = {}) {
   const normalized = url.toString();
   const approved = isOfficialReleaseUrl(normalized) || SETUP_URLS.has(normalized) || approvedUrls.includes(normalized);
   if (!approved) return null;
-  if (workerProfile?.baseUrl && normalized !== CLAIM_URL) {
+  if (workerProfile?.baseUrl && normalized !== CLAIM_URL && normalized !== DOWNLOAD_URL) {
     try {
       const workerUrl = new URL(workerProfile.baseUrl);
       if (url.origin === workerUrl.origin && (url.pathname === workerUrl.pathname || url.pathname.startsWith(`${workerUrl.pathname.replace(/\/$/, "")}/`))) return null;

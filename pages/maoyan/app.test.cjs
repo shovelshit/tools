@@ -482,9 +482,37 @@ test("Electron shows an official update affordance and keeps the HTTP warning vi
   assert.match(html, /id="btn-open-update"/);
   assert.match(source, /async function checkForDesktopUpdate\(manual = false\)/);
   assert.match(source, /window\.maoyanRuntime\.checkForUpdates\(\{ manual \}\)/);
-  assert.match(source, /未经签名验证/);
-  assert.match(source, /window\.maoyanRuntime\.openExternal\(releaseUrl\)/);
   assert.match(source, /不安全 HTTP 连接/);
+});
+
+test("update and failed-check buttons open the download page without confirmation", async () => {
+  const source = readSource("app.js");
+  const elements = new Map();
+  const $ = id => {
+    if (!elements.has(id)) elements.set(id, { dataset: {}, classList: { toggle() {} } });
+    return elements.get(id);
+  };
+  const opened = [], checks = [], errors = [];
+  const runtime = { capabilities: { updates: true }, openExternal: async url => { opened.push(url); return { opened: true }; } };
+  const context = { $, window: { maoyanRuntime: runtime }, checkForDesktopUpdate: async manual => checks.push(manual), showToast: message => errors.push(message) };
+  const vm = require("node:vm");
+  vm.runInNewContext(source.slice(source.indexOf("function renderDesktopUpdate("), source.indexOf("let updateCheckInFlight")), context);
+  vm.runInNewContext(source.slice(source.indexOf("async function onUpdateClick("), source.indexOf("els.btnOpenUpdate?.addEventListener")), context);
+  for (const state of [{ available: true, version: "1.2.3", releaseUrl: "https://github.com/shovelshit/tools/releases/tag/v1.2.3" }, { error: "unavailable" }]) {
+    context.renderDesktopUpdate(state);
+    for (const id of ["btn-open-update", "btn-login-check-update"]) {
+      assert.equal($(id).textContent, state.available ? "下载更新" : "前往下载页");
+      await context.onUpdateClick({ currentTarget: $(id) });
+    }
+  }
+  assert.deepEqual(opened, Array(4).fill("https://ltools.asia/maoyan/download"));
+  context.renderDesktopUpdate({ available: false });
+  await context.onUpdateClick({ currentTarget: $("btn-open-update") });
+  assert.deepEqual(checks, [true]);
+  context.renderDesktopUpdate({ error: "unavailable" });
+  runtime.openExternal = async () => ({ opened: false });
+  await context.onUpdateClick({ currentTarget: $("btn-open-update") });
+  assert.equal(errors.length, 1);
 });
 
 test("both update controls distinguish failure, skipped, current and new releases", async () => {
@@ -508,7 +536,7 @@ test("both update controls distinguish failure, skipped, current and new release
   }
   await context.checkForDesktopUpdate(true);
   assert.equal(requests[0].manual, true);
-  assert.equal($("btn-open-update").dataset.releaseUrl, undefined);
+  assert.equal($("btn-open-update").dataset.download, "true");
   assert.equal($("btn-login-check-update").disabled, false);
   runtime.capabilities.updates = false;
   context.renderDesktopUpdate({});

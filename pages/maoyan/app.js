@@ -308,9 +308,9 @@ function renderDesktopUpdate(update) {
     panel.classList.toggle("hidden", !supported);
     label.textContent = available ? `发现新版本 v${update.version}` : update?.error
       ? "检查失败，请稍后重试" : update?.skipped ? "可手动检查更新" : "已是最新版本";
-    button.textContent = available ? "查看更新" : "检查更新";
-    if (available) button.dataset.releaseUrl = update.releaseUrl;
-    else delete button.dataset.releaseUrl;
+    button.textContent = available ? "下载更新" : update?.error ? "前往下载页" : "检查更新";
+    if (available || update?.error) button.dataset.download = "true";
+    else delete button.dataset.download;
   }
 }
 
@@ -332,15 +332,11 @@ async function checkForDesktopUpdate(manual = false) {
 
 async function onUpdateClick(event) {
   if (!window.maoyanRuntime.capabilities?.updates) return;
-  const releaseUrl = event.currentTarget.dataset.releaseUrl;
-  if (!releaseUrl) return checkForDesktopUpdate(true);
-  const accepted = await window.showConfirm("本应用未经签名验证；请仅从官方 GitHub Releases 页面下载更新。", {
-    title: "查看更新", okText: "打开官方页面", cancelText: "取消"
-  });
-  if (accepted) {
-    try { await window.maoyanRuntime.openExternal(releaseUrl); }
-    catch { showToast("无法打开更新页面", "error"); }
-  }
+  if (event.currentTarget.dataset.download !== "true") return checkForDesktopUpdate(true);
+  try {
+    const result = await window.maoyanRuntime.openExternal("https://ltools.asia/maoyan/download");
+    if (result?.opened === false) showToast("无法打开下载页面", "error");
+  } catch { showToast("无法打开下载页面", "error"); }
 }
 els.btnOpenUpdate?.addEventListener("click", onUpdateClick);
 $("btn-login-check-update")?.addEventListener("click", onUpdateClick);
