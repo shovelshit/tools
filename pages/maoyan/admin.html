@@ -34,13 +34,15 @@
       </div>
       <div class="header-right">
         <button id="btn-refresh-accounts" class="btn small ghost">刷新</button>
+        <button id="btn-dashboard" class="btn small ghost hidden">运营看板</button>
         <button id="btn-admin-logout" class="btn small ghost">退出登录</button>
         <a id="btn-enter-monitor" class="btn small ghost" href="index.html">🎬 管理员监控</a>
         <a class="btn small ghost" href="../">🧰 工具箱</a>
       </div>
     </header>
 
-    <section class="admin-toolbar" aria-label="账号容量设置">
+    <div id="admin-account-view" class="admin-view">
+      <section class="admin-toolbar" aria-label="账号容量设置">
       <label>业务
         <select id="account-business-line" aria-label="业务线">
           <option value="maoyan">电影场次监控</option>
@@ -55,9 +57,9 @@
       <label>默认有效期 <input id="default-valid-days" type="number" min="1" step="1" /><span>天</span></label>
       <label class="admin-toggle"><input id="public-signup-enabled" type="checkbox" /><span>开放申请</span></label>
       <button id="btn-save-settings" class="btn small primary">保存设置</button>
-    </section>
+      </section>
 
-    <section class="admin-toolbar resource-summary" id="maoyan-resource-summary" aria-label="资源状态">
+      <section class="admin-toolbar resource-summary" id="maoyan-resource-summary" aria-label="资源状态">
       <div><span class="muted">活跃影院</span><strong id="resource-cinemas">--</strong></div>
       <div><span class="muted">通知积压</span><strong id="resource-pending">--</strong></div>
       <div><span class="muted">通知失败</span><strong id="resource-failed">--</strong></div>
@@ -67,9 +69,9 @@
         <summary>通知与锁座失败详情</summary>
         <div id="resource-failure-details" class="muted"></div>
       </details>
-    </section>
+      </section>
 
-    <section class="admin-toolbar" aria-label="新增和筛选账号">
+      <section class="admin-toolbar" aria-label="新增和筛选账号">
       <div class="admin-create">
         <input id="new-account-remark" type="text" maxlength="50" placeholder="新账号备注" />
         <button id="btn-add-account" class="btn small success">新增账号</button>
@@ -84,9 +86,9 @@
           <option value="revoked">已撤销</option>
         </select>
       </div>
-    </section>
+      </section>
 
-    <section class="admin-table-panel">
+      <section class="admin-table-panel">
       <div class="row space-between">
         <h2>账号列表</h2>
         <span id="account-summary" class="muted"></span>
@@ -109,11 +111,89 @@
         </table>
       </div>
       <div class="admin-pagination"><button id="btn-load-more" class="btn small ghost hidden">加载更多</button></div>
+      </section>
+    </div>
+
+    <section id="admin-dashboard" class="dashboard-view hidden" aria-label="运营看板">
+      <div class="dashboard-heading">
+        <div>
+          <p class="eyebrow">MAOYAN · OPERATIONS</p>
+          <h2>运营看板</h2>
+          <p id="dashboard-updated-at" class="muted">尚未读取数据</p>
+        </div>
+        <div class="dashboard-actions">
+          <button id="btn-dashboard-back" class="btn small ghost">账号管理</button>
+          <button id="btn-dashboard-refresh" class="btn small primary">刷新看板</button>
+        </div>
+      </div>
+      <div id="dashboard-error" class="dashboard-error hidden" role="alert"></div>
+      <div id="dashboard-loading" class="dashboard-loading hidden" aria-live="polite">读取看板数据...</div>
+
+      <div id="dashboard-summary" class="dashboard-summary" aria-label="核心指标">
+        <article class="dashboard-metric"><span>有效用户</span><strong id="dashboard-active-users">--</strong></article>
+        <article class="dashboard-metric"><span>监控中用户</span><strong id="dashboard-monitoring-users">--</strong></article>
+        <article class="dashboard-metric"><span>活跃影院</span><strong id="dashboard-active-cinemas">--</strong></article>
+        <article class="dashboard-metric"><span>通知成功率</span><strong id="dashboard-notification-rate">--</strong></article>
+        <article class="dashboard-metric"><span>锁座成功</span><strong id="dashboard-lock-success">--</strong></article>
+        <article class="dashboard-metric"><span>锁座失败</span><strong id="dashboard-lock-failed">--</strong></article>
+      </div>
+
+      <div class="dashboard-grid">
+        <section id="dashboard-users" class="admin-table-panel dashboard-panel">
+          <div class="row space-between">
+            <h3>用户监控</h3>
+            <span class="muted">当前状态</span>
+          </div>
+          <div class="dashboard-table-wrap">
+            <table class="token-table dashboard-table">
+              <thead><tr><th>用户</th><th>影院</th><th>监控</th><th>最近检查</th><th>锁座</th><th>通知</th></tr></thead>
+              <tbody id="dashboard-users-body"><tr><td colspan="6" class="muted empty-tip">暂无数据</td></tr></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="dashboard-cinemas" class="admin-table-panel dashboard-panel">
+          <div class="row space-between">
+            <h3>影院排行</h3>
+            <span class="muted">近 24 小时</span>
+          </div>
+          <div class="dashboard-table-wrap">
+            <table class="token-table dashboard-table">
+              <thead><tr><th>影院</th><th>用户</th><th>新增场次</th><th>通知</th><th>锁座</th></tr></thead>
+              <tbody id="dashboard-cinemas-body"><tr><td colspan="5" class="muted empty-tip">暂无数据</td></tr></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <div class="dashboard-grid dashboard-grid-bottom">
+        <section id="dashboard-notifications" class="admin-table-panel dashboard-panel">
+          <div class="row space-between">
+            <h3>通知状态</h3>
+            <span id="dashboard-notification-summary" class="muted">暂无数据</span>
+          </div>
+          <div id="dashboard-notification-list" class="dashboard-status-list">
+            <p class="muted empty-tip">暂无通知记录</p>
+          </div>
+        </section>
+        <section id="dashboard-health" class="admin-table-panel dashboard-panel">
+          <div class="row space-between">
+            <h3>系统健康</h3>
+            <span class="muted">只读</span>
+          </div>
+          <dl class="dashboard-health-list">
+            <div><dt>最近影院批次</dt><dd id="dashboard-latest-batch">暂无数据</dd></div>
+            <div><dt>最早待发送</dt><dd id="dashboard-oldest-pending">暂无数据</dd></div>
+            <div><dt>数据更新时间</dt><dd id="dashboard-health-updated">暂无数据</dd></div>
+          </dl>
+        </section>
+      </div>
     </section>
   </div>
 
   <script src="secure-store.js?v=20260911u"></script>
   <script src="ui.js?v=20260911u"></script>
+  <script src="admin-dashboard.js?v=20260920"></script>
   <script src="admin.js?v=20260911u"></script>
 </body>
 </html>

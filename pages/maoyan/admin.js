@@ -12,7 +12,9 @@ const els = {
   resourceCinemas: $("resource-cinemas"), resourcePending: $("resource-pending"),
   resourceFailed: $("resource-failed"), resourceAdmission: $("resource-admission"), resourceNote: $("resource-note"),
   resourceFailureDetails: $("resource-failure-details"),
-  resourceSummary: $("maoyan-resource-summary")
+  resourceSummary: $("maoyan-resource-summary"),
+  dashboardButton: $("btn-dashboard"), dashboardView: $("admin-dashboard"), accountView: $("admin-account-view"),
+  dashboardBack: $("btn-dashboard-back"), dashboardRefresh: $("btn-dashboard-refresh")
 };
 
 const SAME_ORIGIN_HOSTS = ["ltools.asia", "www.ltools.asia", "tools-a65.pages.dev"];
@@ -26,6 +28,14 @@ let capacity = null;
 let settings = null;
 let nextAfter = null;
 let businessGeneration = 0;
+const dashboard = globalThis.createAdminDashboard ? globalThis.createAdminDashboard({ root: document, request: adminApi }) : null;
+
+function showDashboard(show) {
+  const enabled = show && els.businessLine.value === "maoyan";
+  els.accountView.classList.toggle("hidden", enabled);
+  els.dashboardView.classList.toggle("hidden", !enabled);
+  if (enabled) dashboard?.load(); else dashboard?.clear();
+}
 
 function captureBusinessScope() {
   return { businessLine: els.businessLine.value, generation: businessGeneration };
@@ -177,6 +187,7 @@ function renderAccountSummary() {
   els.capacityLabel.textContent = els.businessLine.value === "store" ? "应用商店账号" : "猫眼账号";
   els.resourceSummary.classList.toggle("hidden", els.businessLine.value !== "maoyan");
   els.btnEnterMonitor.classList.toggle("hidden", els.businessLine.value !== "maoyan");
+  els.dashboardButton.classList.toggle("hidden", els.businessLine.value !== "maoyan");
   els.summary.textContent = `当前显示 ${accounts.length} 个账号`;
   els.btnLoadMore.classList.toggle("hidden", !nextAfter);
 }
@@ -368,6 +379,9 @@ els.businessLine.addEventListener("change", () => {
     .catch((error) => showToast(error.message, "error"));
 });
 els.btnRefresh.addEventListener("click", () => Promise.all([refreshAccounts({ reset: true }), loadSettings(), loadResources()]));
+els.dashboardButton.addEventListener("click", () => showDashboard(true));
+els.dashboardBack.addEventListener("click", () => showDashboard(false));
+els.dashboardRefresh.addEventListener("click", () => dashboard?.load());
 els.btnLoadMore.addEventListener("click", () => refreshAccounts({ reset: false }));
 els.btnEnterMonitor.addEventListener("click", (event) => {
   event.preventDefault();
@@ -380,6 +394,7 @@ els.btnLogout.addEventListener("click", () => {
   void secureSet("adminToken", "");
   els.adminMain.classList.add("hidden");
   els.loginOverlay.classList.remove("hidden");
+  showDashboard(false);
 });
 
 async function copyText(text) {

@@ -6,7 +6,29 @@ const vm = require("node:vm");
 
 const html = fs.readFileSync(path.join(__dirname, "admin.html"), "utf8");
 const source = fs.readFileSync(path.join(__dirname, "admin.js"), "utf8");
+const dashboardSource = fs.readFileSync(path.join(__dirname, "admin-dashboard.js"), "utf8");
 const style = fs.readFileSync(path.join(__dirname, "style.css"), "utf8");
+
+test("admin page exposes an operations dashboard without polling", () => {
+  assert.match(html, /运营看板/);
+  assert.match(html, /id="admin-dashboard"/);
+  assert.match(html, /id="dashboard-summary"/);
+  assert.match(html, /id="dashboard-users"/);
+  assert.match(html, /id="dashboard-cinemas"/);
+  assert.match(html, /id="dashboard-notifications"/);
+  assert.match(html, /id="dashboard-health"/);
+  assert.match(html, /id="btn-dashboard"/);
+  assert.doesNotMatch(dashboardSource, /setInterval/);
+  assert.doesNotMatch(source, /setInterval/);
+});
+
+test("dashboard module uses the authenticated request callback and safe text rendering", () => {
+  assert.match(dashboardSource, /function createAdminDashboard/);
+  assert.match(dashboardSource, /request\(\s*["'`]\/api\/admin\/dashboard\?businessLine=maoyan&window=24h/);
+  assert.match(dashboardSource, /textContent/);
+  assert.doesNotMatch(dashboardSource, /X-Admin-Token/);
+  assert.doesNotMatch(dashboardSource, /innerHTML\s*=/);
+});
 
 test("failure diagnostics start collapsed and have a bounded scrolling area", () => {
   assert.match(html, /<details class="notification-diagnostics">/);
