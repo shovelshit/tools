@@ -370,6 +370,7 @@ els.search.addEventListener("input", () => {
 els.statusFilter.addEventListener("change", () => refreshAccounts({ reset: true }).catch((error) => showToast(error.message, "error")));
 els.businessLine.addEventListener("change", () => {
   businessGeneration += 1;
+  showDashboard(false);
   const scope = captureBusinessScope();
   accounts = [];
   capacity = null;
