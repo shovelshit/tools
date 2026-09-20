@@ -4,6 +4,12 @@ on:
   workflow_dispatch:
   push:
     branches: [master]
+    paths-ignore:
+      - "pages/maoyan/admin.html"
+      - "pages/maoyan/admin.js"
+      - "pages/maoyan/admin-dashboard.js"
+      - "docs/**"
+      - "README.md"
   pull_request:
     paths: ["desktop/**", "pages/maoyan/**", "worker/**", ".github/workflows/electron.yml"]
 

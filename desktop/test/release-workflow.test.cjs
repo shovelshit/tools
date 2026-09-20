@@ -8,7 +8,7 @@ const workflow = fs.readFileSync(workflowPath, "utf8");
 const packageJson = JSON.parse(fs.readFileSync(path.resolve(__dirname, "../package.json"), "utf8"));
 
 test("master pushes publish installers directly to a GitHub Release", () => {
-  assert.match(workflow, /push:\s*\n\s+branches: \[master\]\s*\n\s+pull_request:/);
+  assert.match(workflow, /push:\s*\n\s+branches: \[master\][\s\S]*?\n\s+pull_request:/);
   assert.doesNotMatch(workflow, /branches: \[[^\]]*main/);
   assert.doesNotMatch(workflow, /\n\s+tags:/);
   assert.doesNotMatch(workflow, /\nconcurrency:/);
@@ -38,6 +38,13 @@ test("master pushes publish installers directly to a GitHub Release", () => {
   assert.match(cleanup, /git\/matching-refs\/tags\/\$RELEASE_TAG[\s\S]*?git\/refs\/tags\/\$RELEASE_TAG/);
   assert.match(cleanup, /for attempt in 1 2 3 4/);
   assert.doesNotMatch(cleanup, /releases\/tags|\|\| true/);
+});
+
+test("admin-only pushes do not trigger the Electron release workflow", () => {
+  const push = workflow.split("\n  pull_request:")[0];
+  assert.match(push, /paths-ignore:[\s\S]*pages\/maoyan\/admin\.html/);
+  assert.match(push, /paths-ignore:[\s\S]*pages\/maoyan\/admin\.js/);
+  assert.match(push, /paths-ignore:[\s\S]*pages\/maoyan\/admin-dashboard\.js/);
 });
 
 test("release workflow never stores installers as Actions artifacts", () => {
