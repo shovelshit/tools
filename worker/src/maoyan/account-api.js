@@ -5,6 +5,7 @@ import { createManagedAccount, readCapacity, readServiceSettings, renewAccount, 
 import { resumeAfterRenewal } from "./account-lifecycle.js";
 import { readAdminNotificationFailures, readResourceSummary } from "./resource-budget.js";
 import { getReleaseDownloads } from "./releases.js";
+import { readAdminDashboard } from "./dashboard.js";
 
 export async function handlePublicAccountApi(request, env, url) {
   if (url.pathname === "/api/releases" && request.method === "GET") {
@@ -104,6 +105,12 @@ export async function listAdminAccounts(env, url, nowMs) {
 
 export async function handleAdminAccountApi(request, env, url) {
   const nowMs = serviceNow(env);
+  if (url.pathname === "/api/admin/dashboard" && request.method === "GET") {
+    const businessLine = String(url.searchParams.get("businessLine") || "maoyan").trim();
+    const window = String(url.searchParams.get("window") || "24h").trim();
+    const dashboard = await readAdminDashboard(env.DB, { businessLine, window, nowMs });
+    return json({ ok: true, ...dashboard }, 200, { "Cache-Control": "no-store" });
+  }
   if (url.pathname === "/api/admin/resources" && request.method === "GET") {
     const resources = await readResourceSummary(env, nowMs);
     resources.notificationFailures = await readAdminNotificationFailures(env);
