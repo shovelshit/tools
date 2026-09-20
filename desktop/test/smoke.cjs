@@ -318,7 +318,7 @@ async function main() {
       for (const required of ["account.js", "connection-profile.js", "platform.js", "polling.js", "workflow.js", "maoyan-seat.css", "assets/cinema-background.webp"]) {
         assert.ok(entries.includes(`pages/maoyan/${required}`), `Missing packaged monitor asset: ${required}`);
       }
-      for (const forbidden of ["admin.html", "admin.js", "claim.html", "claim.js", "claim-page.js", "claim.css", "fingerprint.js"]) {
+      for (const forbidden of ["admin.html", "admin.js", "admin-dashboard.js", "claim.html", "claim.js", "claim-page.js", "claim.css", "fingerprint.js"]) {
         assert.equal(entries.includes(`pages/maoyan/${forbidden}`), false, `Unexpected packaged asset: ${forbidden}`);
       }
       assert.equal(entries.some((entry) => /\.test\.cjs$/.test(entry)), false);
