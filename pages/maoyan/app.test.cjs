@@ -412,8 +412,9 @@ test("seat map fits, pans by drag, zooms at cursor; risk box only for inferred s
   assert.match(source, /suppressClick/);
   // 推断标记必须在模板分支被置真(此前从未置真, warn 与推断座位全可选逻辑均不生效)
   assert.match(source, /state\.showMode = "template";\n          state\.seatMapIsTemplate = true;/);
-  // 风险区: 仅推断座位展示, 门控期隐藏; 勾选仅在推断模式下必填
-  assert.match(source, /setHidden\(els\.sectionRisk, !state\.session\?\.uploaded \|\| state\.seatMapIsTemplate !== true\)/);
+  // 风险区: 仅未来推断座位展示, 门控期隐藏; 勾选仅在推断模式下必填
+  assert.match(source, /const inferred = state\.seatMapIsTemplate === true && state\.showMode === "template"/);
+  assert.match(source, /setHidden\(els\.sectionRisk, !state\.session\?\.uploaded \|\| !inferred\)/);
   assert.match(source, /if \(state\.seatMapIsTemplate && !els\.risk\?\.checked\) return "请先勾选风险提示";/);
   // 风险框必须保持独立的边框、底色和文字色，具体设计 token 可随主题调整
   const riskRule = readSource("style.css").match(/\.lock-risk\s*\{([^}]*)\}/)?.[1] || "";

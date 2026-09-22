@@ -36,6 +36,18 @@ test("lock layout source keeps the separate shell and scoped glass surfaces", ()
   assert.match(css, /\.workflow-progress\s*\{[^}]*background:\s*rgba\(27,\s*35,\s*40,\s*0\.62\)/);
 });
 
+test("inferred lock mode exposes a bounded tolerance control and dynamic warning", () => {
+  const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
+  const source = fs.readFileSync(path.join(__dirname, "lock.js"), "utf8");
+  assert.match(html, /id="lock-time-tolerance"[^>]*type="number"[^>]*min="0"[^>]*max="180"/);
+  assert.match(html, /id="lock-inference-warning"/);
+  assert.match(source, /els\.timeTolerance\.value = "30"/);
+  assert.match(source, /timeToleranceMinutes:\s*Number\(els\.timeTolerance\.value\)/);
+  assert.match(source, /模板场次.*前后.*分钟内推断匹配/);
+  assert.match(source, /setHidden\(els\.timeToleranceRow, !inferred\)/);
+  assert.match(source, /displayedTimeTolerance\(rule\.timeToleranceMinutes\)/);
+});
+
 function fakeElement() {
   const listeners = new Map();
   const classes = new Set();

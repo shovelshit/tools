@@ -156,6 +156,7 @@
     const els = {
       button: $("btn-lock-seats"), overlay: $("lock-overlay"), close: $("btn-lock-close"),
       cinema: $("lock-cinema"), movie: $("lock-movie"), template: $("lock-template"), date: $("lock-target-date"),
+      timeTolerance: $("lock-time-tolerance"), timeToleranceRow: $("lock-time-tolerance-row"), inferenceWarning: $("lock-inference-warning"),
       file: $("lock-session-file"), login: $("btn-lock-login"), upload: $("btn-lock-upload"), removeSession: $("btn-lock-remove-session"),
       sessionStatus: $("lock-session-status"), seatGrid: $("lock-seat-grid"), seatCount: $("lock-seat-count"),
       risk: $("lock-risk-accepted"), ruleStatus: $("lock-rule-status"), cancelRule: $("btn-lock-cancel-rule"),
@@ -289,7 +290,7 @@
 
     // 座位图来源提示: 目标场次真实座位图 / 无场次时的未来推断提醒
     function renderSeatSource() {
-      renderRiskSection();
+      renderInferenceControls();
       if (!els.seatSource) return;
       if (!state.seatMapSource) {
         els.seatSource.classList.add("hidden");
@@ -300,10 +301,24 @@
       els.seatSource.classList.remove("hidden");
     }
 
-    // Beta 推断风险提示只在「未来日期无场次 → 推断座位」时展示;
-    // 目标场次是真实座位图无推断风险(待支付说明在弹窗副标题里已有); 门控期(未上传会话)一律隐藏
-    function renderRiskSection() {
-      setHidden(els.sectionRisk, !state.session?.uploaded || state.seatMapIsTemplate !== true);
+    function selectedTimeTolerance() {
+      const value = Number(els.timeTolerance?.value);
+      return Number.isInteger(value) && value >= 0 && value <= 180 ? value : null;
+    }
+
+    function displayedTimeTolerance(value) {
+      return Number.isInteger(value) && value >= 0 && value <= 180 ? value : 30;
+    }
+
+    // 推断控件与风险提示只在未来日期无真实场次时显示，更新范围不会影响已选座位。
+    function renderInferenceControls() {
+      const inferred = state.seatMapIsTemplate === true && state.showMode === "template" && (els.date?.value || "") > chinaDate(new Date());
+      setHidden(els.timeToleranceRow, !inferred);
+      setHidden(els.sectionRisk, !state.session?.uploaded || !inferred);
+      if (!inferred || !els.inferenceWarning) return;
+      const templateTime = templateForCurrent()?.tm || "";
+      const tolerance = displayedTimeTolerance(selectedTimeTolerance());
+      els.inferenceWarning.textContent = `目标场次尚未确定。将以模板场次 ${templateTime} 为基准，在目标日期前后 ${tolerance} 分钟内推断匹配。仅当影片与具体影厅均与模板一致且场次可售时，才会自动锁座；如有多个同等接近的场次，将优先选择较早场次。实际影厅、座位布局和售卖状态仍可能变化，锁座成功后仅生成待支付订单，请在有效时间内自行支付。`;
     }
 
     function seatLabelMap() {
@@ -320,6 +335,7 @@
       if (!state.templateSeqNo) return "请选择场次";
       if (!state.selectedSeatNos.size) return "请先选择座位";
       if (!/^\d{4}-\d{2}-\d{2}$/.test(els.date?.value || "")) return "请选择目标日期";
+      if (state.seatMapIsTemplate && selectedTimeTolerance() === null) return "匹配范围需为 0 至 180 的整数";
       // 风险确认仅针对推断座位(真实座位图无推断风险, 无需勾选)
       if (state.seatMapIsTemplate && !els.risk?.checked) return "请先勾选风险提示";
       if (state.dateBounds && ((els.date.value || "") < state.dateBounds.min || (els.date.value || "") > state.dateBounds.max)) {
@@ -353,7 +369,7 @@
       for (const el of [els.sectionSchedule, els.sectionSeats, els.sectionRules]) {
         setHidden(el, gated);
       }
-      renderRiskSection();
+      renderInferenceControls();
     }
 
     function renderSession() {
@@ -399,7 +415,8 @@
           ? " · 锁座服务当前已停用"
           : "";
       const hall = rule.hall ? ` · ${rule.hall}` : "";
-      els.ruleStatus.textContent = `${rule.cinemaName || "影院"} · ${rule.movieName || "影片"}${hall} · ${rule.targetDate || ""} ${rule.templateTime || ""} · ${seats} · ${status}${suffix}`;
+      const tolerance = ` · ±${displayedTimeTolerance(rule.timeToleranceMinutes)}分钟`;
+      els.ruleStatus.textContent = `${rule.cinemaName || "影院"} · ${rule.movieName || "影片"}${hall} · ${rule.targetDate || ""} ${rule.templateTime || ""}${tolerance} · ${seats} · ${status}${suffix}`;
       if (els.ruleSummary) els.ruleSummary.textContent = status;
       setDetailsOpen(els.ruleDetails, detailOpenState(state.session, rule).rule);
       setHidden(els.cancelRule, false);
@@ -1189,7 +1206,8 @@
       }
       const payload = {
         cinemaId: state.context.cinemaId, movieId: state.movieId, templateSeqNo: state.templateSeqNo,
-        targetDate: els.date.value, seatNos: [...state.selectedSeatNos], riskAccepted: els.risk.checked
+        targetDate: els.date.value, seatNos: [...state.selectedSeatNos], riskAccepted: els.risk.checked,
+        timeToleranceMinutes: Number(els.timeTolerance.value)
       };
       try {
         await buttonLoading(els.submit, action.loadingText, async () => {
@@ -1267,6 +1285,7 @@
       if (els.file) els.file.value = "";
       if (els.cinema) els.cinema.value = "";
       if (els.risk) els.risk.checked = false;
+      if (els.timeTolerance) els.timeTolerance.value = "30";
       renderTemplates();
       renderSession();
       renderRule();
@@ -1298,6 +1317,7 @@
       if (!isCurrentProfileGeneration(generation)) return;
       els.cinema.value = state.context.cinemaName || `影院 ${state.context.cinemaId}`;
       els.risk.checked = false;
+      if (els.timeTolerance) els.timeTolerance.value = "30";
       renderTemplates();
       renderSelection();
       els.overlay.classList.remove("hidden");
@@ -1331,6 +1351,7 @@
       await loadSeats();
     });
     els.risk.addEventListener("change", renderSelection);
+    els.timeTolerance?.addEventListener("input", () => { renderInferenceControls(); renderSelection(); });
     els.login?.addEventListener("click", loginMaoyan);
     els.upload.addEventListener("click", uploadSession);
     els.removeSession.addEventListener("click", removeSession);

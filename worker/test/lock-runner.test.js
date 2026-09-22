@@ -64,7 +64,7 @@ test("resolveLockTarget selects one exact show in the requested hall", () => {
   assert.equal(target.timeDeltaMinutes, 0);
 });
 
-test("resolveLockTarget selects the nearest same-hall show within thirty minutes", () => {
+test("resolveLockTarget selects the nearest same-hall show within the legacy thirty-minute default", () => {
   const target = resolveLockTarget(rule({ hall: "2号厅", templateTime: "20:00" }), {
     showData: { movies: [{ id: "7", shows: [{ showDate: "2026-09-12", plist: [
       { seqNo: "far", tm: "19:35", th: "2号厅", ticketStatus: 0 },
@@ -79,7 +79,7 @@ test("resolveLockTarget selects the nearest same-hall show within thirty minutes
   assert.equal(target.timeDeltaMinutes, 10);
 });
 
-test("resolveLockTarget reports equally-near same-hall shows as ambiguous", () => {
+test("resolveLockTarget deterministically chooses the earlier equally-near same-hall show", () => {
   const target = resolveLockTarget(rule({ hall: "2号厅", templateTime: "20:00" }), {
     showData: { movies: [{ id: "7", shows: [{ showDate: "2026-09-12", plist: [
       { seqNo: "early", tm: "19:50", th: "2号厅", ticketStatus: 0 },
@@ -87,7 +87,41 @@ test("resolveLockTarget reports equally-near same-hall shows as ambiguous", () =
     ] }] }] }
   });
 
-  assert.deepEqual(target, { status: "ambiguous", reason: "fuzzy" });
+  assert.equal(target.status, "matched");
+  assert.equal(target.show.seqNo, "early");
+  assert.equal(target.matchMode, "fuzzy");
+  assert.equal(target.timeDeltaMinutes, -10);
+});
+
+test("resolveLockTarget uses ascending sequence number for identical fuzzy show times", () => {
+  const target = resolveLockTarget(rule({ hall: "2号厅" }), {}, {
+    findShows: () => [],
+    findCompatibleShows: () => [
+      { seqNo: "z-last", tm: "20:10", timeDeltaMinutes: 10 },
+      { seqNo: "a-first", tm: "20:10", timeDeltaMinutes: 10 }
+    ]
+  });
+
+  assert.equal(target.status, "matched");
+  assert.equal(target.show.seqNo, "a-first");
+});
+
+test("resolveLockTarget uses a valid per-rule tolerance and keeps malformed stored tolerance at thirty minutes", () => {
+  const cinema = {
+    showData: { movies: [{ id: "7", shows: [{ showDate: "2026-09-12", plist: [
+      { seqNo: "inside-180", tm: "22:59", th: "2号厅", ticketStatus: 0 },
+      { seqNo: "outside-180", tm: "23:01", th: "2号厅", ticketStatus: 0 }
+    ] }] }] }
+  };
+
+  const configured = resolveLockTarget(rule({ hall: "2号厅", timeToleranceMinutes: 180 }), cinema);
+  assert.equal(configured.status, "matched");
+  assert.equal(configured.show.seqNo, "inside-180");
+
+  const legacy = resolveLockTarget(rule({ hall: "2号厅" }), cinema);
+  assert.deepEqual(legacy, { status: "waiting" });
+  const malformed = resolveLockTarget(rule({ hall: "2号厅", timeToleranceMinutes: 181 }), cinema);
+  assert.deepEqual(malformed, { status: "waiting" });
 });
 
 test("resolveLockTarget reports no match outside the fuzzy window", () => {
@@ -437,22 +471,25 @@ test("automation keeps waiting when no same-hall nearby show exists", async () =
   assert.equal(notifications, 0);
 });
 
-test("automation turns an ambiguous nearby show into a notified failure", async () => {
+test("automation chooses the earlier equally-near nearby show", async () => {
   const stored = rule({ hall: "1号激光IMAX厅", templateTime: "18:40" });
-  let notification;
+  let requestedSeqNo = "";
   await runOneLockRule(await runtime(), tokenId, deps(stored, {
     findShows: () => [],
     findCompatibleShows: () => [
       { seqNo: "250", tm: "18:30", th: "1号激光IMAX厅", timeDeltaMinutes: -10, matchMode: "fuzzy" },
       { seqNo: "260", tm: "18:50", th: "1号激光IMAX厅", timeDeltaMinutes: 10, matchMode: "fuzzy" }
     ],
-    createOrder: async () => { throw new Error("must not order ambiguous candidate"); },
-    notify: async (_config, title, content) => { notification = { title, content }; }
+    fetchSeats: async (_session, request) => {
+      requestedSeqNo = request.seqNo;
+      return { seqNo: request.seqNo, sectionId: "1", sectionName: "1号厅", seats: [{ seatNo: "1-6-18", rowId: "6", columnId: "18", available: true }] };
+    },
+    createOrder: async () => ({ orderId: "order-early", payLeftSecond: 600 })
   }));
 
-  assert.equal(stored.deleted, true);
-  assert.match(notification.content, /多个同厅型/);
-  assert.equal(notification.title, "❌ 锁座失败｜测试电影");
+  assert.equal(requestedSeqNo, "250");
+  assert.equal(stored.state, "locked");
+  assert.equal(stored.targetTime, "18:30");
 });
 
 test("automation notifies when a selected nearby show cannot load its seat map", async () => {

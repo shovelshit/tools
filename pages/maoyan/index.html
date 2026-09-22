@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>电影场次监控</title>
-  <link rel="stylesheet" href="style.css?v=20260920a" />
+  <link rel="stylesheet" href="style.css?v=20260922-tolerance" />
 </head>
 <body>
   <div id="ambient-background" class="ambient-background" aria-hidden="true">
@@ -273,8 +273,12 @@
             <select id="lock-movie"></select>
             <label for="lock-target-date">目标日期</label>
             <input id="lock-target-date" type="date" />
-            <label for="lock-template" id="lock-template-label">场次</label>
-            <select id="lock-template"></select>
+                <label for="lock-template" id="lock-template-label">场次</label>
+                <select id="lock-template"></select>
+                <div id="lock-time-tolerance-row" class="lock-time-tolerance hidden">
+                  <label for="lock-time-tolerance">匹配范围</label>
+                  <span>±</span><input id="lock-time-tolerance" type="number" min="0" max="180" step="1" value="30" inputmode="numeric" /><span>分钟</span>
+                </div>
           </div>
         </section>
 
@@ -313,7 +317,7 @@
         </section>
 
         <section class="lock-section lock-risk" id="lock-section-risk">
-          <p>Beta：未来场次与座位根据当前场次推断。实际开场时间、影厅、座位布局和售卖状态可能变化，可能导致自动锁座失败。锁座成功后仅生成待支付订单，需要在有效时间内自行支付。</p>
+          <p id="lock-inference-warning"></p>
           <label class="lock-risk-check"><input id="lock-risk-accepted" type="checkbox" /> 我已理解上述风险</label>
         </section>
 
@@ -342,7 +346,7 @@
   <script src="workflow.js?v=20260916a"></script>
   <script src="polling.js?v=20260916a"></script>
   <script src="seat-layout.js?v=20260922a"></script>
-  <script src="lock.js?v=20260922-seat-layout"></script>
+  <script src="lock.js?v=20260922-tolerance"></script>
   <script src="app.js?v=20260920b"></script>
 </body>
 </html>

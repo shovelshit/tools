@@ -37,6 +37,10 @@ function seatsMatch(rule, seatMap) {
   });
 }
 
+function ruleTimeTolerance(value) {
+  return Number.isInteger(value) && value >= 0 && value <= 180 ? value : 30;
+}
+
 export function resolveLockTarget(rule, cinema, deps = {}) {
   const exactShows = deps.findShows || findExactShows;
   const nearbyShows = deps.findCompatibleShows || findCompatibleShows;
@@ -54,12 +58,14 @@ export function resolveLockTarget(rule, cinema, deps = {}) {
     targetDate: rule.targetDate,
     templateTime: rule.templateTime,
     templateHall: rule.hall,
-    maxMinutes: 30
+    maxMinutes: ruleTimeTolerance(rule.timeToleranceMinutes)
   }) || [];
   if (!candidates.length) return { status: "waiting" };
-  const nearestDelta = Math.abs(Number(candidates[0].timeDeltaMinutes));
-  const nearest = candidates.filter((candidate) => Math.abs(Number(candidate.timeDeltaMinutes)) === nearestDelta);
-  if (nearest.length > 1) return { status: "ambiguous", reason: "fuzzy" };
+  const nearest = [...candidates].sort((left, right) =>
+    Math.abs(Number(left.timeDeltaMinutes)) - Math.abs(Number(right.timeDeltaMinutes)) ||
+    String(left.tm || "").localeCompare(String(right.tm || "")) ||
+    String(left.seqNo || "").localeCompare(String(right.seqNo || ""))
+  );
   return {
     status: "matched",
     show: nearest[0],

@@ -10,7 +10,8 @@ import {
   lockNotificationContent,
   publicLockRule,
   putLockRule,
-  removeLockRule
+  removeLockRule,
+  validateLockRuleInput
 } from "../src/maoyan/lock-rule.js";
 
 const now = new Date("2026-09-11T04:00:00.000Z");
@@ -101,6 +102,15 @@ async function reject(env, input, pattern, deps = dependencies()) {
   await assert.rejects(createLockRule(env, "token-a", input, deps), pattern);
 }
 
+test("lock-rule input normalizes omitted time tolerance and rejects malformed values", () => {
+  assert.equal(validateLockRuleInput(validInput()).timeToleranceMinutes, 30);
+  assert.equal(validateLockRuleInput(validInput({ timeToleranceMinutes: 0 })).timeToleranceMinutes, 0);
+  assert.equal(validateLockRuleInput(validInput({ timeToleranceMinutes: 180 })).timeToleranceMinutes, 180);
+  for (const value of [-1, 181, 1.5, "30", "NaN", null, NaN]) {
+    assert.throws(() => validateLockRuleInput(validInput({ timeToleranceMinutes: value })), /锁座参数无效/);
+  }
+});
+
 test("creates a rule from authoritative cinema and seat data", async () => {
   const env = await envWithConfig();
   const rule = await createLockRule(env, "token-a", validInput({ seatNos: ["1-6-18", "1-6-18"] }), dependencies());
@@ -111,6 +121,7 @@ test("creates a rule from authoritative cinema and seat data", async () => {
   assert.equal(rule.templateDate, "2026-09-11");
   assert.equal(rule.templateTime, "20:00");
   assert.equal(rule.templateSeqNo, "100");
+  assert.equal(rule.timeToleranceMinutes, 30);
   // label 在创建时用全图普查定段持久化(夹具数据 seg2=rowId、seg3 逐座变化 → 区-排-座, 座号=18),
   // 通知与「已保存规则」直接复用, 不再做单座二次判别
   assert.deepEqual(rule.seats, [{ seatNo: "1-6-18", rowId: "6", columnId: "18", type: "N", label: "6排18座" }]);
@@ -121,6 +132,14 @@ test("creates a rule from authoritative cinema and seat data", async () => {
   assert.equal(rule.payLeftSecond, null);
   assert.match(rule.id, /^[0-9a-f-]{36}$/i);
   assert.equal((await getLockRule(env, "token-a")).id, rule.id);
+});
+
+test("persists and publicly returns the configured inferred time tolerance", async () => {
+  const env = await envWithConfig();
+  const rule = await createLockRule(env, "token-a", validInput({ timeToleranceMinutes: 180 }), dependencies());
+
+  assert.equal(rule.timeToleranceMinutes, 180);
+  assert.equal((await getLockRule(env, "token-a")).timeToleranceMinutes, 180);
 });
 
 test("persists one injected lottery draw for a waiting rule without exposing it", async () => {

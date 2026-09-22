@@ -1173,6 +1173,9 @@ summary:focus-visible {
 
 .lock-form-grid label { color: var(--muted); font-size: 11px; }
 .lock-form-grid input[readonly] { background: rgba(255, 255, 255, 0.035); color: var(--muted); }
+.lock-time-tolerance { grid-column: 1 / -1; display: inline-flex; align-items: center; gap: 5px; min-width: 0; color: var(--muted); font-size: 11px; }
+.lock-time-tolerance label { margin-right: 3px; }
+.lock-time-tolerance input { width: 54px; min-width: 0; padding: 4px 6px; }
 .lock-seat-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .lock-heading-tools,
 .lock-legend,

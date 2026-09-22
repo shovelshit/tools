@@ -27,7 +27,7 @@ export const RULE_KNOWN_ERRORS = [
 export const LOCK_RULE_TERMINAL_STATES = new Set(["locked", "expired", "failed", "completed", "cancelled", "unknown"]);
 const PUBLIC_FIELDS = [
   "id", "cinemaId", "cinemaName", "movieId", "movieName", "hall", "targetDate",
-  "templateDate", "templateTime", "targetTime", "matchMode", "timeDeltaMinutes", "templateSeqNo", "targetSeqNo", "seats", "state",
+  "templateDate", "templateTime", "targetTime", "matchMode", "timeDeltaMinutes", "timeToleranceMinutes", "templateSeqNo", "targetSeqNo", "seats", "state",
   "createdAt", "updatedAt", "lastError", "orderId", "payLeftSecond"
 ];
 
@@ -43,7 +43,7 @@ function seatNo(value) {
 
 function assertExactInput(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("锁座参数无效");
-  const allowed = new Set(["cinemaId", "movieId", "templateSeqNo", "targetDate", "seatNos", "riskAccepted"]);
+  const allowed = new Set(["cinemaId", "movieId", "templateSeqNo", "targetDate", "seatNos", "riskAccepted", "timeToleranceMinutes"]);
   if (Object.keys(input).some((key) => !allowed.has(key))) throw new Error("锁座参数无效");
   if (!decimal(input.cinemaId) || !decimal(input.movieId) || !decimal(input.templateSeqNo)) {
     throw new Error("锁座参数无效");
@@ -53,13 +53,18 @@ function assertExactInput(input) {
   if (!Array.isArray(input.seatNos) || !input.seatNos.length || input.seatNos.some((value) => !seatNo(value))) {
     throw new Error("所选座位无效");
   }
+  const timeToleranceMinutes = Object.hasOwn(input, "timeToleranceMinutes") ? input.timeToleranceMinutes : 30;
+  if (!Number.isInteger(timeToleranceMinutes) || timeToleranceMinutes < 0 || timeToleranceMinutes > 180) {
+    throw new Error("锁座参数无效");
+  }
   return {
     cinemaId: String(input.cinemaId),
     movieId: String(input.movieId),
     templateSeqNo: String(input.templateSeqNo),
     targetDate: String(input.targetDate),
     seatNos: [...new Set(input.seatNos.map(String))],
-    riskAccepted: input.riskAccepted === true
+    riskAccepted: input.riskAccepted === true,
+    timeToleranceMinutes
   };
 }
 
@@ -221,7 +226,7 @@ export async function createLockRule(env, tokenId, input, options = {}) {
   if (String(seatMap?.seqNo) !== seatSeqNo) throw new Error("猫眼座位图场次无效");
   const ignoreAvailability = !targetShow;
   // 推断模式(保存等待规则, 未来场次可能无法兑现)必须显式勾选风险提示;
-  // 目标场次为真实座位图, 与前端 renderRiskSection/submitBlockReason 同口径(仅模板模式显示并要求勾选)
+  // 目标场次为真实座位图, 与前端 renderInferenceControls/submitBlockReason 同口径(仅模板模式显示并要求勾选)
   if (!targetShow && values.riskAccepted !== true) throw new Error("请确认锁座风险提示");
   const seats = selectedSeats(seatMap, values.seatNos, { ignoreAvailability });
   const timestamp = new Date(now).toISOString();
@@ -240,6 +245,7 @@ export async function createLockRule(env, tokenId, input, options = {}) {
     targetDate: values.targetDate,
     templateDate: template.date,
     templateTime: template.time,
+    timeToleranceMinutes: values.timeToleranceMinutes,
     templateSeqNo: values.templateSeqNo,
     targetSeqNo: seatSeqNo,
     seats,
