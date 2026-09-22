@@ -106,18 +106,34 @@ test("resolveLockTarget uses ascending sequence number for identical fuzzy show 
   assert.equal(target.show.seqNo, "a-first");
 });
 
-test("resolveLockTarget uses a valid per-rule tolerance and keeps malformed stored tolerance at thirty minutes", () => {
+test("resolveLockTarget accepts a configured tolerance at the inclusive 180-minute boundary", () => {
   const cinema = {
     showData: { movies: [{ id: "7", shows: [{ showDate: "2026-09-12", plist: [
-      { seqNo: "inside-180", tm: "22:59", th: "2号厅", ticketStatus: 0 },
-      { seqNo: "outside-180", tm: "23:01", th: "2号厅", ticketStatus: 0 }
+      { seqNo: "inside-180", tm: "23:00", th: "2号厅", ticketStatus: 0 }
     ] }] }] }
   };
 
   const configured = resolveLockTarget(rule({ hall: "2号厅", timeToleranceMinutes: 180 }), cinema);
   assert.equal(configured.status, "matched");
   assert.equal(configured.show.seqNo, "inside-180");
+});
 
+test("resolveLockTarget waits when the only configured-tolerance candidate is 181 minutes away", () => {
+  const cinema = {
+    showData: { movies: [{ id: "7", shows: [{ showDate: "2026-09-12", plist: [
+      { seqNo: "outside-180", tm: "23:01", th: "2号厅", ticketStatus: 0 }
+    ] }] }] }
+  };
+
+  assert.deepEqual(resolveLockTarget(rule({ hall: "2号厅", timeToleranceMinutes: 180 }), cinema), { status: "waiting" });
+});
+
+test("resolveLockTarget keeps malformed stored tolerance at thirty minutes", () => {
+  const cinema = {
+    showData: { movies: [{ id: "7", shows: [{ showDate: "2026-09-12", plist: [
+      { seqNo: "outside-default", tm: "20:31", th: "2号厅", ticketStatus: 0 }
+    ] }] }] }
+  };
   const legacy = resolveLockTarget(rule({ hall: "2号厅" }), cinema);
   assert.deepEqual(legacy, { status: "waiting" });
   const malformed = resolveLockTarget(rule({ hall: "2号厅", timeToleranceMinutes: 181 }), cinema);

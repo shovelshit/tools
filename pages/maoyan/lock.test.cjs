@@ -50,8 +50,8 @@ test("inferred lock mode keeps the bounded tolerance control inside the risk pan
   assert.match(source, /els\.timeTolerance\.value = "30"/);
   assert.match(source, /const raw = String\(value \?\? ""\)\.trim\(\);/);
   assert.match(source, /if \(!raw\) return null;/);
-  assert.match(source, /const timeToleranceMinutes = selectedTimeTolerance\(\);/);
-  assert.match(source, /timeToleranceMinutes\n      }/);
+  assert.match(source, /const timeToleranceMinutes = inferred \? selectedTimeTolerance\(\) : null;/);
+  assert.match(source, /\.\.\.\(inferred \? \{ timeToleranceMinutes \} : \{\}\)/);
   assert.match(source, /模板场次.*前后.*分钟内推断匹配/);
   assert.match(source, /displayedTimeTolerance\(rule\.timeToleranceMinutes\)/);
 });
@@ -90,6 +90,7 @@ function fakeElement() {
       contains: (name) => classes.has(name)
     },
     addEventListener: (name, listener) => listeners.set(name, listener),
+    trigger: (name, event = {}) => listeners.get(name)?.(event),
     closest: () => fakeElement(),
     append: () => {},
     setAttribute(name, value) { this[name] = String(value); },
@@ -105,6 +106,7 @@ function mountLock({
   const ids = [
     "btn-lock-seats", "lock-overlay", "btn-lock-close", "lock-cinema", "lock-movie", "lock-template",
     "lock-target-date", "lock-session-file", "btn-lock-login", "btn-lock-upload", "btn-lock-remove-session",
+    "lock-time-tolerance",
     "lock-session-status", "lock-seat-grid", "lock-seat-count", "lock-risk-accepted", "lock-rule-status",
     "btn-lock-cancel-rule", "lock-template-label", "lock-seat-source", "btn-lock-seat-feedback", "lock-official-toggle",
     "lock-official-wrap", "lock-official-frame", "btn-official-zoom-in", "btn-official-zoom-out",
@@ -119,9 +121,10 @@ function mountLock({
     removeEventListener: () => {}
   };
   const messages = [];
-  const root = { document, window: null, showToast: (message, type) => messages.push({ message, type }) };
+  const root = { document, window: null, showToast: (message, type) => messages.push({ message, type }), showConfirm: async () => true };
   root.window = root;
   const source = fs.readFileSync(path.join(__dirname, "lock.js"), "utf8");
+  const testSource = source.replace("return {\n      syncAvailability", "return { getShowMode: () => state.showMode,\n      syncAvailability");
   const module = { exports: {} };
   const vmContext = {
     module, exports: module.exports, Intl, Date, Set, document, window: root,
@@ -130,7 +133,7 @@ function mountLock({
   const layoutSource = fs.readFileSync(path.join(__dirname, "seat-layout.js"), "utf8");
   vm.runInNewContext(layoutSource, vmContext, { filename: "seat-layout.js" });
   vmContext.module = module;
-  vm.runInNewContext(source, vmContext, { filename: "lock.js" });
+  vm.runInNewContext(testSource, vmContext, { filename: "lock.js" });
   const runtime = {
     kind: runtimeInfo?.kind,
     getRuntimeInfo: () => runtimeInfo,
@@ -174,6 +177,40 @@ test("refreshing an uploaded session does not expose inference risk for a real s
   assert.equal(f.elements["lock-section-seats"].classList.contains("hidden"), false);
   await f.controller.refreshRemoteState();
   assert.equal(f.elements["lock-section-risk"].classList.contains("hidden"), true);
+});
+
+test("a blank inferred tolerance does not block immediate real-show locking or enter its payload", async () => {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" })
+    .formatToParts(new Date());
+  const values = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+  const today = `${values.year}-${values.month}-${values.day}`;
+  const tomorrow = new Date(`${today}T00:00:00.000Z`);
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+  const requests = [];
+  const dom = mountLock({
+    context: { movies: [{ id: "7", nm: "测试电影", checked: true, shows: [{ showDate: today, plist: [
+      { seqNo: "100", tm: "20:00", th: "1号厅", ticketStatus: 0 }
+    ] }] }] },
+    api: {
+      "/api/lock/session/status": { session: { uploaded: true } },
+      "/api/lock/rule": (options) => {
+        requests.push(JSON.parse(options.body));
+        return { rule: { state: "locked", automationEnabled: true } };
+      }
+    }
+  });
+  dom.elements["lock-target-date"].value = tomorrow.toISOString().slice(0, 10);
+  await dom.controller.open();
+  dom.elements["lock-time-tolerance"].value = "   ";
+  dom.elements["lock-target-date"].value = today;
+  await dom.elements["lock-target-date"].trigger("change");
+  dom.controller.refreshTemplates();
+  assert.equal(dom.controller.getShowMode(), "target");
+  assert.equal(dom.elements["btn-lock-submit"].textContent, "立即锁座");
+  await dom.elements["btn-lock-submit"].trigger("click");
+
+  assert.equal(requests.length, 1);
+  assert.equal(Object.hasOwn(requests[0], "timeToleranceMinutes"), false);
 });
 
 function loadRuntime() {

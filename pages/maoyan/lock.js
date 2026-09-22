@@ -1191,8 +1191,9 @@
     async function createRule() {
       const generation = capturedProfileGeneration();
       const action = lockAction(state.showMode);
-      const timeToleranceMinutes = selectedTimeTolerance();
-      if (timeToleranceMinutes === null) {
+      const inferred = state.showMode === "template";
+      const timeToleranceMinutes = inferred ? selectedTimeTolerance() : null;
+      if (inferred && timeToleranceMinutes === null) {
         renderSelection();
         return;
       }
@@ -1217,7 +1218,7 @@
       const payload = {
         cinemaId: state.context.cinemaId, movieId: state.movieId, templateSeqNo: state.templateSeqNo,
         targetDate: els.date.value, seatNos: [...state.selectedSeatNos], riskAccepted: els.risk.checked,
-        timeToleranceMinutes
+        ...(inferred ? { timeToleranceMinutes } : {})
       };
       try {
         await buttonLoading(els.submit, action.loadingText, async () => {
