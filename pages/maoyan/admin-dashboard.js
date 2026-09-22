@@ -9,6 +9,18 @@
       if (!values?.length) { const tr = document.createElement("tr"); const td = document.createElement("td"); td.colSpan = columns; td.className = "muted empty-tip"; td.textContent = empty; tr.append(td); body.append(tr); return; }
       for (const item of values) { const tr = document.createElement("tr"); for (const value of item) { const td = document.createElement("td"); td.textContent = value == null ? "-" : String(value); tr.append(td); } body.append(tr); }
     }
+    function renderFeedback(items) {
+      const body = $("dashboard-seat-feedback-body"); body.textContent = "";
+      if (!items.length) { const tr = document.createElement("tr"); const td = document.createElement("td"); td.colSpan = 7; td.className = "muted empty-tip"; td.textContent = "暂无座位反馈"; tr.append(td); body.append(tr); return; }
+      for (const item of items) {
+        const tr = document.createElement("tr");
+        [fmt(item.reportedAt), item.cinemaId, item.movieId, item.seqNo, item.source === "manual" ? "手动" : "自动", item.tokenId].forEach((value) => { const td = document.createElement("td"); td.textContent = value == null ? "-" : String(value); tr.append(td); });
+        const status = document.createElement("td");
+        const button = document.createElement("button"); button.className = "link-btn"; button.textContent = item.status === "processed" ? "已处理" : "未处理";
+        button.addEventListener("click", async () => { button.disabled = true; try { await request("/api/admin/seat-feedback", { method: "POST", body: JSON.stringify({ key: item.key, status: item.status === "processed" ? "unprocessed" : "processed" }) }); await load(); } catch (error) { button.disabled = false; const alert = $("dashboard-error"); alert.textContent = `状态更新失败：${error.message}`; alert.classList.remove("hidden"); } });
+        status.append(button); tr.append(status); body.append(tr);
+      }
+    }
     function render(data) {
       const s = data.summary || {};
       set("dashboard-active-users", s.activeUsers ?? 0); set("dashboard-monitoring-users", s.monitoringUsers ?? 0);
@@ -23,7 +35,7 @@
       set("dashboard-latest-batch", fmt(data.health?.latestBatchAt)); set("dashboard-oldest-pending", fmt(data.health?.oldestPendingNotificationAt));
       const feedback = data.seatFeedback || {};
       set("dashboard-seat-feedback-summary", `近 24 小时：${feedback.count || 0} 条`);
-      rows("dashboard-seat-feedback-body", (feedback.items || feedback.recent || []).map((item) => [fmt(item.reportedAt), item.cinemaId, item.movieId, item.seqNo, item.source === "manual" ? "手动" : "自动", item.tokenId, item.status === "processed" ? "已处理" : "未处理"]), 7, "暂无座位反馈");
+      renderFeedback(feedback.items || feedback.recent || []);
     }
     async function load() {
       if (state.loading) return;
