@@ -91,6 +91,9 @@ test("admin dashboard aggregates active maoyan users and excludes revoked/store 
     createdAt: NOW - 2 * DAY, lastError: "过期失败"
   });
   await insertNotification(env, { eventKey: "lock:pending", userId: active.account.id, state: "pending" });
+  await env.DB.prepare(
+    "INSERT INTO seat_feedback(fb_key,reported_at,day,token_id,cinema_id,movie_id,seq_no,source) VALUES (?,?,?,?,?,?,?,?)"
+  ).bind("seatfb:cinema-a:1", new Date(NOW - 60 * 1000).toISOString(), "2026-09-20", active.account.id, "cinema-a", "movie-a", "1", "auto").run();
   await insertNotification(env, { eventKey: "store:sent", userId: store.account.id, state: "sent" });
 
   const response = await worker.fetch(request("/api/admin/dashboard?businessLine=maoyan&window=24h"), env);
@@ -120,6 +123,8 @@ test("admin dashboard aggregates active maoyan users and excludes revoked/store 
   );
   assert.equal(payload.health.latestBatchAt, NOW - 5 * 60 * 1000);
   assert.equal(payload.health.oldestPendingNotificationAt, NOW);
+  assert.equal(payload.seatFeedback.count, 1);
+  assert.equal(payload.seatFeedback.recent[0].cinemaId, "cinema-a");
 });
 
 test("dashboard returns null success rate with no completed notifications and tolerates malformed JSON", async () => {

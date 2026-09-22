@@ -17,6 +17,8 @@ test("admin page exposes an operations dashboard without polling", () => {
   assert.match(html, /id="dashboard-cinemas"/);
   assert.match(html, /id="dashboard-notifications"/);
   assert.match(html, /id="dashboard-health"/);
+  assert.match(html, /id="dashboard-seat-feedback"/);
+  assert.match(html, /id="dashboard-seat-feedback-body"/);
   assert.match(html, /id="btn-dashboard"/);
   assert.doesNotMatch(dashboardSource, /setInterval/);
   assert.doesNotMatch(source, /setInterval/);

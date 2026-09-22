@@ -188,12 +188,24 @@
           </dl>
         </section>
       </div>
+      <section id="dashboard-seat-feedback" class="admin-table-panel dashboard-panel">
+        <div class="row space-between">
+          <h3>座位反馈</h3>
+          <span id="dashboard-seat-feedback-summary" class="muted">近 24 小时：暂无</span>
+        </div>
+        <div class="dashboard-table-wrap">
+          <table class="token-table dashboard-table">
+            <thead><tr><th>时间</th><th>影院</th><th>电影</th><th>场次</th><th>来源</th><th>账号</th></tr></thead>
+            <tbody id="dashboard-seat-feedback-body"><tr><td colspan="6" class="muted empty-tip">暂无座位反馈</td></tr></tbody>
+          </table>
+        </div>
+      </section>
     </section>
   </div>
 
   <script src="secure-store.js?v=20260911u"></script>
   <script src="ui.js?v=20260911u"></script>
-  <script src="admin-dashboard.js?v=20260920"></script>
+  <script src="admin-dashboard.js?v=20260922-seat-feedback"></script>
   <script src="admin.js?v=20260920-dashboard"></script>
 </body>
 </html>

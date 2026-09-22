@@ -21,6 +21,9 @@
       const n = data.notifications || {}; set("dashboard-notification-summary", `待发送 ${n.pending || 0} · 失败 ${n.failed || 0}`);
       if (!(n.recent || []).length) { const p = document.createElement("p"); p.className = "muted empty-tip"; p.textContent = "暂无通知记录"; list.append(p); } else for (const item of n.recent) { const p = document.createElement("p"); p.textContent = `${item.kind || "通知"} · ${item.state || "-"} · ${fmt(item.createdAt)}` + (item.lastError ? ` · ${item.lastError}` : ""); list.append(p); }
       set("dashboard-latest-batch", fmt(data.health?.latestBatchAt)); set("dashboard-oldest-pending", fmt(data.health?.oldestPendingNotificationAt));
+      const feedback = data.seatFeedback || {};
+      set("dashboard-seat-feedback-summary", `近 24 小时：${feedback.count || 0} 条`);
+      rows("dashboard-seat-feedback-body", (feedback.recent || []).map((item) => [fmt(item.reportedAt), item.cinemaId, item.movieId, item.seqNo, item.source === "manual" ? "手动" : "自动", item.tokenId]), 6, "暂无座位反馈");
     }
     async function load() {
       if (state.loading) return;

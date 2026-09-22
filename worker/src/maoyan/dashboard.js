@@ -273,16 +273,34 @@ async function readHealth(DB, businessLine) {
   };
 }
 
+async function readSeatFeedback(DB, windowStart) {
+  const count = await first(DB, "SELECT COUNT(*) AS n FROM seat_feedback WHERE reported_at>=?", new Date(windowStart).toISOString());
+  const rows = await all(DB,
+    "SELECT fb_key,reported_at,day,token_id,cinema_id,movie_id,seq_no,source FROM seat_feedback " +
+    "WHERE reported_at>=? ORDER BY reported_at DESC LIMIT ?",
+    new Date(windowStart).toISOString(), RECENT_LIMIT
+  );
+  return {
+    count: Number(count?.n || 0),
+    recent: rows.map((row) => ({
+      key: String(row.fb_key), reportedAt: String(row.reported_at), day: row.day || null,
+      tokenId: row.token_id || null, cinemaId: row.cinema_id || null, movieId: row.movie_id || null,
+      seqNo: row.seq_no || null, source: row.source || null
+    }))
+  };
+}
+
 export async function readAdminDashboard(DB, { businessLine = "maoyan", window = "24h", nowMs = Date.now() } = {}) {
   assertDashboardQuery({ businessLine, window });
   const generatedAt = Number(nowMs);
   const windowStart = generatedAt - WINDOW_MS;
-  const [summary, users, cinemas, notifications, health] = await Promise.all([
+  const [summary, users, cinemas, notifications, health, seatFeedback] = await Promise.all([
     readSummary(DB, businessLine, generatedAt, windowStart),
     readUsers(DB, businessLine, generatedAt),
     readCinemas(DB, businessLine, generatedAt, windowStart),
     readNotifications(DB, businessLine, windowStart),
-    readHealth(DB, businessLine)
+    readHealth(DB, businessLine),
+    readSeatFeedback(DB, windowStart)
   ]);
-  return { generatedAt, window, summary, users, cinemas, notifications, health };
+  return { generatedAt, window, summary, users, cinemas, notifications, health, seatFeedback };
 }
