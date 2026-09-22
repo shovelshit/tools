@@ -4,6 +4,8 @@
 // 主键 fb_key = seatfb:{cinemaId}:{seqNo||"na"}(沿用原 KV key), 同 key 覆盖更新不堆积; 管理端 DELETE 清理。
 
 import * as db from "./db.js";
+import { ADMIN_USER_ID, ensureAdminAccount } from "./auth.js";
+import { enqueueNotification, wakeNotificationDispatcher } from "./notification-outbox.js";
 
 const PREFIX = "seatfb:";
 
@@ -15,6 +17,30 @@ function chinaDay(value) {
 
 export function seatFeedbackKey(cinemaId, seqNo) {
   return `${PREFIX}${String(cinemaId || "na")}:${String(seqNo || "na")}`;
+}
+
+async function notifyAdmin(env, key, record) {
+  try {
+    await ensureAdminAccount(env);
+    const result = await enqueueNotification(env.DB, {
+      eventKey: `${key}:${record.reportedAt}`,
+      userId: ADMIN_USER_ID,
+      kind: "seat-feedback",
+      title: "💺 收到座位异常反馈",
+      content: [
+        `来源：${record.source === "manual" ? "用户手动反馈" : "系统自动检测"}`,
+        `影院 ID：${record.cinemaId}`,
+        `影片 ID：${record.movieId || "未提供"}`,
+        `场次 ID：${record.seqNo || "未提供"}`,
+        `反馈时间：${record.reportedAt}`
+      ].join("\n"),
+      credentialVersion: 0,
+      nowMs: new Date(record.reportedAt).getTime()
+    });
+    if (result.created) await wakeNotificationDispatcher(env);
+  } catch {
+    // 反馈已经留档时，通知故障不能让用户误以为反馈失败。
+  }
 }
 
 // 记录一条反馈。source: "manual"(用户按钮上报) | "auto"(cron/立即锁座解析失败自动留档)。
@@ -40,6 +66,7 @@ export async function recordSeatFeedback(env, input = {}) {
       if (existing?.source === "auto" && existing?.day === record.day) return false;
     }
     await db.putSeatFeedbackRow(env.DB, key, record);
+    await notifyAdmin(env, key, record);
     return true;
   } catch {
     return false;

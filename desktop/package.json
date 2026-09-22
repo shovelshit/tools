@@ -43,6 +43,7 @@
           "account.js",
           "app.js",
           "connection-profile.js",
+          "seat-layout.js",
           "lock.js",
           "platform.js",
           "polling.js",

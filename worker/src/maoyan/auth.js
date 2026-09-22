@@ -1,7 +1,7 @@
 import { accountStatus, getAccount, getAccountByKey, hashAccessKey } from "./accounts.js";
 import { requireBusinessAccess } from "../common/business.js";
 
-const ADMIN_USER_ID = "00000000-0000-4000-8000-000000000001";
+export const ADMIN_USER_ID = "00000000-0000-4000-8000-000000000001";
 const ADMIN_SESSION_MS = 24 * 60 * 60 * 1000;
 
 export class AccountAuthError extends Error {

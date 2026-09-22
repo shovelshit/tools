@@ -314,7 +314,7 @@ export async function putSeatFeedbackRow(db, key, record) {
     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) " +
     "ON CONFLICT(fb_key) DO UPDATE SET reported_at = excluded.reported_at, day = excluded.day, " +
     "token_id = excluded.token_id, cinema_id = excluded.cinema_id, movie_id = excluded.movie_id, " +
-    "seq_no = excluded.seq_no, source = excluded.source"
+    "seq_no = excluded.seq_no, source = excluded.source, status = excluded.status"
   ).bind(
     key, record.reportedAt, record.day || null, record.tokenId || null, record.cinemaId || null,
     record.movieId || null, record.seqNo || null, record.source || null, record.status || "unprocessed"

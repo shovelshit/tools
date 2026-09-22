@@ -1,5 +1,9 @@
 // 猫眼锁座 Beta 配置弹窗。会话文件仅在一次上传请求中存在于浏览器内存。
 (function (root) {
+  const seatLayout = root.MaoyanSeatLayout;
+  if (!seatLayout) throw new Error("座位布局模块未加载");
+  const { seatSegmentOf, seatPosition, seatDisplayLabel } = seatLayout;
+
   const RULE_LABELS = {
     waiting_schedule: "等待目标场次",
     matching: "正在锁座",
@@ -63,75 +67,6 @@
         }];
       }))
     );
-  }
-
-  // 猫眼座位口径: 票面排号 = seat.rowId (影厅内 1..N 连续)。
-  // data-no 是官方原样透传的不透明主键: 「-」三段/「#」三段/纯数字 seatId 并存,
-  // 且有万达天和型「区-座-排」与寰映型「区-排-座」两种段序(真实数据锚定)。
-  // 判别优先按行内特征: 同排恒定段=排号、逐座变化段=座号(普查 75/75 零失败);
-  // 不足时回落全局启发式; 纯数字等无段语义的座位由 seatPosition 用解析序号兜底。
-  function seatSegmentOf(seats) {
-    const parsed = [];
-    for (const seat of seats || []) {
-      const parts = String(seat?.seatNo || "").split(/[^0-9A-Za-z]+/);
-      if (parts.length === 3 && parts.every((part) => part)) {
-        parsed.push({ rowId: String(seat?.rowId ?? ""), seg2: parts[1], seg3: parts[2] });
-      }
-    }
-    const rowGroups = new Map();
-    for (const item of parsed) {
-      if (!rowGroups.has(item.rowId)) rowGroups.set(item.rowId, []);
-      rowGroups.get(item.rowId).push(item);
-    }
-    let checkedRows = 0;
-    let vary2 = 0;
-    let vary3 = 0;
-    for (const group of rowGroups.values()) {
-      if (group.length < 2) continue;
-      checkedRows += 1;
-      if (new Set(group.map((item) => item.seg2)).size > 1) vary2 += 1;
-      if (new Set(group.map((item) => item.seg3)).size > 1) vary3 += 1;
-    }
-    if (checkedRows > 0) {
-      if (vary2 > 0 && vary3 === 0) return 2;
-      if (vary3 > 0 && vary2 === 0) return 3;
-    }
-    const uniq2 = new Set(parsed.map((item) => item.seg2)).size;
-    const uniq3 = new Set(parsed.map((item) => item.seg3)).size;
-    return uniq3 > uniq2 && uniq3 > rowGroups.size ? 3 : 2;
-  }
-
-  function seatPosition(seat, seatSegment) {
-    const source = seat && typeof seat === "object" ? seat.seatNo : seat;
-    const row = seat && typeof seat === "object" ? Number(seat.rowId) : NaN;
-    if (!Number.isInteger(row) || row <= 0) return null;
-    const parts = String(source || "").split(/[^0-9A-Za-z]+/);
-    const seatNumber = parts.length === 3 && parts.every((part) => /^\d+$/.test(part))
-      ? Number(parts[seatSegment === 3 ? 2 : 1])
-      : NaN;
-    if (Number.isInteger(seatNumber) && seatNumber > 0) return { rowNumber: row, seatNumber };
-    // 纯数字 seatId 等无段语义: 与官方已选气泡同口径, 用解析列号兜底(座位不再整格丢失)
-    const column = seat && typeof seat === "object" ? Number(seat.columnId) : NaN;
-    if (Number.isInteger(column) && column > 0) return { rowNumber: row, seatNumber: column };
-    return null;
-  }
-
-  function seatDisplayLabel(seat, seatSegment) {
-    const source = seat && typeof seat === "object" ? seat.seatNo : seat;
-    const row = seat && typeof seat === "object" ? Number(seat.rowId) : NaN;
-    if (!Number.isInteger(row) || row <= 0) return String(source || "");
-    const parts = String(source || "").split(/[^0-9A-Za-z]+/);
-    if (parts.length === 3 && parts.every((part) => /^\d+$/.test(part))) {
-      // 「区-排-座」强信号(仅展示文案; 座位图几何排序仍由 seatPosition 全图普查判别):
-      // seg2===rowId 且 seg3===columnId → 寰映激光IMAX型, 座号取 seg3。修复: 未加载座位图时
-      // segment 缺省 2(万达「区-座-排」假设), 会把排号段误当座号(真实缺陷: 9排15座→9排9座)。
-      const colOrdinal = Number(seat.columnId);
-      if (colOrdinal > 0 && Number(parts[1]) === row && Number(parts[2]) === colOrdinal) {
-        return `${row}排${Number(parts[2])}座`;
-      }
-    }
-    const position = seatPosition(seat, seatSegment);
-    return position ? `${position.rowNumber}排${position.seatNumber}座` : String(source || "");
   }
 
   // 情侣座按排内物理位置配对。columnId/票面座号在不同影院既可能递增也可能递减，
@@ -611,7 +546,8 @@
         if (!rows.has(key)) rows.set(key, []);
         rows.get(key).push(seat);
       }
-      const orderedRows = [...rows.entries()].sort((a, b) => Number(a[0]) - Number(b[0]));
+      // 上游 DOM 顺序就是影厅从前到后的官方排序；字母排号不能再做 Number 排序。
+      const orderedRows = [...rows.entries()];
       // 列号表头: 与猫眼一致用票面座号。物理格模式下跨排过道错位会让同一格位座号不同
       // (如排10 的孤立座), 取该格位上出现最多的票面号, 过道格留空
       const allCols = seats.map((seat) => seatPosition(seat, state.seatSeg)?.seatNumber).filter(Number.isFinite);
@@ -1033,7 +969,7 @@
         // 过期响应: 用户已切到其他场次, 丢弃, 不覆盖新渲染
         if (loadSeq !== seatLoadSeq || !isCurrentProfileGeneration(generation)) return;
         // 座号段判别: 两种影厅口径(区-座-排 / 区-排-座)自动适配, 布局与文案保持票面语义
-        state.seatSeg = seatSegmentOf(seatMap?.seats);
+        state.seatSeg = seatMap?.layout || seatSegmentOf(seatMap?.seats);
         state.seatMap = seatMap;
         renderSeatMap();
         if (els.officialToggle?.checked) void loadOfficialCompare();

@@ -315,7 +315,7 @@ async function main() {
       assert.ok(entries.includes("desktop/main/index.js"));
       assert.ok(entries.includes("desktop/preload/index.js"));
       assert.ok(entries.includes("pages/maoyan/index.html"));
-      for (const required of ["account.js", "connection-profile.js", "platform.js", "polling.js", "workflow.js", "maoyan-seat.css", "assets/cinema-background.webp"]) {
+      for (const required of ["account.js", "connection-profile.js", "seat-layout.js", "platform.js", "polling.js", "workflow.js", "maoyan-seat.css", "assets/cinema-background.webp"]) {
         assert.ok(entries.includes(`pages/maoyan/${required}`), `Missing packaged monitor asset: ${required}`);
       }
       for (const forbidden of ["admin.html", "admin.js", "admin-dashboard.js", "claim.html", "claim.js", "claim-page.js", "claim.css", "fingerprint.js"]) {

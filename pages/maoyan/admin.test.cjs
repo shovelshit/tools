@@ -32,6 +32,11 @@ test("dashboard module uses the authenticated request callback and safe text ren
   assert.doesNotMatch(dashboardSource, /innerHTML\s*=/);
 });
 
+test("seat feedback status control names the action instead of only showing state", () => {
+  assert.match(dashboardSource, /标记已处理/);
+  assert.match(dashboardSource, /重新打开/);
+});
+
 test("dashboard layout stays bounded on desktop and narrow mobile viewports", () => {
   assert.match(style, /\.dashboard-view\s*\{[^}]*min-width:\s*0/);
   assert.match(style, /\.dashboard-grid\s*\{[^}]*min-width:\s*0/);

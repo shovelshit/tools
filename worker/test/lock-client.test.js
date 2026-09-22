@@ -331,6 +331,10 @@ test("falls back to parse ordinals for numeric seat ids the way the official bub
   assert.equal(seatDisplayLabel(seat, 3), "9排12座");
   // columnId 缺失时原样返回
   assert.equal(seatDisplayLabel({ seatNo: "7376", rowId: "9" }), "7376");
+  assert.equal(
+    seatDisplayLabel({ seatNo: "6166", rowId: "A", columnId: "26" }),
+    "A排26座"
+  );
 });
 
 test("matches only the exact target date and HH:mm", () => {

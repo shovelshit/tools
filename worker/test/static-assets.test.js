@@ -55,6 +55,15 @@ test("built monitor page includes its cinema background image", async () => {
   assert.ok(image.length > 10000);
 });
 
+test("built monitor page includes the seat layout strategy loaded before the lock controller", async () => {
+  const root = await mkdtemp(join(tmpdir(), "maoyan-assets-"));
+  const target = join(root, "public");
+  await buildAssets({ target });
+  const html = await readFile(join(target, "maoyan/index.html"), "utf8");
+  assert.ok((await walk(target)).includes("maoyan/seat-layout.js"));
+  assert.ok(html.indexOf("seat-layout.js") < html.indexOf("lock.js"));
+});
+
 test("static asset build includes the isolated Store browser application", async () => {
   const root = await mkdtemp(join(tmpdir(), "store-assets-"));
   const target = join(root, "public");

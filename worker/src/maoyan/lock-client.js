@@ -1,5 +1,8 @@
 import { lockError, lockLog } from "./log.js";
 import { captureFailureDetail } from "./failure-detail.js";
+import { seatDisplayLabel, seatSegmentOf } from "./seat-layout.js";
+
+export { seatDisplayLabel, seatSegmentOf } from "./seat-layout.js";
 
 const ORIGIN = "https://www.maoyan.com";
 const HOST = "www.maoyan.com";
@@ -272,74 +275,6 @@ export function extractOfficialSeatHtml(html) {
   } catch {
     return "";
   }
-}
-
-// 猫眼座位口径: 票面排号 = data-row-id (影厅内 1..N 连续)。
-// data-no 是官方前端原样透传的不透明主键, 实际存在四种编码形状(55 页普查实证):
-//   ① 「#」三段: 影厅长编码#排#座 (seg2/seg3 常见两位前导零)
-//   ② 「-」三段·全零区码: 0000000000000001-排-座 (seg3 前导零)
-//   ③ 「-」三段·变长零填充区码: 同页 7~12 位填充并存, seg1 不能作为判别依据
-//   ④ 纯数字 seatId: 无分隔符(约 15% 影院), 排/座信息无法从 seatNo 推出
-// 另有万达天和型「区-座-排」与寰映型「区-排-座」两种段序, 以及多区厅同排跨区(seg1 行内混区)。
-// 展示一律用下方两个函数(需要 seat 携带 rowId/columnId); 内部请求仍使用原始 seatNo(不可改写)。
-export function seatSegmentOf(seats) {
-  // 分段: 按非字母数字切分, 天然兼容「-」「#」及未来其它分隔符; 三段齐全才算有段语义
-  const parsed = [];
-  for (const seat of seats || []) {
-    const parts = String(seat?.seatNo || "").split(/[^0-9A-Za-z]+/);
-    if (parts.length === 3 && parts.every((part) => part)) {
-      parsed.push({ rowId: String(seat?.rowId ?? ""), seg2: parts[1], seg3: parts[2] });
-    }
-  }
-  // 行内判别(普查 75/75 零失败): 同一排内逐座恒定的段是排号, 逐座变化的段是座号
-  const rowGroups = new Map();
-  for (const item of parsed) {
-    if (!rowGroups.has(item.rowId)) rowGroups.set(item.rowId, []);
-    rowGroups.get(item.rowId).push(item);
-  }
-  let checkedRows = 0;
-  let vary2 = 0;
-  let vary3 = 0;
-  for (const group of rowGroups.values()) {
-    if (group.length < 2) continue;
-    checkedRows += 1;
-    if (new Set(group.map((item) => item.seg2)).size > 1) vary2 += 1;
-    if (new Set(group.map((item) => item.seg3)).size > 1) vary3 += 1;
-  }
-  if (checkedRows > 0) {
-    // 座号段须在所有受检排内逐座变化、排号段在所有受检排内恒定; 混合特征视为判别不充分
-    if (vary2 > 0 && vary3 === 0) return 2;
-    if (vary3 > 0 && vary2 === 0) return 3;
-  }
-  // 全局启发式兜底(单座规则/全是单座排/混合特征): 三段中唯一值更多者为座号
-  const uniq2 = new Set(parsed.map((item) => item.seg2)).size;
-  const uniq3 = new Set(parsed.map((item) => item.seg3)).size;
-  return uniq3 > uniq2 && uniq3 > rowGroups.size ? 3 : 2;
-}
-
-export function seatDisplayLabel(seatOrSeatNo, seatSegment = 2) {
-  const seat = seatOrSeatNo && typeof seatOrSeatNo === "object" ? seatOrSeatNo : null;
-  if (!seat) return seatOrSeatNo == null ? "" : String(seatOrSeatNo);
-  const seatNo = String(seat.seatNo || "");
-  const row = Number(seat.rowId);
-  if (!Number.isInteger(row) || row <= 0) return seatNo;
-  const parts = seatNo.split(/[^0-9A-Za-z]+/);
-  if (parts.length === 3 && parts.every((part) => /^\d+$/.test(part))) {
-    // 「区-排-座」强信号: seg2 与票面排号一致且 seg3 与解析列号一致(寰映激光IMAX型实证)。
-    // 不依赖座位图普查 —— 单座规则/未加载座位图时普查不充分、恒回落 seg=2(万达「区-座-排」假设),
-    // 会把该型排号段误当座号(真实缺陷: 9排15座 显示成 9排9座)。
-    const colOrdinal = Number(seat.columnId);
-    if (colOrdinal > 0 && Number(parts[1]) === row && Number(parts[2]) === colOrdinal) {
-      return `${row}排${Number(parts[2])}座`;
-    }
-    // 段有效(三段全数字) → 排号仍用 rowId(与真实订单票面「9排1座」锚定), 座号取判别段并去前导零
-    const seatNumber = Number(parts[seatSegment === 3 ? 2 : 1]);
-    if (Number.isInteger(seatNumber) && seatNumber > 0) return `${row}排${seatNumber}座`;
-  }
-  // 段无效(纯数字 seatId 等) → 与官方「已选座」气泡同口径, 用解析序号兜底
-  const column = Number(seat.columnId);
-  if (Number.isInteger(column) && column > 0) return `${row}排${column}座`;
-  return seatNo;
 }
 
 export function findExactShows(data, { movieId, targetDate, templateTime }) {

@@ -104,6 +104,66 @@
       └── 出网                猫眼接口 / Bark / Server酱 / GitHub Release 元数据
 ```
 
+### 座位解析与反馈架构
+
+```mermaid
+flowchart TB
+    Maoyan["猫眼座位接口<br/>原始 HTML / seatNo / rowId / columnId"]
+
+    subgraph Worker["Cloudflare Worker"]
+        Parser["原始座位解析<br/>保留 seatNo，不改写下单参数"]
+        Registry["座位策略注册表<br/>识别厅型并路由"]
+        Default["default<br/>默认解析"]
+        Wanda["wanda<br/>区-座-排"]
+        Huanying["huanying<br/>区-排-座"]
+        Numeric["numeric-id<br/>纯数字座位 ID"]
+        Alpha["alpha-row<br/>A/B/C 字母排号"]
+        Model["统一座位模型<br/>rowLabel / seatNumber<br/>orderIndex / availability<br/>raw seatNo"]
+    end
+
+    subgraph Clients["客户端"]
+        Web["Web 监控页"]
+        Electron["Electron 客户端"]
+        Renderer["统一座位渲染器<br/>只负责布局、颜色和选择"]
+    end
+
+    subgraph Lock["锁座链路"]
+        Rule["锁座规则<br/>保存原始 seatNo"]
+        Order["CreateOrder<br/>使用原始 seatNo 下单"]
+    end
+
+    subgraph Feedback["异常反馈闭环"]
+        Report["用户反馈座位异常"]
+        D1["D1 seat_feedback<br/>未处理 / 已处理"]
+        Notify["管理员通知 Outbox"]
+        Admin["管理员看板<br/>标记已处理 / 重新打开"]
+    end
+
+    Maoyan --> Parser --> Registry
+    Registry --> Default
+    Registry --> Wanda
+    Registry --> Huanying
+    Registry --> Numeric
+    Registry --> Alpha
+    Default --> Model
+    Wanda --> Model
+    Huanying --> Model
+    Numeric --> Model
+    Alpha --> Model
+    Model --> Web
+    Model --> Electron
+    Web --> Renderer
+    Electron --> Renderer
+    Renderer --> Rule --> Order
+    Parser -. 原始 seatNo .-> Order
+    Renderer --> Report --> D1
+    Report --> Notify
+    D1 --> Admin
+    Admin --> D1
+```
+
+Worker 在 `worker/src/maoyan/seat-layout/strategies/` 中按院线或编码类型独立维护解析策略，由 `worker/src/maoyan/seat-layout.js` 统一识别和路由。Worker 对客户端输出归一化的 `rowLabel`、`seatNumber`、`orderIndex` 和售卖状态；Web 与 Electron 共用渲染器。用于创建订单的 `seatNo` 始终保留猫眼原值，不使用展示坐标反向生成。
+
 ### 目录结构
 
 ```
@@ -112,6 +172,7 @@ pages/                    # 前端源码（构建时按白名单复制）
 ├── maoyan/               # 猫眼监控+锁座
 │   ├── index.html        #   工具页（监控配置 + 锁座面板）
 │   ├── app.js / lock.js  #   监控逻辑 / 锁座弹窗（座位图、官方对比区）
+│   ├── seat-layout.js    #   归一化座位模型的浏览器兼容适配
 │   ├── admin.html/js     #   管理端（令牌签发/吊销）
 │   └── secure-store.js   #   令牌 AES-GCM 加密存储
 └── store/                # 应用商店
@@ -126,7 +187,7 @@ worker/                   # Cloudflare Worker（tools-api）
 │   ├── maoyan/           # 猫眼域：api(上游) check(监控) cities user ddl
 │   │                     #   cron(窗口) tokens(令牌) log notify
 │   │                     #   lock-api/rule/client/runner/session(锁座链路)
-│   │                     #   seat-feedback
+│   │                     #   seat-layout + strategies(座位解析策略) / seat-feedback
 │   └── store/proxy.js    # 应用商店文件代理
 └── test/                 # node:test 单测
 

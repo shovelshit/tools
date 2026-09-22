@@ -9,7 +9,7 @@ const PAGE_FILES = [
   "index.html", "admin.html", "claim.html", "download.html",
   "style.css", "claim.css", "maoyan-seat.css", "download.css",
   "account.js", "admin.js", "admin-dashboard.js", "app.js", "claim-page.js", "claim.js", "download-page.js",
-  "connection-profile.js", "fingerprint.js", "lock.js", "platform.js",
+  "connection-profile.js", "fingerprint.js", "seat-layout.js", "lock.js", "platform.js",
   "polling.js", "runtime.js", "secure-store.js", "ui.js", "workflow.js"
 ];
 

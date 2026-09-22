@@ -1,5 +1,6 @@
 import { json } from "../common/http.js";
 import { fetchSeatMap } from "./lock-client.js";
+import { detectSeatLayout, resolveSeatPosition } from "./seat-layout.js";
 import { recordSeatFeedback } from "./seat-feedback.js";
 import {
   getLockSessionStatus,
@@ -99,23 +100,32 @@ async function uploadBody(request) {
 }
 
 function publicSeatMap(seatMap) {
+  const seats = seatMap.seats || [];
+  const layout = detectSeatLayout(seats);
   return {
     seqNo: String(seatMap.seqNo),
     sectionId: String(seatMap.sectionId),
     sectionName: String(seatMap.sectionName),
     // 每排物理格总数(含过道占位): 前端复现主站物理布局用, 旧解析无此字段时为 0
     cols: Number(seatMap.cols) || 0,
-    seats: (seatMap.seats || []).map(({ seatNo, rowId, columnId, type, available, availability, disabledReason, orderIndex }) => ({
-      seatNo: String(seatNo),
-      rowId: String(rowId),
-      columnId: String(columnId),
-      type: String(type || ""),
-      available: available === true,
-      availability: ["available", "sold", "unavailable", "unknown"].includes(availability) ? availability : available === true ? "available" : "unknown",
-      disabledReason: disabledReason == null ? null : String(disabledReason),
-      // 排内物理位次(含过道占位计数): 主站同款布局锚点
-      orderIndex: Number(orderIndex) || 0
-    }))
+    layout,
+    seats: seats.map((seat) => {
+      const { seatNo, rowId, columnId, type, available, availability, disabledReason, orderIndex } = seat;
+      const position = resolveSeatPosition(seat, layout);
+      return {
+        seatNo: String(seatNo),
+        rowId: String(rowId),
+        columnId: String(columnId),
+        rowLabel: position?.rowNumber ?? String(rowId),
+        seatNumber: position?.seatNumber ?? null,
+        type: String(type || ""),
+        available: available === true,
+        availability: ["available", "sold", "unavailable", "unknown"].includes(availability) ? availability : available === true ? "available" : "unknown",
+        disabledReason: disabledReason == null ? null : String(disabledReason),
+        // 排内物理位次(含过道占位计数): 主站同款布局锚点
+        orderIndex: Number(orderIndex) || 0
+      };
+    })
   };
 }
 

@@ -45,6 +45,37 @@ test("手动反馈写入纯标识记录, 同 key 覆盖更新", async () => {
   assert.equal(listed[0].reportedAt, "2026-09-12T21:00:00.000Z");
   assert.equal(await updateSeatFeedback(env, key, "processed"), true);
   assert.equal((await listSeatFeedback(env))[0].status, "processed");
+
+  await recordSeatFeedback(env, {
+    tokenId, cinemaId: "25428", movieId: "7", seqNo: "100", source: "manual",
+    now: new Date("2026-09-12T22:00:00.000Z")
+  });
+  assert.equal((await listSeatFeedback(env))[0].status, "unprocessed");
+});
+
+test("收到座位反馈时为管理员排队通知", async () => {
+  let wakes = 0;
+  const env = {
+    DB: new MemoryD1(),
+    NOTIFICATION_DISPATCHER: {
+      idFromName: () => "main",
+      get: () => ({ fetch: async () => { wakes += 1; return new Response("{}"); } })
+    }
+  };
+  assert.equal(await recordSeatFeedback(env, {
+    tokenId, cinemaId: "37534", movieId: "248172", seqNo: "202609260042783", source: "manual", now
+  }), true);
+  const row = await env.DB.prepare(
+    "SELECT user_id,kind,payload,state FROM notification_outbox ORDER BY id DESC LIMIT 1"
+  ).first();
+  assert.equal(row.user_id, "00000000-0000-4000-8000-000000000001");
+  assert.equal(row.kind, "seat-feedback");
+  assert.equal(row.state, "pending");
+  const payload = JSON.parse(row.payload);
+  assert.equal(payload.title, "💺 收到座位异常反馈");
+  assert.match(payload.content, /37534/);
+  assert.match(payload.content, /202609260042783/);
+  assert.equal(wakes, 1);
 });
 
 test("自动留档按中国日期当天去重, 手动反馈不受去重限制", async () => {

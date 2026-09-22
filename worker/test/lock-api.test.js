@@ -105,8 +105,8 @@ test("API response secrecy: template seats omit official HTML and comparison is 
     const seatMapBody = (await body(response)).seatMap;
     assert.equal(Object.hasOwn(seatMapBody, "officialHtml"), false);
     assert.deepEqual(seatMapBody, {
-      seqNo: "100", sectionId: "1", sectionName: "1号厅", cols: 0,
-      seats: [{ seatNo: "1-6-18", rowId: "6", columnId: "18", type: "N", available: true, availability: "available", disabledReason: null, orderIndex: 1 }]
+      seqNo: "100", sectionId: "1", sectionName: "1号厅", cols: 0, layout: "wanda",
+      seats: [{ seatNo: "1-6-18", rowId: "6", columnId: "18", rowLabel: 6, seatNumber: 18, type: "N", available: true, availability: "available", disabledReason: null, orderIndex: 1 }]
     });
     const officialResponse = await handleLockApi(
       request("/api/lock/official-seats?cinemaId=25428&movieId=7&seqNo=100"),

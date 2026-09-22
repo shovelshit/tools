@@ -5,8 +5,11 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 function loadLockModule() {
+  const layoutSource = fs.readFileSync(path.join(__dirname, "seat-layout.js"), "utf8");
   const source = fs.readFileSync(path.join(__dirname, "lock.js"), "utf8");
   const context = { module: { exports: {} }, exports: {}, Intl, Date, Set };
+  vm.runInNewContext(layoutSource, context, { filename: "seat-layout.js" });
+  context.module = { exports: {} };
   vm.runInNewContext(source, context, { filename: "lock.js" });
   return context.module.exports;
 }
@@ -92,10 +95,14 @@ function mountLock({
   root.window = root;
   const source = fs.readFileSync(path.join(__dirname, "lock.js"), "utf8");
   const module = { exports: {} };
-  vm.runInNewContext(source, {
+  const vmContext = {
     module, exports: module.exports, Intl, Date, Set, document, window: root,
     Option: function Option(text, value) { this.text = text; this.value = value; }
-  }, { filename: "lock.js" });
+  };
+  const layoutSource = fs.readFileSync(path.join(__dirname, "seat-layout.js"), "utf8");
+  vm.runInNewContext(layoutSource, vmContext, { filename: "seat-layout.js" });
+  vmContext.module = module;
+  vm.runInNewContext(source, vmContext, { filename: "lock.js" });
   const runtime = {
     kind: runtimeInfo?.kind,
     getRuntimeInfo: () => runtimeInfo,
@@ -534,6 +541,16 @@ test("lock utilities keep hash-delimited and numeric seats selectable and labell
   // 既有保守护栏不回退: 非数字段/缺 rowId 仍无法定位
   assert.equal(lockUtils.seatPosition({ seatNo: "1-2-x", rowId: "3" }), null);
   assert.equal(lockUtils.seatPosition({ seatNo: "1-2-3" }), null);
+});
+
+test("lock utilities preserve alphabetic row labels from Maoyan seat maps", () => {
+  const { lockUtils } = loadLockModule();
+  const seat = { seatNo: "6166", rowId: "A", columnId: "26", orderIndex: 6 };
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(lockUtils.seatPosition(seat, 2))),
+    { rowNumber: "A", seatNumber: 26 }
+  );
+  assert.equal(lockUtils.seatDisplayLabel(seat, 2), "A排26座");
 });
 
 test("lock utilities require a selected cinema before enabling lock configuration", () => {

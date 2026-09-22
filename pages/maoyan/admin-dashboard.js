@@ -16,8 +16,21 @@
         const tr = document.createElement("tr");
         [fmt(item.reportedAt), item.cinemaId, item.movieId, item.seqNo, item.source === "manual" ? "手动" : "自动", item.tokenId].forEach((value) => { const td = document.createElement("td"); td.textContent = value == null ? "-" : String(value); tr.append(td); });
         const status = document.createElement("td");
-        const button = document.createElement("button"); button.className = "link-btn"; button.textContent = item.status === "processed" ? "已处理" : "未处理";
-        button.addEventListener("click", async () => { button.disabled = true; try { await request("/api/admin/seat-feedback", { method: "POST", body: JSON.stringify({ key: item.key, status: item.status === "processed" ? "unprocessed" : "processed" }) }); await load(); } catch (error) { button.disabled = false; const alert = $("dashboard-error"); alert.textContent = `状态更新失败：${error.message}`; alert.classList.remove("hidden"); } });
+        const button = document.createElement("button"); button.type = "button"; button.className = "link-btn";
+        const renderAction = () => { button.textContent = item.status === "processed" ? "重新打开" : "标记已处理"; };
+        renderAction();
+        button.addEventListener("click", async () => {
+          button.disabled = true;
+          const nextStatus = item.status === "processed" ? "unprocessed" : "processed";
+          try {
+            await request("/api/admin/seat-feedback", { method: "POST", body: JSON.stringify({ key: item.key, status: nextStatus }) });
+            item.status = nextStatus;
+            renderAction();
+            $("dashboard-error")?.classList.add("hidden");
+          } catch (error) {
+            const alert = $("dashboard-error"); alert.textContent = `状态更新失败：${error.message}`; alert.classList.remove("hidden");
+          } finally { button.disabled = false; }
+        });
         status.append(button); tr.append(status); body.append(tr);
       }
     }
@@ -34,7 +47,7 @@
       if (!(n.recent || []).length) { const p = document.createElement("p"); p.className = "muted empty-tip"; p.textContent = "暂无通知记录"; list.append(p); } else for (const item of n.recent) { const p = document.createElement("p"); p.textContent = `${item.kind || "通知"} · ${item.state || "-"} · ${fmt(item.createdAt)}` + (item.lastError ? ` · ${item.lastError}` : ""); list.append(p); }
       set("dashboard-latest-batch", fmt(data.health?.latestBatchAt)); set("dashboard-oldest-pending", fmt(data.health?.oldestPendingNotificationAt));
       const feedback = data.seatFeedback || {};
-      set("dashboard-seat-feedback-summary", `近 24 小时：${feedback.count || 0} 条`);
+      set("dashboard-seat-feedback-summary", `全部反馈：${feedback.count || 0} 条`);
       renderFeedback(feedback.items || feedback.recent || []);
     }
     async function load() {
