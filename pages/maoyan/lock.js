@@ -112,6 +112,13 @@
       : { buttonText: "保存自动锁座规则", loadingText: "保存中...", successText: "自动锁座规则已启用" };
   }
 
+  function parseTimeTolerance(value) {
+    const raw = String(value ?? "").trim();
+    if (!raw) return null;
+    const minutes = Number(raw);
+    return Number.isInteger(minutes) && minutes >= 0 && minutes <= 180 ? minutes : null;
+  }
+
   async function changeMovieSelection({ state, movieId, renderShowOptions, loadSeats }) {
     state.movieId = movieId;
     state.templateSeqNo = "";
@@ -156,7 +163,7 @@
     const els = {
       button: $("btn-lock-seats"), overlay: $("lock-overlay"), close: $("btn-lock-close"),
       cinema: $("lock-cinema"), movie: $("lock-movie"), template: $("lock-template"), date: $("lock-target-date"),
-      timeTolerance: $("lock-time-tolerance"), timeToleranceRow: $("lock-time-tolerance-row"), inferenceWarning: $("lock-inference-warning"),
+      timeTolerance: $("lock-time-tolerance"), inferenceWarning: $("lock-inference-warning"),
       file: $("lock-session-file"), login: $("btn-lock-login"), upload: $("btn-lock-upload"), removeSession: $("btn-lock-remove-session"),
       sessionStatus: $("lock-session-status"), seatGrid: $("lock-seat-grid"), seatCount: $("lock-seat-count"),
       risk: $("lock-risk-accepted"), ruleStatus: $("lock-rule-status"), cancelRule: $("btn-lock-cancel-rule"),
@@ -302,8 +309,7 @@
     }
 
     function selectedTimeTolerance() {
-      const value = Number(els.timeTolerance?.value);
-      return Number.isInteger(value) && value >= 0 && value <= 180 ? value : null;
+      return parseTimeTolerance(els.timeTolerance?.value);
     }
 
     function displayedTimeTolerance(value) {
@@ -313,7 +319,6 @@
     // 推断控件与风险提示只在未来日期无真实场次时显示，更新范围不会影响已选座位。
     function renderInferenceControls() {
       const inferred = state.seatMapIsTemplate === true && state.showMode === "template" && (els.date?.value || "") > chinaDate(new Date());
-      setHidden(els.timeToleranceRow, !inferred);
       setHidden(els.sectionRisk, !state.session?.uploaded || !inferred);
       if (!inferred || !els.inferenceWarning) return;
       const templateTime = templateForCurrent()?.tm || "";
@@ -1186,6 +1191,11 @@
     async function createRule() {
       const generation = capturedProfileGeneration();
       const action = lockAction(state.showMode);
+      const timeToleranceMinutes = selectedTimeTolerance();
+      if (timeToleranceMinutes === null) {
+        renderSelection();
+        return;
+      }
       if (state.showMode === "target") {
         const template = templateForCurrent();
         const labels = seatLabelMap();
@@ -1207,7 +1217,7 @@
       const payload = {
         cinemaId: state.context.cinemaId, movieId: state.movieId, templateSeqNo: state.templateSeqNo,
         targetDate: els.date.value, seatNos: [...state.selectedSeatNos], riskAccepted: els.risk.checked,
-        timeToleranceMinutes: Number(els.timeTolerance.value)
+        timeToleranceMinutes
       };
       try {
         await buttonLoading(els.submit, action.loadingText, async () => {
@@ -1448,7 +1458,7 @@
     createMaoyanLockController,
     lockUtils: {
       templatesFromMovies, chinaDateBounds, lockDateBounds, fitSeatViewport, seatPosition, seatDisplayLabel, seatSegmentOf, couplePartnerOf,
-      seatVisualState, isReadyToSubmit, isLockAvailable, lockAction, changeMovieSelection, preferredTargetShow, clearSeatSelection, publicSession, detailOpenState
+      seatVisualState, isReadyToSubmit, isLockAvailable, lockAction, parseTimeTolerance, changeMovieSelection, preferredTargetShow, clearSeatSelection, publicSession, detailOpenState
     }
   };
   if (typeof module !== "undefined" && module.exports) module.exports = exported;

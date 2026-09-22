@@ -36,16 +36,32 @@ test("lock layout source keeps the separate shell and scoped glass surfaces", ()
   assert.match(css, /\.workflow-progress\s*\{[^}]*background:\s*rgba\(27,\s*35,\s*40,\s*0\.62\)/);
 });
 
-test("inferred lock mode exposes a bounded tolerance control and dynamic warning", () => {
+test("inferred lock mode keeps the bounded tolerance control inside the risk panel and rejects blank input", () => {
   const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
   const source = fs.readFileSync(path.join(__dirname, "lock.js"), "utf8");
+  const riskStart = html.indexOf('<section class="lock-section lock-risk" id="lock-section-risk">');
+  const tolerance = html.indexOf('id="lock-time-tolerance"');
+  const acceptance = html.indexOf('id="lock-risk-accepted"');
+  const riskEnd = html.indexOf("</section>", riskStart);
   assert.match(html, /id="lock-time-tolerance"[^>]*type="number"[^>]*min="0"[^>]*max="180"/);
   assert.match(html, /id="lock-inference-warning"/);
+  assert.ok(riskStart < tolerance && tolerance < acceptance && acceptance < riskEnd);
+  assert.equal(html.slice(0, riskStart).includes('id="lock-time-tolerance-row"'), false);
   assert.match(source, /els\.timeTolerance\.value = "30"/);
-  assert.match(source, /timeToleranceMinutes:\s*Number\(els\.timeTolerance\.value\)/);
+  assert.match(source, /const raw = String\(value \?\? ""\)\.trim\(\);/);
+  assert.match(source, /if \(!raw\) return null;/);
+  assert.match(source, /const timeToleranceMinutes = selectedTimeTolerance\(\);/);
+  assert.match(source, /timeToleranceMinutes\n      }/);
   assert.match(source, /模板场次.*前后.*分钟内推断匹配/);
-  assert.match(source, /setHidden\(els\.timeToleranceRow, !inferred\)/);
   assert.match(source, /displayedTimeTolerance\(rule\.timeToleranceMinutes\)/);
+});
+
+test("time tolerance parsing rejects blank values instead of treating them as zero", () => {
+  const { lockUtils } = loadLockModule();
+  assert.equal(lockUtils.parseTimeTolerance(""), null);
+  assert.equal(lockUtils.parseTimeTolerance("   "), null);
+  assert.equal(lockUtils.parseTimeTolerance("0"), 0);
+  assert.equal(lockUtils.parseTimeTolerance("180"), 180);
 });
 
 function fakeElement() {
