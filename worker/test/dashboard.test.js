@@ -124,7 +124,13 @@ test("admin dashboard aggregates active maoyan users and excludes revoked/store 
   assert.equal(payload.health.latestBatchAt, NOW - 5 * 60 * 1000);
   assert.equal(payload.health.oldestPendingNotificationAt, NOW);
   assert.equal(payload.seatFeedback.count, 1);
-  assert.equal(payload.seatFeedback.recent[0].cinemaId, "cinema-a");
+  assert.equal(payload.seatFeedback.items[0].cinemaId, "cinema-a");
+  assert.equal(payload.seatFeedback.items[0].status, "unprocessed");
+  const statusUpdate = await worker.fetch(new Request("https://worker.example/api/admin/seat-feedback", {
+    method: "POST", headers: { "X-Admin-Token": "test-admin-token", "Content-Type": "application/json" },
+    body: JSON.stringify({ key: "seatfb:cinema-a:1", status: "processed" })
+  }), env);
+  assert.equal(statusUpdate.status, 200);
 });
 
 test("dashboard returns null success rate with no completed notifications and tolerates malformed JSON", async () => {

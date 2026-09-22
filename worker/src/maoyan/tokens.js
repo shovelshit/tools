@@ -4,7 +4,7 @@ import { json } from "../common/http.js";
 import { runCheck } from "./check.js";
 import { monitorError } from "./log.js";
 import { inMonitorWindow } from "./cron.js";
-import { listSeatFeedback, deleteSeatFeedback } from "./seat-feedback.js";
+import { listSeatFeedback, deleteSeatFeedback, updateSeatFeedback } from "./seat-feedback.js";
 import { accountStatus } from "./accounts.js";
 import { cleanupExpiredAccount } from "./account-lifecycle.js";
 import { accountErrorResponse, handleAdminAccountApi } from "./account-api.js";
@@ -121,6 +121,13 @@ export async function handleAdminTokens(request, env, url) {
         return json({ ok: false, error: "无效的反馈记录" }, 400);
       }
       return json({ ok: true });
+    }
+    if (url.pathname === "/api/admin/seat-feedback" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      const key = String(body.key || "");
+      const status = String(body.status || "");
+      if (!await updateSeatFeedback(env, key, status)) return json({ ok: false, error: "无效的反馈状态或记录" }, 400);
+      return json({ ok: true, key, status }, 200, { "Cache-Control": "no-store" });
     }
     return json({ error: "Method Not Allowed" }, 405);
   } catch (e) {

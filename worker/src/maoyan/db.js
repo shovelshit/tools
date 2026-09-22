@@ -304,27 +304,27 @@ export async function replaceChanges(db, tokenId, entries) {
 
 export async function getSeatFeedbackRow(db, key) {
   return await db.prepare(
-    "SELECT fb_key, reported_at, day, token_id, cinema_id, movie_id, seq_no, source FROM seat_feedback WHERE fb_key = ?"
+    "SELECT fb_key, reported_at, day, token_id, cinema_id, movie_id, seq_no, source, status FROM seat_feedback WHERE fb_key = ?"
   ).bind(key).first();
 }
 
 export async function putSeatFeedbackRow(db, key, record) {
   await db.prepare(
-    "INSERT INTO seat_feedback (fb_key, reported_at, day, token_id, cinema_id, movie_id, seq_no, source) " +
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?) " +
+    "INSERT INTO seat_feedback (fb_key, reported_at, day, token_id, cinema_id, movie_id, seq_no, source, status) " +
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) " +
     "ON CONFLICT(fb_key) DO UPDATE SET reported_at = excluded.reported_at, day = excluded.day, " +
     "token_id = excluded.token_id, cinema_id = excluded.cinema_id, movie_id = excluded.movie_id, " +
     "seq_no = excluded.seq_no, source = excluded.source"
   ).bind(
     key, record.reportedAt, record.day || null, record.tokenId || null, record.cinemaId || null,
-    record.movieId || null, record.seqNo || null, record.source || null
+    record.movieId || null, record.seqNo || null, record.source || null, record.status || "unprocessed"
   ).run();
 }
 
 // 管理端列表: 形状与 KV 版一致 {key, reportedAt, day, tokenId, cinemaId, movieId, seqNo, source}, 按 reportedAt 倒序
 export async function listSeatFeedbackRows(db) {
   const { results } = await db.prepare(
-    "SELECT fb_key, reported_at, day, token_id, cinema_id, movie_id, seq_no, source " +
+    "SELECT fb_key, reported_at, day, token_id, cinema_id, movie_id, seq_no, source, status " +
     "FROM seat_feedback ORDER BY reported_at DESC"
   ).all();
   return results.map((row) => ({
@@ -335,8 +335,15 @@ export async function listSeatFeedbackRows(db) {
     cinemaId: row.cinema_id,
     movieId: row.movie_id,
     seqNo: row.seq_no,
-    source: row.source
+    source: row.source,
+    status: row.status || "unprocessed"
   }));
+}
+
+export async function updateSeatFeedbackStatus(db, key, status) {
+  const result = await db.prepare("UPDATE seat_feedback SET status = ? WHERE fb_key = ?")
+    .bind(status, key).run();
+  return Number(result?.meta?.changes || 0) > 0;
 }
 
 export async function deleteSeatFeedbackRow(db, key) {

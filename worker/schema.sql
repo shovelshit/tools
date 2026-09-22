@@ -325,7 +325,8 @@ CREATE TABLE IF NOT EXISTS seat_feedback (
   cinema_id TEXT,
   movie_id TEXT,
   seq_no TEXT,
-  source TEXT
+  source TEXT,
+  status TEXT NOT NULL DEFAULT 'unprocessed'
 );
 
 CREATE TABLE IF NOT EXISTS lock_rule (

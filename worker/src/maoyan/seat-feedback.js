@@ -57,6 +57,11 @@ export async function deleteSeatFeedback(env, key) {
   return true;
 }
 
+export async function updateSeatFeedback(env, key, status) {
+  if (!String(key || "").startsWith(PREFIX) || !["processed", "unprocessed"].includes(status)) return false;
+  return await db.updateSeatFeedbackStatus(env.DB, key, status);
+}
+
 // 包装 fetchSeatMap: 解析失败(座位图格式无效)时自动留档后原样抛错, 其余错误不记。
 // 传入的 deps/options.fetchSeats(mock)不经包装; 留档失败不影响主流程。
 export function withSeatFeedback(base, env, context = {}) {

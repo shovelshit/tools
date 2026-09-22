@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { MemoryD1, createDB, testEncryptionKey, validSession } from "./helpers.js";
 import {
-  recordSeatFeedback, seatFeedbackKey, listSeatFeedback, deleteSeatFeedback, withSeatFeedback
+  recordSeatFeedback, seatFeedbackKey, listSeatFeedback, deleteSeatFeedback, updateSeatFeedback, withSeatFeedback
 } from "../src/maoyan/seat-feedback.js";
 import { handleLockApi } from "../src/maoyan/lock-api.js";
 import { handleAdminTokens } from "../src/maoyan/tokens.js";
@@ -31,7 +31,8 @@ test("手动反馈写入纯标识记录, 同 key 覆盖更新", async () => {
     cinemaId: "25428",
     movieId: "7",
     seqNo: "100",
-    source: "manual"
+    source: "manual",
+    status: "unprocessed"
   }]);
   // 覆盖更新: 换个令牌再报, 只留最新一条
   await recordSeatFeedback(env, {
@@ -42,6 +43,8 @@ test("手动反馈写入纯标识记录, 同 key 覆盖更新", async () => {
   assert.equal(listed.length, 1);
   assert.equal(listed[0].tokenId, "22222222-2222-4222-8222-222222222222");
   assert.equal(listed[0].reportedAt, "2026-09-12T21:00:00.000Z");
+  assert.equal(await updateSeatFeedback(env, key, "processed"), true);
+  assert.equal((await listSeatFeedback(env))[0].status, "processed");
 });
 
 test("自动留档按中国日期当天去重, 手动反馈不受去重限制", async () => {
