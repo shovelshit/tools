@@ -4,15 +4,90 @@ import { createAccountEnv, seedAccount } from "./account-fixtures.js";
 import { cinemaFixture } from "./scaling-fixtures.js";
 import {
   advanceSubscriber,
+  beginCinemaRun,
+  completeCinemaRun,
+  completeRunSubscriber,
   diffCinemaSnapshot,
+  hashCinemaData,
+  listRunSubscribers,
   listDueCinemas,
   listSubscribers,
+  normalizeCinemaData,
   persistCinemaSnapshot,
   saveConfigWithSubscription,
   syncSubscription
 } from "../src/maoyan/monitor-store.js";
 
 const NOW = Date.parse("2026-09-16T04:00:00.000Z");
+
+test("cinema data hashes are canonical and ignore irrelevant provider fields", () => {
+  const before = cinemaFixture({ seqNos: ["s1", "s2"] });
+  const after = structuredClone(before);
+  after.showData.movies[0].shows[0].plist.reverse();
+  after.showData.movies[0].shows[0].plist[0].providerOnly = "ignored";
+  assert.deepEqual(normalizeCinemaData(before), normalizeCinemaData(after));
+  assert.equal(hashCinemaData(before), hashCinemaData(after));
+
+  const changedTime = structuredClone(before);
+  changedTime.showData.movies[0].shows[0].plist[0].tm = "23:59";
+  const changedHall = structuredClone(before);
+  changedHall.showData.movies[0].shows[0].plist[0].th = "2号厅";
+  const changedStatus = structuredClone(before);
+  changedStatus.showData.movies[0].shows[0].plist[0].ticketStatus = 2;
+  assert.notEqual(hashCinemaData(before), hashCinemaData(changedTime));
+  assert.notEqual(hashCinemaData(before), hashCinemaData(changedHall));
+  assert.notEqual(hashCinemaData(before), hashCinemaData(changedStatus));
+});
+
+test("an active cinema run returns stored data idempotently", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  const first = cinemaFixture({ cinemaId: "run-1", seqNos: ["s1"] });
+  const started = await beginCinemaRun(env.DB, {
+    cinemaId: "run-1", runId: "r1", nowMs: NOW, fetchedData: first
+  });
+  const retry = await beginCinemaRun(env.DB, {
+    cinemaId: "run-1", runId: "r1", nowMs: NOW + 10, fetchedData: cinemaFixture({ seqNos: ["different"] })
+  });
+  assert.deepEqual(retry, started);
+});
+
+test("run subscribers skip completed users but keep failed users selectable", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  const first = await seedAccount(env, { expiresAt: NOW + 60_000 });
+  const second = await seedAccount(env, { expiresAt: NOW + 60_000 });
+  for (const account of [first.account, second.account]) {
+    await syncSubscription(env.DB, account.id, { enabled: true, cinemaId: "run-2" }, 1, NOW);
+  }
+  await env.DB.prepare("UPDATE monitor_subscriptions SET last_run_id=? WHERE user_id=?").bind("r2", first.account.id).run();
+  const page = await listRunSubscribers(env.DB, {
+    cinemaId: "run-2", runId: "r2", startedAt: NOW, limit: 10
+  });
+  assert.deepEqual(page.items.map((item) => item.userId), [second.account.id]);
+  await completeRunSubscriber(env.DB, {
+    userId: second.account.id, cinemaId: "run-2", runId: "r2", configVersion: 1,
+    nextDueAt: NOW + 1000, baselineVersion: null
+  });
+  assert.deepEqual((await listRunSubscribers(env.DB, {
+    cinemaId: "run-2", runId: "r2", startedAt: NOW, limit: 10
+  })).items, []);
+});
+
+test("completing a cinema run promotes active data and clears active fields", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  const data = cinemaFixture({ cinemaId: "run-3", seqNos: ["s1"] });
+  const started = await beginCinemaRun(env.DB, {
+    cinemaId: "run-3", runId: "r3", nowMs: NOW, fetchedData: data
+  });
+  const result = await completeCinemaRun(env.DB, { cinemaId: "run-3", runId: "r3", nowMs: NOW + 1 });
+  assert.deepEqual(result, { runId: "r3", version: started.version, data: started.data, changed: started.changed });
+  const row = await env.DB.prepare("SELECT current_version,current_hash,current_data,active_run_id,active_data,run_state FROM cinema_state WHERE cinema_id=?").bind("run-3").first();
+  assert.equal(Number(row.current_version), started.version);
+  assert.equal(row.current_hash, hashCinemaData(data));
+  assert.equal(row.current_data, JSON.stringify(started.data));
+  assert.equal(row.active_run_id, null);
+  assert.equal(row.active_data, null);
+  assert.equal(row.run_state, "completed");
+});
 
 test("seat-order-free show reorder creates no new event", () => {
   const before = cinemaFixture({ seqNos: ["s1", "s2"] });
