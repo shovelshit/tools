@@ -72,15 +72,10 @@ test("admin dashboard aggregates active maoyan users and excludes revoked/store 
   }), "2026-09-20T03:56:00.000Z").run();
 
   await env.DB.prepare(
-    "INSERT INTO cinema_batches(cinema_id,batch_id,status,version,public_data,captured_at) VALUES " +
-    "(?,'batch-a','committed',1,?,?),(?,'batch-old','committed',1,?,?)"
+    "INSERT INTO cinema_state(cinema_id,current_version,current_data,run_state,completed_at,updated_at) VALUES (?,?,?,?,?,?)"
   ).bind(
-    "cinema-a", JSON.stringify({ showData: { cinemaName: "影院 A", movies: [] } }), NOW - 5 * 60 * 1000,
-    "cinema-a", JSON.stringify({ showData: { cinemaName: "影院 A", movies: [] } }), NOW - 2 * DAY
+    "cinema-a", 1, JSON.stringify({ showData: { cinemaName: "影院 A", movies: [] } }), "completed", NOW - 5 * 60 * 1000, NOW - 5 * 60 * 1000
   ).run();
-  await env.DB.prepare(
-    "INSERT INTO cinema_events(cinema_id,batch_id,movie_id,payload,created_at) VALUES (?,?,?,?,?)"
-  ).bind("cinema-a", "batch-a", "movie-a", JSON.stringify({ movieName: "测试电影", shows: [{ seqNo: "1" }] }), NOW - 10 * 60 * 1000).run();
 
   await insertNotification(env, {
     eventKey: "lock:rule-a:locked", userId: active.account.id, state: "sent",
@@ -121,7 +116,7 @@ test("admin dashboard aggregates active maoyan users and excludes revoked/store 
   assert.equal(payload.users[0].monitorState, "monitoring");
   assert.equal(payload.users[0].lockState, "waiting_schedule");
   assert.deepEqual(payload.cinemas.map((row) => row.cinemaId), ["cinema-a"]);
-  assert.equal(payload.cinemas[0].newShows, 1);
+  assert.equal(payload.cinemas[0].newShows, 0);
   assert.equal(payload.notifications.pending, 2);
   assert.equal(payload.notifications.failed, 1);
   assert.equal(payload.notifications.recent.length, 4);
@@ -172,6 +167,25 @@ test("dashboard returns null success rate with no completed notifications and to
   assert.equal(payload.summary.lockFailed, 0);
   assert.equal(payload.users[0].lastCheck, null);
   assert.equal(payload.users[0].lockState, null);
+});
+
+test("dashboard uses cinema_state even when legacy batches contain a newer name", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  env.NOW_MS = String(NOW);
+  const active = await seedAccount(env, {
+    id: "state-user", expiresAt: NOW + DAY, businessLine: "maoyan", config: { enabled: true }
+  });
+  await insertSubscription(env, active.account.id, "cinema-state");
+  await env.DB.prepare(
+    "INSERT INTO cinema_state(cinema_id,current_version,current_data,run_state,completed_at,updated_at) VALUES (?,?,?,?,?,?)"
+  ).bind("cinema-state", 2, JSON.stringify({ showData: { cinemaName: "当前影院", movies: [] } }), "completed", NOW - 1000, NOW - 1000).run();
+  await env.DB.prepare(
+    "INSERT INTO cinema_batches(cinema_id,batch_id,status,version,public_data,captured_at) VALUES (?,?,?,?,?,?)"
+  ).bind("cinema-state", "legacy", "committed", 99, JSON.stringify({ showData: { cinemaName: "历史影院", movies: [] } }), NOW).run();
+  const payload = await (await worker.fetch(request("/api/admin/dashboard?businessLine=maoyan&window=24h"), env)).json();
+  assert.equal(payload.users[0].cinemaName, "当前影院");
+  assert.equal(payload.cinemas[0].cinemaName, "当前影院");
+  assert.equal(payload.health.latestBatchAt, NOW - 1000);
 });
 
 test("dashboard distinguishes verified maintenance scans from incomplete and unrun jobs", async () => {

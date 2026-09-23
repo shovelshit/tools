@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { PRODUCTION_SCHEMA_SQL, createMonitorStateFixture } from "./helpers.js";
 import { applyMaoyanMonitorStateV2 } from "../scripts/apply-maoyan-monitor-state-v2.mjs";
+import { migrateActiveMonitorState } from "../scripts/migrate-maoyan-monitor-state.mjs";
 
 const migrationSql = readFileSync(new URL("../sql/maoyan-monitor-state-v2.sql", import.meta.url), "utf8");
 
@@ -47,4 +48,35 @@ test("v2 migration is safe on the current schema and initializes baseline from c
   assert.equal(Number(subscription.baseline_version), currentVersion);
   assert.equal(subscription.last_run_id, null);
   assert.equal((await DB.prepare("SELECT data FROM user_config WHERE token_id=?").bind(userId).first()).data, JSON.stringify({ cinemaId }));
+});
+
+test("active state migration copies the latest batch and preserves lock and pending outbox", async () => {
+  const { DB, userId, cinemaId } = await createMonitorStateFixture({ nowMs: 1_726_000_000_000 });
+  await DB.prepare("DELETE FROM cinema_state").run();
+  await DB.prepare("INSERT INTO cinema_batches(cinema_id,batch_id,status,version,public_data,captured_at) VALUES (?,?,?,?,?,?)")
+    .bind(cinemaId, "old", "committed", 4, JSON.stringify({ showData: { cinemaName: "影院 A", movies: [] } }), 1_725_999_000_000).run();
+
+  const result = await migrateActiveMonitorState(DB, { nowMs: 1_726_000_000_000, userId });
+  assert.deepEqual(result, { migratedUsers: 1, migratedCinemas: 1, preservedOutbox: 1, resetBaselines: 1 });
+  const state = await DB.prepare("SELECT current_version,current_data,completed_at,run_state FROM cinema_state WHERE cinema_id=?").bind(cinemaId).first();
+  assert.equal(state.current_version, 4);
+  assert.equal(JSON.parse(state.current_data).showData.cinemaName, "影院 A");
+  assert.equal(state.completed_at, 1_725_999_000_000);
+  assert.equal(state.run_state, "completed");
+  assert.equal((await DB.prepare("SELECT baseline_version,last_run_id FROM monitor_subscriptions WHERE user_id=?").bind(userId).first()).baseline_version, 4);
+  assert.equal((await DB.prepare("SELECT data FROM lock_rule WHERE token_id=?").bind(userId).first()).data, JSON.stringify({ id: "lock-1", state: "waiting_schedule" }));
+  assert.equal((await DB.prepare("SELECT state FROM notification_outbox WHERE user_id=?").bind(userId).first()).state, "pending");
+});
+
+test("active state migration leaves a missing batch at version zero for a first-scan baseline", async () => {
+  const { DB, userId, cinemaId } = await createMonitorStateFixture({ nowMs: 1_726_000_000_000 });
+  await DB.prepare("DELETE FROM cinema_state").run();
+  const result = await migrateActiveMonitorState(DB, { nowMs: 1_726_000_000_000, userId });
+  assert.deepEqual(result, { migratedUsers: 1, migratedCinemas: 1, preservedOutbox: 1, resetBaselines: 0 });
+  const state = await DB.prepare("SELECT current_version,current_data,current_hash,run_state FROM cinema_state WHERE cinema_id=?").bind(cinemaId).first();
+  assert.equal(state.current_version, 0);
+  assert.equal(state.current_data, null);
+  assert.equal(state.current_hash, null);
+  assert.equal(state.run_state, "idle");
+  assert.equal((await DB.prepare("SELECT baseline_version FROM monitor_subscriptions WHERE user_id=?").bind(userId).first()).baseline_version, null);
 });

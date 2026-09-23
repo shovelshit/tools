@@ -129,9 +129,9 @@ async function readUsers(DB, businessLine, nowMs) {
   const notifications = await readLatestNotificationByUser(DB, businessLine, nowMs);
   const rows = await all(DB,
     "SELECT u.id,u.remark,u.state,u.expires_at,s.cinema_id,s.enabled,s.next_due_at," +
-    "ms.data AS status_data,lr.data AS lock_data " +
+    "cs.current_data AS status_data,cs.completed_at,lr.data AS lock_data " +
     "FROM users u LEFT JOIN monitor_subscriptions s ON s.user_id=u.id " +
-    "LEFT JOIN monitor_status ms ON ms.token_id=u.id LEFT JOIN lock_rule lr ON lr.token_id=u.id " +
+    "LEFT JOIN cinema_state cs ON cs.cinema_id=s.cinema_id LEFT JOIN lock_rule lr ON lr.token_id=u.id " +
     `WHERE ${ACTIVE_USER_WHERE} ORDER BY s.enabled DESC,u.created_at DESC,u.id DESC LIMIT 100`,
     businessLine, nowMs
   );
@@ -145,10 +145,10 @@ async function readUsers(DB, businessLine, nowMs) {
       accountStatus: "active",
       expiresAt: numberOrNull(row.expires_at),
       cinemaId: textOrNull(row.cinema_id),
-      cinemaName: textOrNull(status?.cinemaName) || textOrNull(lock?.cinemaName) || textOrNull(row.cinema_id),
+      cinemaName: cinemaNameFrom(status) || textOrNull(status?.cinemaName) || textOrNull(lock?.cinemaName) || textOrNull(row.cinema_id),
       monitorState: Number(row.enabled || 0) === 1 ? "monitoring" : "stopped",
-      lastCheck: textOrNull(status?.lastCheck),
-      lastCheckTs: numberOrNull(status?.lastCheckTs),
+      lastCheck: numberOrNull(row.completed_at) == null ? null : new Date(Number(row.completed_at)).toISOString(),
+      lastCheckTs: numberOrNull(row.completed_at),
       nextDueAt: numberOrNull(row.next_due_at),
       lockState: textOrNull(lock?.state),
       lockMovie: textOrNull(lock?.movieName),
@@ -162,13 +162,11 @@ async function readUsers(DB, businessLine, nowMs) {
 
 async function readCinemaNames(DB) {
   const rows = await all(DB,
-    "SELECT b.cinema_id,b.public_data,b.captured_at FROM cinema_batches b " +
-    "JOIN (SELECT cinema_id,MAX(captured_at) AS captured_at FROM cinema_batches GROUP BY cinema_id) latest " +
-    "ON latest.cinema_id=b.cinema_id AND latest.captured_at=b.captured_at"
+    "SELECT cinema_id,current_data,completed_at,updated_at FROM cinema_state"
   );
   return new Map(rows.map((row) => [
     String(row.cinema_id),
-    { name: cinemaNameFrom(safeJson(row.public_data)), latestBatchAt: numberOrNull(row.captured_at) }
+    { name: cinemaNameFrom(safeJson(row.current_data)), latestBatchAt: numberOrNull(row.completed_at ?? row.updated_at) }
   ]));
 }
 
@@ -181,10 +179,6 @@ async function readCinemas(DB, businessLine, nowMs, windowStart) {
     "GROUP BY s.cinema_id ORDER BY user_count DESC,s.cinema_id LIMIT 20",
     businessLine, nowMs
   );
-  const events = new Map((await all(DB,
-    "SELECT cinema_id,COUNT(*) AS n FROM cinema_events WHERE created_at>=? GROUP BY cinema_id",
-    windowStart
-  )).map((row) => [String(row.cinema_id), Number(row.n || 0)]));
   const notifications = new Map((await all(DB,
     "SELECT s.cinema_id,COUNT(o.id) AS n FROM notification_outbox o " +
     "JOIN users u ON u.id=o.user_id JOIN monitor_subscriptions s ON s.user_id=u.id " +
@@ -213,7 +207,7 @@ async function readCinemas(DB, businessLine, nowMs, windowStart) {
       cinemaId,
       cinemaName: latest.name || cinemaId,
       monitoringUsers: Number(row.user_count || 0),
-      newShows: events.get(cinemaId) || 0,
+      newShows: 0,
       notifications: notifications.get(cinemaId) || 0,
       lockSuccess: Number(lock.locked || 0),
       lockFailed: Number(lock.failed || 0),
@@ -326,7 +320,12 @@ async function readMaintenanceHealth(DB, nowMs) {
 }
 
 async function readHealth(DB, businessLine, nowMs) {
-  const latestBatch = await first(DB, "SELECT MAX(captured_at) AS at FROM cinema_batches");
+  const latestBatch = await first(DB,
+    "SELECT MAX(COALESCE(cs.completed_at,cs.updated_at)) AS at FROM cinema_state cs " +
+    "JOIN monitor_subscriptions s ON s.cinema_id=cs.cinema_id JOIN users u ON u.id=s.user_id " +
+    "WHERE u.business_line=?",
+    businessLine
+  );
   const oldestPending = await first(DB,
     "SELECT MIN(CASE WHEN o.state='sending' THEN o.lease_until ELSE o.next_attempt_at END) AS at " +
     "FROM notification_outbox o JOIN users u ON u.id=o.user_id " +
