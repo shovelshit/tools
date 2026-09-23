@@ -53,7 +53,6 @@ test("inferred lock mode keeps the bounded tolerance control inside the risk pan
   assert.match(source, /const timeToleranceMinutes = inferred \? selectedTimeTolerance\(\) : null;/);
   assert.match(source, /\.\.\.\(inferred \? \{ timeToleranceMinutes \} : \{\}\)/);
   assert.match(source, /模板场次.*前后.*分钟内推断匹配/);
-  assert.match(source, /displayedTimeTolerance\(rule\.timeToleranceMinutes\)/);
 });
 
 test("time tolerance parsing rejects blank values instead of treating them as zero", () => {
@@ -204,6 +203,23 @@ test("lock controller exposes a display-ready summary for the notification monit
     rule: "2026-09-28 13:15 · 1号激光IMAX厅 · ±180分钟 · 12排18座 · 等待目标场次",
     active: true
   });
+});
+
+test("saved rule summary and detail show actual tolerance without inventing defaults", async () => {
+  for (const [fields, expected] of [
+    [{ timeToleranceMinutes: 0 }, "±0分钟"],
+    [{ timeToleranceMinutes: 30 }, "±30分钟"],
+    [{ timeToleranceMinutes: 180 }, "±180分钟"],
+    [{}, "匹配范围未提供"],
+    [{ timeToleranceMinutes: null }, "匹配范围未提供"],
+    [{ timeToleranceMinutes: "bad" }, "匹配范围异常（bad）"],
+    [{ timeToleranceMinutes: 181 }, "匹配范围异常（181）"]
+  ]) {
+    const f = mountLock({ api: { "/api/lock/rule": { rule: { state: "waiting_schedule", ...fields } } } });
+    await f.controller.refreshRemoteState();
+    assert.ok(f.controller.getPanelSummary().rule.includes(expected), f.controller.getPanelSummary().rule);
+    assert.ok(f.elements["lock-rule-status"].textContent.includes(expected), f.elements["lock-rule-status"].textContent);
+  }
 });
 
 test("a blank inferred tolerance does not block immediate real-show locking or enter its payload", async () => {

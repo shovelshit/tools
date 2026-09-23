@@ -312,8 +312,10 @@
       return parseTimeTolerance(els.timeTolerance?.value);
     }
 
-    function displayedTimeTolerance(value) {
-      return Number.isInteger(value) && value >= 0 && value <= 180 ? value : 30;
+    function savedTimeToleranceLabel(value) {
+      if (value === undefined || value === null) return "匹配范围未提供";
+      if (Number.isInteger(value) && value >= 0 && value <= 180) return `±${value}分钟`;
+      return `匹配范围异常（${String(value)}）`;
     }
 
     // 推断控件与风险提示只在未来日期无真实场次时显示，更新范围不会影响已选座位。
@@ -322,7 +324,7 @@
       setHidden(els.sectionRisk, !state.session?.uploaded || !inferred);
       if (!inferred || !els.inferenceWarning) return;
       const templateTime = templateForCurrent()?.tm || "";
-      const tolerance = displayedTimeTolerance(selectedTimeTolerance());
+      const tolerance = selectedTimeTolerance() ?? 30;
       els.inferenceWarning.textContent = `目标场次尚未确定。将以模板场次 ${templateTime} 为基准，在目标日期前后 ${tolerance} 分钟内推断匹配。仅当影片与具体影厅均与模板一致且场次可售时，才会自动锁座；如有多个同等接近的场次，将优先选择较早场次。实际影厅、座位布局和售卖状态仍可能变化，锁座成功后仅生成待支付订单，请在有效时间内自行支付。`;
     }
 
@@ -344,7 +346,7 @@
         .join("、") || "未选择座位";
       const target = [rule.targetDate, rule.templateTime].filter(Boolean).join(" ");
       const hall = rule.hall || "";
-      const tolerance = `±${displayedTimeTolerance(rule.timeToleranceMinutes)}分钟`;
+      const tolerance = savedTimeToleranceLabel(rule.timeToleranceMinutes);
       const status = RULE_LABELS[rule.state] || "规则状态未知";
       return {
         exists: true,
@@ -441,7 +443,7 @@
           ? " · 锁座服务当前已停用"
           : "";
       const hall = rule.hall ? ` · ${rule.hall}` : "";
-      const tolerance = ` · ±${displayedTimeTolerance(rule.timeToleranceMinutes)}分钟`;
+      const tolerance = ` · ${savedTimeToleranceLabel(rule.timeToleranceMinutes)}`;
       els.ruleStatus.textContent = `${rule.cinemaName || "影院"} · ${rule.movieName || "影片"}${hall} · ${rule.targetDate || ""} ${rule.templateTime || ""}${tolerance} · ${seats} · ${status}${suffix}`;
       if (els.ruleSummary) els.ruleSummary.textContent = status;
       setDetailsOpen(els.ruleDetails, detailOpenState(state.session, rule).rule);

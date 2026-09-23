@@ -353,8 +353,20 @@ export async function deleteSeatFeedbackRow(db, key) {
 // ---------- 锁座规则(每令牌一行 JSON 状态机) ----------
 
 export async function getLockRuleRow(db, tokenId) {
-  const row = await db.prepare("SELECT data FROM lock_rule WHERE token_id = ?").bind(tokenId).first();
-  return row ? JSON.parse(row.data) : null;
+  let row = await db.prepare("SELECT data FROM lock_rule WHERE token_id = ?").bind(tokenId).first();
+  if (!row) return null;
+  const rule = JSON.parse(row.data);
+  if (rule && typeof rule === "object" && !Array.isArray(rule) && !Object.hasOwn(rule, "timeToleranceMinutes")) {
+    // 补齐旧数据后再读取实际值；只更新缺失字段，避免覆盖并发修改的规则或显式配置。
+    // 与 sql/lock-rule-time-tolerance.sql 保持一致，不改业务时间戳。
+    await db.prepare(
+      "UPDATE lock_rule SET data = json_set(data, '$.timeToleranceMinutes', 30) " +
+      "WHERE token_id = ? AND json_type(data) = 'object' AND json_type(data, '$.timeToleranceMinutes') IS NULL"
+    ).bind(tokenId).run();
+    row = await db.prepare("SELECT data FROM lock_rule WHERE token_id = ?").bind(tokenId).first();
+    return row ? JSON.parse(row.data) : null;
+  }
+  return rule;
 }
 
 export async function putLockRuleRow(db, tokenId, rule) {
