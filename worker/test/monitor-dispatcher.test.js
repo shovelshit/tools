@@ -40,3 +40,22 @@ test("newer batches replace only the pending batch while current work finishes",
   }));
   assert.equal((await storage.get("currentBatch")).batchId, "new");
 });
+
+test("alarm resumes the current run before accepting a newer run", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  const { account } = await seedAccount(env, { expiresAt: NOW + 600_000 });
+  await syncSubscription(env.DB, account.id, { enabled: true, cinemaId: "1" }, 1, NOW);
+  const storage = createStorageFixture();
+  const dispatched = [];
+  const dispatcher = new MonitorDispatcher({ storage }, env, {
+    dispatchCinema: async (_env, input) => dispatched.push(input.runId)
+  });
+  await storage.put("currentBatch", { runId: "run-current", nowMs: NOW, cursor: "" });
+  await dispatcher.fetch(new Request("https://internal/internal/batch", {
+    method: "POST", body: JSON.stringify({ runId: "run-new", nowMs: NOW + 180_000 })
+  }));
+  assert.ok(dispatched.every((runId) => runId === "run-current"));
+  await dispatcher.alarm();
+  assert.ok(dispatched.includes("run-new"));
+  assert.equal(dispatched.filter((runId) => runId === "run-current").length, 1);
+});

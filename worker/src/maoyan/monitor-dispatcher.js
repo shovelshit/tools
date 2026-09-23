@@ -2,7 +2,7 @@ import { listDueCinemas } from "./monitor-store.js";
 
 const PAGE_SIZE = 20;
 
-async function dispatchCinema(env, input) {
+export async function dispatchCinema(env, input) {
   const stub = env.MONITOR_COORDINATOR.get(env.MONITOR_COORDINATOR.idFromName(String(input.cinemaId)));
   const response = await stub.fetch(new Request("https://internal/internal/batch", {
     method: "POST",
@@ -40,7 +40,7 @@ export class MonitorDispatcher {
     const dispatch = this.deps.dispatchCinema || dispatchCinema;
     await storage.setAlarm(Date.now() + 30_000);
     for (const cinemaId of page.items) {
-      await dispatch(this.env, { cinemaId, batchId: current.batchId, nowMs: current.nowMs });
+      await dispatch(this.env, { cinemaId, runId: current.runId || current.batchId, nowMs: current.nowMs });
     }
     if (page.nextCursor) {
       await storage.put("currentBatch", { ...current, cursor: page.nextCursor });
@@ -64,15 +64,16 @@ export class MonitorDispatcher {
       return Response.json({ error: "Not Found" }, { status: 404 });
     }
     const body = await request.json().catch(() => ({}));
-    if (!body.batchId || !Number.isFinite(Number(body.nowMs))) {
+    const runId = body.runId || body.batchId;
+    if (!runId || !Number.isFinite(Number(body.nowMs))) {
       return Response.json({ error: "Bad Request" }, { status: 400 });
     }
     const storage = this.state.storage;
-    const incoming = { batchId: String(body.batchId), nowMs: Number(body.nowMs), cursor: "" };
+    const incoming = { runId: String(runId), batchId: String(runId), nowMs: Number(body.nowMs), cursor: "" };
     return await this.exclusive(async () => {
       const current = await storage.get("currentBatch");
       if (!current) await storage.put("currentBatch", incoming);
-      else if (current.batchId !== incoming.batchId) {
+      else if ((current.runId || current.batchId) !== incoming.runId) {
         const pending = await storage.get("pendingBatch");
         if (!pending || incoming.nowMs >= Number(pending.nowMs)) await storage.put("pendingBatch", incoming);
       }
@@ -85,13 +86,13 @@ export class MonitorDispatcher {
   }
 }
 
-export async function dispatchMonitorBatch(env, { batchId, nowMs }) {
+export async function dispatchMonitorBatch(env, { runId, batchId, nowMs }) {
   if (!env.MONITOR_DISPATCHER) return { accepted: false };
   const stub = env.MONITOR_DISPATCHER.get(env.MONITOR_DISPATCHER.idFromName("main"));
   const response = await stub.fetch(new Request("https://internal/internal/batch", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ batchId: String(batchId), nowMs: Number(nowMs) })
+    body: JSON.stringify({ runId: String(runId || batchId), nowMs: Number(nowMs) })
   }));
   return { accepted: response.ok };
 }

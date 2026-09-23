@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createAccountEnv, seedAccount } from "./account-fixtures.js";
 import { syncSubscription } from "../src/maoyan/monitor-store.js";
 import { putLockRuleRow } from "../src/maoyan/db.js";
-import { MonitorCoordinator, processCinemaBatch } from "../src/maoyan/monitor-coordinator.js";
+import { MonitorCoordinator, processCinemaBatch, processCinemaRun } from "../src/maoyan/monitor-coordinator.js";
 import { cinemaFixture, createStorageFixture } from "./scaling-fixtures.js";
 
 const NOW = Date.parse("2026-09-16T04:00:00.000Z");
@@ -183,6 +183,39 @@ test("replaying a committed cinema batch does not duplicate user events", async 
   assert.equal(fetches, 1);
   assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM notification_outbox").first()).n, 1);
   assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM change_log").first()).n, 1);
+});
+
+test("unchanged run still checks a waiting lock and advances its due time", async () => {
+  const runNow = Date.now();
+  const env = await createAccountEnv({ nowMs: runNow });
+  const { account } = await seedAccount(env, { expiresAt: runNow + 600_000, config: { enabled: true, cinemaId: "1", selectedMovieIds: ["7"] } });
+  await syncSubscription(env.DB, account.id, { enabled: true, cinemaId: "1" }, 1, runNow);
+  await putLockRuleRow(env.DB, account.id, waitingRule({ lotteryKey: "same", seqNo: "s1", templateTime: "18:40" }));
+  const calls = [];
+  const fetchCinema = async () => cinemaFixture({ seqNos: ["s1"] });
+  await processCinemaRun(env, { cinemaId: "1", runId: "run-1", nowMs: runNow, fetchCinema, runLock: async (_env, userId) => { calls.push(userId); } });
+  const before = await env.DB.prepare("SELECT next_due_at FROM monitor_subscriptions WHERE user_id=?").bind(account.id).first();
+  await processCinemaRun(env, { cinemaId: "1", runId: "run-2", nowMs: runNow + 180_000, fetchCinema, runLock: async (_env, userId) => { calls.push(userId); } });
+  const after = await env.DB.prepare("SELECT next_due_at FROM monitor_subscriptions WHERE user_id=?").bind(account.id).first();
+  assert.equal(calls.length, 2);
+  assert.ok(Number(after.next_due_at) > Number(before.next_due_at));
+});
+
+test("failed lock resumes the same run without duplicating its notification", async () => {
+  const runNow = Date.now();
+  const env = await createAccountEnv({ nowMs: runNow, maxUsers: 2 });
+  const first = await seedAccount(env, { expiresAt: runNow + 600_000, config: { enabled: true, cinemaId: "1", selectedMovieIds: ["7"] } });
+  const second = await seedAccount(env, { expiresAt: runNow + 600_000, config: { enabled: true, cinemaId: "1", selectedMovieIds: ["7"] } });
+  for (const account of [first.account, second.account]) await syncSubscription(env.DB, account.id, { enabled: true, cinemaId: "1" }, 1, runNow);
+  await processCinemaRun(env, { cinemaId: "1", runId: "base", nowMs: runNow, fetchCinema: async () => cinemaFixture({ seqNos: ["s1"] }), runLock: async () => {} });
+  for (const account of [first.account, second.account]) await putLockRuleRow(env.DB, account.id, waitingRule({ lotteryKey: account.id, seqNo: "s2", templateTime: "18:41" }));
+  let fail = true;
+  const fetchCinema = async () => cinemaFixture({ seqNos: ["s1", "s2"] });
+  const firstAttempt = await processCinemaRun(env, { cinemaId: "1", runId: "retry", nowMs: runNow + 180_000, fetchCinema, runLock: async (_env, userId) => { if (userId === second.account.id && fail) throw new Error("rejected"); } });
+  assert.equal(firstAttempt.retryable, true);
+  fail = false;
+  await processCinemaRun(env, { cinemaId: "1", runId: "retry", nowMs: runNow + 240_000, fetchCinema: async () => { throw new Error("must reuse active data"); }, runLock: async () => {} });
+  assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM notification_outbox WHERE kind='new-shows'").first()).n, 2);
 });
 
 test("concurrent manual checks share one cinema fetch and retain per-user cooldowns", async () => {
