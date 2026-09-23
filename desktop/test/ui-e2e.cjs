@@ -306,7 +306,7 @@ async function main() {
     const key = await page.locator("#serverchan-input").boundingBox();
     assert.ok(Math.abs(channel.x - key.x) <= 1, "channel and key left edges differ");
     await page.locator("#serverchan-input").fill("SCTmockkey");
-    await page.locator("#btn-test-push").click();
+    await page.locator("#btn-test-push-serverchan").click();
     await page.waitForFunction(() => document.querySelector("#btn-toggle-monitor")?.disabled === false);
     await page.locator("#btn-toggle-monitor").click();
     await page.waitForFunction(() => document.querySelector("#btn-toggle-monitor")?.textContent === "停止监控");
