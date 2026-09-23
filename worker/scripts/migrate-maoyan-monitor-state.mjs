@@ -29,6 +29,7 @@ export async function migrateActiveMonitorState(DB, { nowMs = Date.now(), userId
   );
 
   const cinemaIds = new Set();
+  const initializedCinemas = new Set();
   let resetBaselines = 0;
   let preservedOutbox = 0;
   for (const subscription of subscriptions) {
@@ -41,8 +42,15 @@ export async function migrateActiveMonitorState(DB, { nowMs = Date.now(), userId
       "WHERE cinema_id=? AND status='committed' ORDER BY captured_at DESC,version DESC LIMIT 1"
     ).bind(cinemaId).first();
 
-    if (existingState) {
+    if (existingState && !initializedCinemas.has(cinemaId)) {
       // A rerun must never discard an active run or subscriber progress.
+    } else if (initializedCinemas.has(cinemaId)) {
+      const baseline = existingState?.current_data == null ? null : Number(existingState.current_version || 0);
+      const result = await DB.prepare(
+        "UPDATE monitor_subscriptions SET baseline_version=?,last_run_id=NULL,updated_at=? " +
+        "WHERE user_id=? AND cinema_id=? AND enabled=1"
+      ).bind(baseline, timestamp, uid, cinemaId).run();
+      if (baseline != null && Number(result?.meta?.changes || 0) > 0) resetBaselines += 1;
     } else if (latest) {
       const normalized = normalizeCinemaData(parseJson(latest.public_data));
       const version = Number(latest.version);
@@ -60,6 +68,7 @@ export async function migrateActiveMonitorState(DB, { nowMs = Date.now(), userId
         "WHERE user_id=? AND cinema_id=? AND enabled=1"
       ).bind(version, timestamp, uid, cinemaId).run();
       if (Number(result?.meta?.changes || 0) > 0) resetBaselines += 1;
+      initializedCinemas.add(cinemaId);
     } else {
       await DB.prepare(
         "INSERT INTO cinema_state(cinema_id,current_version,current_hash,current_data,run_state,updated_at) " +
@@ -72,6 +81,7 @@ export async function migrateActiveMonitorState(DB, { nowMs = Date.now(), userId
         "UPDATE monitor_subscriptions SET baseline_version=NULL,last_run_id=NULL,updated_at=? " +
         "WHERE user_id=? AND cinema_id=? AND enabled=1"
       ).bind(timestamp, uid, cinemaId).run();
+      initializedCinemas.add(cinemaId);
     }
 
     const pending = await DB.prepare(
