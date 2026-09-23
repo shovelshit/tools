@@ -1,8 +1,9 @@
--- Maoyan monitor state v2. Apply after pausing the monitor dispatcher.
--- Preflight required before this file: PRAGMA table_info(monitor_subscriptions);
--- The Node entry point conditionally adds last_run_id for pre-v2 databases,
--- then executes this idempotent SQL. Existing user, config, lock and
--- notification rows are intentionally untouched.
+-- Maoyan monitor state v2 post-SQL, executed by
+-- worker/scripts/apply-maoyan-monitor-state-v2.mjs after pausing the monitor
+-- dispatcher. The wrapper performs PRAGMA table_info(monitor_subscriptions)
+-- and conditionally adds last_run_id for pre-v2 databases before executing
+-- this idempotent SQL. This file is not a standalone old-schema entry point.
+-- Existing user, config, lock and notification rows are intentionally untouched.
 CREATE TABLE IF NOT EXISTS cinema_state (
   cinema_id TEXT PRIMARY KEY,
   current_version INTEGER NOT NULL DEFAULT 0 CHECK (current_version >= 0),

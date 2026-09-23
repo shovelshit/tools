@@ -10,4 +10,3 @@ export function applyMaoyanMonitorStateV2(database) {
   }
   database.exec(STATE_SQL);
 }
-
