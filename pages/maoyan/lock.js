@@ -119,6 +119,20 @@
     return Number.isInteger(minutes) && minutes >= 0 && minutes <= 180 ? minutes : null;
   }
 
+  function validTemplateTime(value) {
+    if (!/^\d{2}:\d{2}$/.test(String(value || ""))) return false;
+    const [hour, minute] = value.split(":").map(Number);
+    return hour <= 23 && minute <= 59;
+  }
+
+  function matchingTimeWindow(templateTime, tolerance) {
+    if (!validTemplateTime(templateTime)) return null;
+    const [hour, minute] = String(templateTime).split(":").map(Number);
+    const center = hour * 60 + minute;
+    const format = (minutes) => `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+    return `${format(Math.max(0, center - tolerance))}-${format(Math.min(1439, center + tolerance))}`;
+  }
+
   async function changeMovieSelection({ state, movieId, renderShowOptions, loadSeats }) {
     state.movieId = movieId;
     state.templateSeqNo = "";
@@ -324,8 +338,13 @@
       setHidden(els.sectionRisk, !state.session?.uploaded || !inferred);
       if (!inferred || !els.inferenceWarning) return;
       const templateTime = templateForCurrent()?.tm || "";
-      const tolerance = selectedTimeTolerance() ?? 30;
-      els.inferenceWarning.textContent = `目标场次尚未确定。将以模板场次 ${templateTime} 为基准，在目标日期前后 ${tolerance} 分钟内推断匹配。仅当影片与具体影厅均与模板一致且场次可售时，才会自动锁座；如有多个同等接近的场次，将优先选择较早场次。实际影厅、座位布局和售卖状态仍可能变化，锁座成功后仅生成待支付订单，请在有效时间内自行支付。`;
+      const tolerance = selectedTimeTolerance();
+      els.timeTolerance?.setAttribute("aria-invalid", String(tolerance === null));
+      let range;
+      if (tolerance === null) range = "匹配范围需为 0 至 180 的整数。";
+      else if (!validTemplateTime(templateTime)) range = "模板场次时间无效，请重新选择场次。";
+      else range = `将以模板场次 ${templateTime} 为基准，在目标日期前后 ${tolerance} 分钟内推断匹配（目标日期 ${matchingTimeWindow(templateTime, tolerance)}）。`;
+      els.inferenceWarning.textContent = `目标场次尚未确定。${range}仅当影片与具体影厅均与模板一致且场次可售时，才会自动锁座；如有多个同等接近的场次，将优先选择较早场次。实际影厅、座位布局和售卖状态仍可能变化，锁座成功后仅生成待支付订单，请在有效时间内自行支付。`;
     }
 
     function seatLabelMap() {
@@ -361,6 +380,7 @@
     function submitBlockReason() {
       if (!state.session?.uploaded) return "请先上传猫眼会话";
       if (!state.templateSeqNo) return "请选择场次";
+      if (state.seatMapIsTemplate && !validTemplateTime(templateForCurrent()?.tm)) return "模板场次时间无效，请重新选择场次";
       if (!state.selectedSeatNos.size) return "请先选择座位";
       if (!/^\d{4}-\d{2}-\d{2}$/.test(els.date?.value || "")) return "请选择目标日期";
       if (state.seatMapIsTemplate && selectedTimeTolerance() === null) return "匹配范围需为 0 至 180 的整数";
@@ -1217,8 +1237,48 @@
       const inferred = state.showMode === "template";
       const timeToleranceMinutes = inferred ? selectedTimeTolerance() : null;
       if (inferred && timeToleranceMinutes === null) {
+        renderInferenceControls();
         renderSelection();
         return;
+      }
+      if (inferred && !validTemplateTime(templateForCurrent()?.tm)) {
+        renderInferenceControls();
+        renderSelection();
+        return;
+      }
+      const payload = {
+        cinemaId: state.context.cinemaId, movieId: state.movieId, templateSeqNo: state.templateSeqNo,
+        targetDate: els.date.value, seatNos: [...state.selectedSeatNos], riskAccepted: els.risk.checked,
+        ...(inferred ? { timeToleranceMinutes } : {})
+      };
+      if (inferred) {
+        const template = templateForCurrent();
+        const templateDetails = [template?.showDate, template?.tm, template?.th || "影厅未提供"].filter(Boolean).join(" · ");
+        const labels = seatLabelMap();
+        const seats = payload.seatNos.map((seatNo) => labels.get(seatNo) || seatNo).join("、");
+        const targetDate = payload.targetDate;
+        const details = [
+          `目标日期：${targetDate}`,
+          `影院：${state.context.cinemaName || `影院 ${state.context.cinemaId}`}`,
+          `影片：${template?.movieName || "影片"}`,
+          `模板场次：${[template?.showDate, template?.tm].filter(Boolean).join(" ")} · ${template?.th || "影厅未提供"}`,
+          `匹配范围：±${timeToleranceMinutes} 分钟（${targetDate} ${matchingTimeWindow(template?.tm, timeToleranceMinutes)}）`,
+          `座位：${seats}`
+        ];
+        const confirmed = await root.showConfirm(
+          `${details.join("\n")}\n\n目标场次尚未确定，实际影厅、座位布局和售卖状态可能变化。匹配成功后仅创建待支付订单，需自行支付。`,
+          { title: "确认保存自动锁座规则", okText: "确认保存", danger: true }
+        );
+        if (!confirmed || !isCurrentProfileGeneration(generation)) return;
+        const currentTemplate = templateForCurrent();
+        if (selectedTimeTolerance() !== timeToleranceMinutes || els.date.value !== targetDate || state.showMode !== "template"
+          || state.movieId !== payload.movieId || state.templateSeqNo !== payload.templateSeqNo
+          || state.context?.cinemaId !== payload.cinemaId || !state.session?.uploaded
+          || [currentTemplate?.showDate, currentTemplate?.tm, currentTemplate?.th || "影厅未提供"].filter(Boolean).join(" · ") !== templateDetails
+          || [...state.selectedSeatNos].join("\0") !== payload.seatNos.join("\0") || !els.risk.checked) {
+          renderSelection();
+          return;
+        }
       }
       if (state.showMode === "target") {
         const template = templateForCurrent();
@@ -1238,11 +1298,6 @@
         if (!confirmed) return;
         if (!isCurrentProfileGeneration(generation)) return;
       }
-      const payload = {
-        cinemaId: state.context.cinemaId, movieId: state.movieId, templateSeqNo: state.templateSeqNo,
-        targetDate: els.date.value, seatNos: [...state.selectedSeatNos], riskAccepted: els.risk.checked,
-        ...(inferred ? { timeToleranceMinutes } : {})
-      };
       try {
         await buttonLoading(els.submit, action.loadingText, async () => {
           try {

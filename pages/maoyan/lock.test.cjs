@@ -106,6 +106,7 @@ function mountLock({
     "btn-lock-seats", "lock-overlay", "btn-lock-close", "lock-cinema", "lock-movie", "lock-template",
     "lock-target-date", "lock-session-file", "btn-lock-login", "btn-lock-upload", "btn-lock-remove-session",
     "lock-time-tolerance",
+    "lock-inference-warning",
     "lock-session-status", "lock-seat-grid", "lock-seat-count", "lock-risk-accepted", "lock-rule-status",
     "btn-lock-cancel-rule", "lock-template-label", "lock-seat-source", "btn-lock-seat-feedback", "lock-official-toggle",
     "lock-official-wrap", "lock-official-frame", "btn-official-zoom-in", "btn-official-zoom-out",
@@ -123,7 +124,7 @@ function mountLock({
   const root = { document, window: null, showToast: (message, type) => messages.push({ message, type }), showConfirm: async () => true };
   root.window = root;
   const source = fs.readFileSync(path.join(__dirname, "lock.js"), "utf8");
-  const testSource = source.replace("return {\n      syncAvailability", "return { getShowMode: () => state.showMode,\n      syncAvailability");
+  const testSource = source.replace("return {\n      syncAvailability", "return { getShowMode: () => state.showMode, getTestState: () => state,\n      syncAvailability");
   const module = { exports: {} };
   const vmContext = {
     module, exports: module.exports, Intl, Date, Set, document, window: root,
@@ -161,6 +162,7 @@ function mountLock({
   });
   return {
     controller,
+    root,
     elements,
     messages,
     loginButton: elements["btn-lock-login"],
@@ -168,6 +170,101 @@ function mountLock({
     fileInput: elements["lock-session-file"]
   };
 }
+
+function inferredRuleFixture(templateTime, tolerance = "60") {
+  const requests = [];
+  const dom = mountLock({ api: { "/api/lock/rule": (options) => {
+    requests.push(JSON.parse(options.body));
+    return { rule: { state: "waiting_schedule", automationEnabled: true } };
+  } } });
+  const state = dom.controller.getTestState();
+  state.context = { cinemaId: "25428", cinemaName: "测试影院" };
+  state.session = { uploaded: true };
+  state.movieId = "7";
+  state.templateSeqNo = "100";
+  state.templates = [{ movieId: "7", movieName: "测试电影", seqNo: "100", showDate: "2026-09-22", tm: templateTime, th: "激光 IMAX 厅" }];
+  state.showMode = "template";
+  state.seatMapIsTemplate = true;
+  state.seatMap = { seats: [{ seatNo: "1-6-18", rowId: "6", columnId: "18" }] };
+  state.selectedSeatNos.add("1-6-18");
+  const date = state.dateBounds.max;
+  dom.elements["lock-target-date"].value = date;
+  dom.elements["lock-risk-accepted"].checked = true;
+  dom.elements["lock-time-tolerance"].value = tolerance;
+  return { ...dom, date, requests };
+}
+
+test("saving an inferred rule confirms its bounded target-date window and seats before sending", async () => {
+  for (const [templateTime, expectedWindow] of [
+    ["00:20", "00:00-01:20"], ["23:30", "22:30-23:59"]
+  ]) {
+    const f = inferredRuleFixture(templateTime);
+    const prompts = [];
+    f.root.showConfirm = async (message, options) => {
+      prompts.push({ message, options, requestCount: f.requests.length });
+      return true;
+    };
+    await f.elements["btn-lock-submit"].trigger("click");
+    assert.equal(prompts.length, 1);
+    assert.equal(prompts[0].requestCount, 0);
+    assert.ok(prompts[0].message.includes(`目标日期：${f.date}`));
+    assert.ok(prompts[0].message.includes(`模板场次：2026-09-22 ${templateTime}`));
+    assert.ok(prompts[0].message.includes(expectedWindow), prompts[0].message);
+    assert.ok(prompts[0].message.includes("测试电影") && prompts[0].message.includes("激光 IMAX 厅"));
+    assert.ok(prompts[0].message.includes("测试影院") && prompts[0].message.includes("6排18座"));
+    assert.equal(f.requests.length, 1);
+    assert.equal(f.requests[0].timeToleranceMinutes, 60);
+  }
+});
+
+test("cancelling an inferred-rule confirmation sends no request", async () => {
+  const f = inferredRuleFixture("20:00");
+  f.root.showConfirm = async () => false;
+  await f.elements["btn-lock-submit"].trigger("click");
+  assert.equal(f.requests.length, 0);
+});
+
+test("inferred rule does not submit when the source template or session changes during confirmation", async () => {
+  for (const change of [
+    (f) => { f.controller.getTestState().templates[0].showDate = "2026-09-21"; },
+    (f) => { f.controller.getTestState().session = { uploaded: false }; }
+  ]) {
+    const f = inferredRuleFixture("20:00");
+    f.root.showConfirm = async () => { change(f); return true; };
+    await f.elements["btn-lock-submit"].trigger("click");
+    assert.equal(f.requests.length, 0);
+  }
+});
+
+test("invalid inferred tolerance shows an error and blocks confirmation and submission", async () => {
+  for (const value of ["", "300", "1.5", "abc"]) {
+    const f = inferredRuleFixture("20:00", value);
+    let confirmed = false;
+    f.root.showConfirm = async () => { confirmed = true; return true; };
+    f.elements["lock-time-tolerance"].trigger("input");
+    assert.equal(f.elements["btn-lock-submit"].disabled, true);
+    assert.match(f.elements["lock-inference-warning"].textContent, /匹配范围需为 0 至 180 的整数/);
+    assert.doesNotMatch(f.elements["lock-inference-warning"].textContent, /30 分钟/);
+    await f.elements["btn-lock-submit"].trigger("click");
+    assert.equal(confirmed, false);
+    assert.equal(f.requests.length, 0);
+  }
+});
+
+test("malformed inferred template time cannot render a window or submit a rule", async () => {
+  for (const templateTime of ["", "25:00", "12:60", "not-a-time"]) {
+    const f = inferredRuleFixture(templateTime);
+    let confirmed = false;
+    f.root.showConfirm = async () => { confirmed = true; return true; };
+    f.elements["lock-time-tolerance"].trigger("input");
+    assert.equal(f.elements["btn-lock-submit"].disabled, true);
+    assert.match(f.elements["lock-inference-warning"].textContent, /模板场次时间无效/);
+    assert.doesNotMatch(f.elements["lock-inference-warning"].textContent, /NaN/);
+    await f.elements["btn-lock-submit"].trigger("click");
+    assert.equal(confirmed, false);
+    assert.equal(f.requests.length, 0);
+  }
+});
 
 test("refreshing an uploaded session does not expose inference risk for a real seat map", async () => {
   const f = mountLock({ api: { "/api/lock/session/status": { session: { uploaded: true } } } });
