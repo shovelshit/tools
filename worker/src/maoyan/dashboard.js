@@ -179,6 +179,13 @@ async function readCinemas(DB, businessLine, nowMs, windowStart) {
     "GROUP BY s.cinema_id ORDER BY user_count DESC,s.cinema_id LIMIT 20",
     businessLine, nowMs
   );
+  const newShows = new Map((await all(DB,
+    "SELECT s.cinema_id,COUNT(o.id) AS n FROM notification_outbox o " +
+    "JOIN users u ON u.id=o.user_id JOIN monitor_subscriptions s ON s.user_id=u.id " +
+    `WHERE ${ACTIVE_USER_WHERE} AND s.enabled=1 AND o.kind='new-shows' AND o.created_at>=? ` +
+    "GROUP BY s.cinema_id",
+    businessLine, nowMs, windowStart
+  )).map((row) => [String(row.cinema_id), Number(row.n || 0)]));
   const notifications = new Map((await all(DB,
     "SELECT s.cinema_id,COUNT(o.id) AS n FROM notification_outbox o " +
     "JOIN users u ON u.id=o.user_id JOIN monitor_subscriptions s ON s.user_id=u.id " +
@@ -207,7 +214,7 @@ async function readCinemas(DB, businessLine, nowMs, windowStart) {
       cinemaId,
       cinemaName: latest.name || cinemaId,
       monitoringUsers: Number(row.user_count || 0),
-      newShows: 0,
+      newShows: newShows.get(cinemaId) || 0,
       notifications: notifications.get(cinemaId) || 0,
       lockSuccess: Number(lock.locked || 0),
       lockFailed: Number(lock.failed || 0),

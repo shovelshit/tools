@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { PRODUCTION_SCHEMA_SQL, createMonitorStateFixture } from "./helpers.js";
 import { applyMaoyanMonitorStateV2 } from "../scripts/apply-maoyan-monitor-state-v2.mjs";
 import { migrateActiveMonitorState } from "../scripts/migrate-maoyan-monitor-state.mjs";
+import { beginCinemaRun, hashCinemaData } from "../src/maoyan/monitor-store.js";
 
 const migrationSql = readFileSync(new URL("../sql/maoyan-monitor-state-v2.sql", import.meta.url), "utf8");
 
@@ -53,19 +54,41 @@ test("v2 migration is safe on the current schema and initializes baseline from c
 test("active state migration copies the latest batch and preserves lock and pending outbox", async () => {
   const { DB, userId, cinemaId } = await createMonitorStateFixture({ nowMs: 1_726_000_000_000 });
   await DB.prepare("DELETE FROM cinema_state").run();
-  await DB.prepare("INSERT INTO cinema_batches(cinema_id,batch_id,status,version,public_data,captured_at) VALUES (?,?,?,?,?,?)")
-    .bind(cinemaId, "old", "committed", 4, JSON.stringify({ showData: { cinemaName: "影院 A", movies: [] } }), 1_725_999_000_000).run();
+  await DB.prepare("INSERT INTO cinema_batches(cinema_id,batch_id,status,version,public_data,captured_at) VALUES (?,?,?,?,?,?),(?,?,?,?,?,?)")
+    .bind(cinemaId, "old", "committed", 4, JSON.stringify({ showData: { cinemaName: "旧影院", movies: [] } }), 1_725_999_000_000,
+      cinemaId, "latest", "committed", 5, JSON.stringify({ showData: { cinemaName: "影院 A", movies: [] } }), 1_725_999_500_000).run();
 
   const result = await migrateActiveMonitorState(DB, { nowMs: 1_726_000_000_000, userId });
   assert.deepEqual(result, { migratedUsers: 1, migratedCinemas: 1, preservedOutbox: 1, resetBaselines: 1 });
-  const state = await DB.prepare("SELECT current_version,current_data,completed_at,run_state FROM cinema_state WHERE cinema_id=?").bind(cinemaId).first();
-  assert.equal(state.current_version, 4);
+  const state = await DB.prepare("SELECT current_version,current_hash,current_data,completed_at,run_state FROM cinema_state WHERE cinema_id=?").bind(cinemaId).first();
+  assert.equal(state.current_version, 5);
   assert.equal(JSON.parse(state.current_data).showData.cinemaName, "影院 A");
-  assert.equal(state.completed_at, 1_725_999_000_000);
+  assert.equal(state.completed_at, 1_725_999_500_000);
   assert.equal(state.run_state, "completed");
-  assert.equal((await DB.prepare("SELECT baseline_version,last_run_id FROM monitor_subscriptions WHERE user_id=?").bind(userId).first()).baseline_version, 4);
+  assert.equal((await DB.prepare("SELECT baseline_version,last_run_id FROM monitor_subscriptions WHERE user_id=?").bind(userId).first()).baseline_version, 5);
+  assert.equal(state.current_hash, hashCinemaData(JSON.parse(state.current_data)));
   assert.equal((await DB.prepare("SELECT data FROM lock_rule WHERE token_id=?").bind(userId).first()).data, JSON.stringify({ id: "lock-1", state: "waiting_schedule" }));
   assert.equal((await DB.prepare("SELECT state FROM notification_outbox WHERE user_id=?").bind(userId).first()).state, "pending");
+});
+
+test("re-running state migration preserves an active run and subscriber progress", async () => {
+  const { DB, userId, cinemaId } = await createMonitorStateFixture({ nowMs: 1_726_000_000_000 });
+  await DB.prepare("DELETE FROM cinema_state").run();
+  await DB.prepare("INSERT INTO cinema_batches(cinema_id,batch_id,status,version,public_data,captured_at) VALUES (?,?,?,?,?,?)")
+    .bind(cinemaId, "latest", "committed", 4, JSON.stringify({ showData: { cinemaName: "影院 A", movies: [] } }), 1_725_999_000_000).run();
+  await migrateActiveMonitorState(DB, { nowMs: 1_726_000_000_000, userId });
+  const run = await beginCinemaRun(DB, {
+    cinemaId, runId: "in-progress", nowMs: 1_726_000_001_000,
+    fetchedData: { showData: { cinemaName: "影院 A", movies: [] } }
+  });
+  await DB.prepare("UPDATE monitor_subscriptions SET last_run_id=? WHERE user_id=?").bind("in-progress", userId).run();
+  await migrateActiveMonitorState(DB, { nowMs: 1_726_000_002_000, userId });
+  const state = await DB.prepare("SELECT active_run_id,active_data,run_state,subscriber_cursor FROM cinema_state WHERE cinema_id=?").bind(cinemaId).first();
+  assert.equal(state.active_run_id, "in-progress");
+  assert.equal(state.run_state, "processing");
+  assert.ok(state.active_data);
+  assert.equal((await DB.prepare("SELECT baseline_version,last_run_id FROM monitor_subscriptions WHERE user_id=?").bind(userId).first()).last_run_id, "in-progress");
+  assert.equal(run.runId, "in-progress");
 });
 
 test("active state migration leaves a missing batch at version zero for a first-scan baseline", async () => {

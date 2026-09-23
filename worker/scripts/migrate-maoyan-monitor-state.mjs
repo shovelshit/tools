@@ -7,7 +7,6 @@ function parseJson(value) {
     return {};
   }
 }
-
 async function rows(DB, sql, ...params) {
   return (await DB.prepare(sql).bind(...params).all()).results || [];
 }
@@ -36,12 +35,15 @@ export async function migrateActiveMonitorState(DB, { nowMs = Date.now(), userId
     const uid = String(subscription.user_id);
     const cinemaId = String(subscription.cinema_id);
     cinemaIds.add(cinemaId);
+    const existingState = await DB.prepare("SELECT cinema_id,current_version,current_data,active_run_id,run_state FROM cinema_state WHERE cinema_id=?").bind(cinemaId).first();
     const latest = await DB.prepare(
       "SELECT version,public_data,captured_at FROM cinema_batches " +
       "WHERE cinema_id=? AND status='committed' ORDER BY captured_at DESC,version DESC LIMIT 1"
     ).bind(cinemaId).first();
 
-    if (latest) {
+    if (existingState) {
+      // A rerun must never discard an active run or subscriber progress.
+    } else if (latest) {
       const normalized = normalizeCinemaData(parseJson(latest.public_data));
       const version = Number(latest.version);
       await DB.prepare(
@@ -85,4 +87,3 @@ export async function migrateActiveMonitorState(DB, { nowMs = Date.now(), userId
     resetBaselines
   };
 }
-

@@ -182,9 +182,14 @@ test("dashboard uses cinema_state even when legacy batches contain a newer name"
   await env.DB.prepare(
     "INSERT INTO cinema_batches(cinema_id,batch_id,status,version,public_data,captured_at) VALUES (?,?,?,?,?,?)"
   ).bind("cinema-state", "legacy", "committed", 99, JSON.stringify({ showData: { cinemaName: "历史影院", movies: [] } }), NOW).run();
+  await insertNotification(env, {
+    eventKey: "cinema:cinema-state:run-1:state-user:movie-1",
+    userId: active.account.id, kind: "new-shows", state: "pending"
+  });
   const payload = await (await worker.fetch(request("/api/admin/dashboard?businessLine=maoyan&window=24h"), env)).json();
   assert.equal(payload.users[0].cinemaName, "当前影院");
   assert.equal(payload.cinemas[0].cinemaName, "当前影院");
+  assert.equal(payload.cinemas[0].newShows, 1);
   assert.equal(payload.health.latestBatchAt, NOW - 1000);
 });
 
