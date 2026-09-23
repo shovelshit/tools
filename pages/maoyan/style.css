@@ -892,6 +892,66 @@ summary:focus-visible {
 .push-hint a { color: var(--success-dark); text-decoration: none; }
 .push-hint a:hover { text-decoration: underline; }
 
+.push-key-control {
+  grid-column: 2;
+  display: grid;
+  grid-template-columns: minmax(0, 560px) max-content;
+  justify-content: start;
+  align-items: center;
+  gap: 4px 7px;
+  min-width: 0;
+}
+
+.push-key-input { min-width: 0; }
+.push-key-input input { width: 100%; }
+.push-key-control > .btn { width: max-content; white-space: nowrap; }
+
+.notify-monitor-card {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid rgba(66, 189, 178, 0.36);
+  border-radius: 7px;
+  background: linear-gradient(90deg, rgba(66, 189, 178, 0.08), rgba(17, 27, 31, 0.62));
+}
+
+.notify-monitor-copy { min-width: 0; }
+.notify-monitor-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 750;
+}
+.notify-monitor-title.st-running { color: var(--success-dark); }
+.notify-monitor-title.st-stopped { color: var(--danger); }
+.notify-monitor-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.notify-monitor-title.st-running .notify-monitor-dot {
+  background: var(--success);
+  box-shadow: 0 0 0 3px rgba(66, 189, 178, 0.12), 0 0 10px rgba(66, 189, 178, 0.48);
+}
+.notify-monitor-title.st-stopped .notify-monitor-dot { background: var(--danger); }
+.notify-monitor-summary {
+  display: grid;
+  gap: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.notify-monitor-summary > div { display: flex; gap: 7px; min-width: 0; }
+.notify-monitor-summary b { flex: 0 0 auto; color: var(--text); font-weight: 650; }
+.notify-monitor-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+
 .control-strip {
   display: flex;
   align-items: center;
@@ -1547,12 +1607,14 @@ summary:focus-visible {
   .row-span-all > label,
   .lock-form-grid > label { margin-top: 5px; }
   .row-span-all .push-hint { grid-column: 1; }
+  .push-key-control { grid-column: 1; grid-template-columns: minmax(0, 1fr) auto; }
   .channel-row { align-items: stretch; }
   .channel-opts { display: grid; grid-template-columns: 1fr 1fr; }
   .channel-opts span { min-height: 40px; justify-content: center; font-size: 12px; }
   .control-strip { flex-wrap: wrap; }
   .control-strip .spacer { display: none; }
   .control-strip .btn { flex: 1 1 auto; }
+  .notify-monitor-card { gap: 10px; }
   .panel-actions .btn { min-width: 92px; }
   .autosave-state { font-size: 10px; }
   .search-row .btn { flex: 0 0 auto; }

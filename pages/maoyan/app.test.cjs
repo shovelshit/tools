@@ -312,6 +312,12 @@ test("notification controls stay compact on desktop and use the full width on mo
   const css = readSource("style.css");
   assert.match(css, /\.channel-opts\s*\{[^}]*width:\s*fit-content/);
   assert.match(css, /\.row-span-all\s*>\s*input\s*\{\s*width:\s*min\(100%,\s*560px\)/);
+  assert.match(css, /\.push-key-control\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*560px\)\s+max-content/);
+  assert.match(css, /\.push-key-control\s*>\s*\.btn\s*\{[^}]*white-space:\s*nowrap/);
+  assert.match(css, /\.push-key-control\s*>\s*\.btn\s*\{[^}]*width:\s*max-content/);
+  assert.doesNotMatch(css, /\.push-key-control\s*>\s*\.btn\s*\{[^}]*min-height:\s*34px/);
+  assert.match(css, /\.notify-monitor-card\s*\{[\s\S]*grid-template-columns:\s*1fr/);
+  assert.match(css, /\.notify-monitor-actions\s*\{[^}]*justify-content:\s*flex-end/);
   assert.match(css, /@media \(max-width:\s*640px\)[\s\S]*\.row-span-all,[\s\S]*grid-template-columns:\s*1fr/);
 });
 
@@ -344,7 +350,7 @@ test("save-and-test waits for blur autosave and adopts the verification version"
   };
   vm.createContext(context);
   vm.runInContext(source.slice(source.indexOf('let lastSavedSig = "";'), source.indexOf("// 影片勾选变化较密集")), context);
-  const start = source.indexOf('els.btnTestPush.addEventListener("click"');
+  const start = source.indexOf("async function testPush(button)");
   vm.runInContext(source.slice(start, source.indexOf("// ---------------- 变化记录", start)), context);
   const autoSave = context.autoSaveConfig();
   const explicit = handler();
@@ -543,4 +549,33 @@ test("both update controls distinguish failure, skipped, current and new release
   runtime.capabilities.updates = false;
   context.renderDesktopUpdate({});
   assert.equal($("login-update-status").classList.hidden, true);
+});
+
+test("notification step keeps each save action beside its active key and exposes the monitor card", () => {
+  const html = readSource("index.html");
+  const source = readSource("app.js");
+  const barkStart = html.indexOf('id="push-bark-row"');
+  const serverStart = html.indexOf('id="push-serverchan-row"');
+  const controlStart = html.indexOf('id="notify-monitor-card"');
+  assert.ok(barkStart >= 0 && serverStart > barkStart && controlStart > serverStart);
+  assert.match(html.slice(barkStart, serverStart), /push-key-control[\s\S]*id="btn-test-push"/);
+  assert.match(html.slice(serverStart, controlStart), /push-key-control[\s\S]*id="btn-test-push-serverchan"/);
+  assert.match(html.slice(barkStart, serverStart), /push-key-control[\s\S]*?id="btn-test-push"[\s\S]*?<\/div>\s*<div class="push-hint/);
+  assert.match(html.slice(serverStart, controlStart), /push-key-control[\s\S]*?id="btn-test-push-serverchan"[\s\S]*?<\/div>\s*<div class="push-hint/);
+  assert.match(html, /id="notify-monitor-title"/);
+  assert.match(html, /id="notify-monitor-cinema"/);
+  assert.match(html, /id="notify-monitor-movie"/);
+  assert.match(html, /id="notify-monitor-rule"/);
+  assert.match(html, /id="notify-monitor-copy"|class="notify-monitor-copy"/);
+  assert.match(html, /class="notify-monitor-copy"[\s\S]*class="notify-monitor-actions"/);
+  assert.match(source, /function renderNotifyMonitorSummary\(\)/);
+  assert.match(source, /ruleSummary/);
+  assert.match(source, /btnTestPushServerChan/);
+});
+
+test("notification controls share one push verification implementation", () => {
+  const source = readSource("app.js");
+  assert.match(source, /async function testPush\(button\)/);
+  assert.match(source, /btnTestPush\.addEventListener\("click", \(\) => testPush\(els\.btnTestPush\)\)/);
+  assert.match(source, /btnTestPushServerChan\?\.addEventListener\("click", \(\) => testPush\(els\.btnTestPushServerChan\)\)/);
 });

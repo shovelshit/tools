@@ -38,6 +38,7 @@ const els = {
   // 监控设置
   btnCheck: $("btn-check"),
   btnTestPush: $("btn-test-push"),
+  btnTestPushServerChan: $("btn-test-push-serverchan"),
   btnLockSeats: $("btn-lock-seats"),
   btnToggleMonitor: $("btn-toggle-monitor"),
   batchTip: $("batch-tip"),
@@ -94,7 +95,7 @@ const clientPlatform = window.detectPlatform ? window.detectPlatform({
   userAgentData: navigator.userAgentData
 }) : { os: "unknown", arch: "unknown" };
 let pollingController = null;
-let lockPollingState = { open: false, active: false };
+let lockPollingState = { open: false, active: false, ruleSummary: null };
 let renderedChanges = [];
 
 // 城市 / 影院搜索
@@ -240,6 +241,7 @@ const lockController = window.createMaoyanLockController({
   onLog: log,
   onPollingState: (next) => {
     lockPollingState = next;
+    renderNotifyMonitorSummary();
     syncPollingState();
   }
 });
@@ -275,6 +277,34 @@ function setStatus(text, state = "off", details = [], error = "") {
     nodes.push(errorItem);
   }
   els.statusLine.replaceChildren(...nodes);
+  renderNotifyMonitorSummary();
+}
+
+function renderNotifyMonitorSummary() {
+  const title = $("notify-monitor-title");
+  if (!title) return;
+  const titleText = monitorEnabled
+    ? ["监控中", nextBatchText()].filter(Boolean).join(" · ")
+    : (connected ? "已停止" : "未连接");
+  const titleState = monitorEnabled ? "running" : (connected ? "stopped" : "off");
+  const dot = document.createElement("span");
+  dot.className = "notify-monitor-dot";
+  const text = document.createElement("span");
+  text.textContent = titleText;
+  title.className = `notify-monitor-title st-${titleState}`;
+  title.replaceChildren(dot, text);
+
+  const cinema = selectedCinema?.name || String(els.cinemaName?.textContent || "")
+    .replace(/（ID:.*?）$/, "").trim() || "未选择影院";
+  const movies = cinemaMovies.filter((movie) => movie.checked)
+    .map((movie) => movie.nm || movie.name).filter(Boolean);
+  const ruleSummary = lockPollingState.ruleSummary;
+  const cinemaEl = $("notify-monitor-cinema");
+  const movieEl = $("notify-monitor-movie");
+  const ruleEl = $("notify-monitor-rule");
+  if (cinemaEl) cinemaEl.textContent = cinema;
+  if (movieEl) movieEl.textContent = movies.length ? movies.join("、") : "未选择影片";
+  if (ruleEl) ruleEl.textContent = ruleSummary?.exists ? ruleSummary.rule : "暂无锁座规则";
 }
 
 function setConnectionState({ profileKey = "", workerUrl = "" } = {}) {
@@ -895,6 +925,7 @@ function updateMonitorBtn() {
   const requiresPushTest = !monitorEnabled && !pushVerified;
   els.btnToggleMonitor.disabled = !connected || requiresPushTest;
   els.btnToggleMonitor.title = requiresPushTest ? "请先配置推送渠道，填好推送密钥并「保存并测试」" : "";
+  renderNotifyMonitorSummary();
   syncWorkflowUi();
 }
 
@@ -1298,6 +1329,7 @@ function renderShowtimes(m, box) {
 
 function syncCount() {
   els.movieCount.textContent = `共 ${cinemaMovies.length} 部在映影片，已勾选 ${getSelectedIds().length} 部`;
+  renderNotifyMonitorSummary();
   lockController.syncAvailability();
   syncWorkflowUi();
 }
@@ -1327,11 +1359,11 @@ els.btnCheck.addEventListener("click", async () => {
   });
 });
 
-els.btnTestPush.addEventListener("click", async () => {
+async function testPush(button) {
   if (!connected) return showToast("请先连接云端", "warn");
   const generation = profileGeneration.current();
   let ownsSave = false;
-  await withButtonLoading(els.btnTestPush, "发送中...", async () => {
+  await withButtonLoading(button, "发送中...", async () => {
     try {
       // 点击会先触发输入框 blur 自动保存；测试必须等待保存完成，避免并发版本冲突。
       await waitForAutoSave();
@@ -1359,7 +1391,10 @@ els.btnTestPush.addEventListener("click", async () => {
       if (ownsSave && profileGeneration.isCurrent(generation)) finishConfigSave();
     }
   });
-});
+}
+
+els.btnTestPush.addEventListener("click", () => testPush(els.btnTestPush));
+els.btnTestPushServerChan?.addEventListener("click", () => testPush(els.btnTestPushServerChan));
 
 // ---------------- 变化记录 ----------------
 function applyStatusSummary(data) {

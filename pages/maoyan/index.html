@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>电影场次监控</title>
-  <link rel="stylesheet" href="style.css?v=20260922-tolerance-r1" />
+  <link rel="stylesheet" href="style.css?v=20260923-notify-r3" />
 </head>
 <body>
   <div id="ambient-background" class="ambient-background" aria-hidden="true">
@@ -204,21 +204,35 @@
                 </div>
                 <div id="push-bark-row" class="row-span-all">
                   <label for="bark-input">推送密钥</label>
-                  <input id="bark-input" type="text" placeholder="Bark Key 或 URL，如 https://api.day.app/xxxxx" autocomplete="off" />
+                  <div class="push-key-control">
+                    <div class="push-key-input"><input id="bark-input" type="text" placeholder="Bark Key 或 URL，如 https://api.day.app/xxxxx" autocomplete="off" /></div>
+                    <button id="btn-test-push" class="btn small ghost" type="button">保存并测试</button>
+                  </div>
                   <div class="push-hint muted">没有 Bark？<a href="https://apps.apple.com/cn/app/id1403753865" data-external-link target="_blank" rel="noopener">下载 Bark</a> 并在 App 内复制 Key</div>
                 </div>
                 <div id="push-serverchan-row" class="row-span-all hidden">
                   <label for="serverchan-input">推送密钥</label>
-                  <input id="serverchan-input" type="text" placeholder="SCT 开头的 SendKey" autocomplete="off" />
+                  <div class="push-key-control">
+                    <div class="push-key-input"><input id="serverchan-input" type="text" placeholder="SCT 开头的 SendKey" autocomplete="off" /></div>
+                    <button id="btn-test-push-serverchan" class="btn small ghost" type="button">保存并测试</button>
+                  </div>
                   <div class="push-hint muted"><a href="https://sct.ftqq.com/sendkey" data-external-link target="_blank" rel="noopener">登录 Server酱</a> 获取 SendKey</div>
                 </div>
                 <p id="push-platform-advice" class="push-hint muted span-all hidden"></p>
               </div>
-              <div class="control-strip">
-                <button id="btn-test-push" class="btn small ghost" type="button">保存并测试</button>
-                <span class="spacer"></span>
-                <button id="btn-lock-seats" class="btn small ghost" type="button" disabled title="配置自动锁座">锁座</button>
-                <button id="btn-toggle-monitor" class="btn primary" type="button">开始监控</button>
+              <div id="notify-monitor-card" class="notify-monitor-card">
+                <div class="notify-monitor-copy">
+                  <div id="notify-monitor-title" class="notify-monitor-title"><span class="notify-monitor-dot"></span><span>未连接</span></div>
+                  <div class="notify-monitor-summary">
+                    <div><b>影院</b><span id="notify-monitor-cinema">未选择影院</span></div>
+                    <div><b>影片</b><span id="notify-monitor-movie">未选择影片</span></div>
+                    <div><b>锁座规则</b><span id="notify-monitor-rule">暂无锁座规则</span></div>
+                  </div>
+                </div>
+                <div class="notify-monitor-actions">
+                  <button id="btn-lock-seats" class="btn small ghost" type="button" disabled title="配置自动锁座">锁座</button>
+                  <button id="btn-toggle-monitor" class="btn primary" type="button">开始监控</button>
+                </div>
               </div>
               <div class="muted tip-line" id="batch-tip">云端按定时批次自动检查（当前每 30 分钟一批，以服务端为准）。改动会自动保存。</div>
               <section class="activity-section" aria-labelledby="activity-title">
@@ -346,7 +360,7 @@
   <script src="workflow.js?v=20260916a"></script>
   <script src="polling.js?v=20260916a"></script>
   <script src="seat-layout.js?v=20260922a"></script>
-  <script src="lock.js?v=20260922-tolerance-r2"></script>
-  <script src="app.js?v=20260920b"></script>
+  <script src="lock.js?v=20260922-notify-r2"></script>
+  <script src="app.js?v=20260922-notify-r2"></script>
 </body>
 </html>

@@ -205,7 +205,7 @@
 
     function emitPollingState() {
       const active = Boolean(state.rule && ["waiting_schedule", "matching"].includes(state.rule.state));
-      onPollingState?.({ open: !els.overlay.classList.contains("hidden"), active });
+      onPollingState?.({ open: !els.overlay.classList.contains("hidden"), active, ruleSummary: getPanelSummary() });
     }
 
     function showNativeSessionResult(result, fallback, type) {
@@ -332,6 +332,27 @@
         map.set(String(seat.seatNo), seatDisplayLabel(seat, state.seatSeg));
       }
       return map;
+    }
+
+    function getPanelSummary() {
+      const rule = state.rule;
+      if (!rule) return { exists: false, cinema: "", movie: "", rule: "暂无锁座规则", active: false };
+      const labels = seatLabelMap();
+      const seats = (rule.seats || [])
+        .map((seat) => seat?.label || labels.get(String(seat?.seatNo ?? seat)) || seatDisplayLabel(seat, state.seatSeg))
+        .filter(Boolean)
+        .join("、") || "未选择座位";
+      const target = [rule.targetDate, rule.templateTime].filter(Boolean).join(" ");
+      const hall = rule.hall || "";
+      const tolerance = `±${displayedTimeTolerance(rule.timeToleranceMinutes)}分钟`;
+      const status = RULE_LABELS[rule.state] || "规则状态未知";
+      return {
+        exists: true,
+        cinema: rule.cinemaName || "影院",
+        movie: rule.movieName || "影片",
+        rule: [target, hall, tolerance, seats, status].filter(Boolean).join(" · "),
+        active: isActiveLockRule(rule)
+      };
     }
 
     // 提交按钮的置灰原因(展示在按钮 title 上)
@@ -1451,7 +1472,7 @@
 
     return {
       syncAvailability, open, refreshTemplates: renderTemplates, close, reset,
-      refreshRemoteState, loginMaoyan, uploadSession, dispose, getSession: () => publicSession(state.session)
+      refreshRemoteState, loginMaoyan, uploadSession, dispose, getSession: () => publicSession(state.session), getPanelSummary
     };
   }
 

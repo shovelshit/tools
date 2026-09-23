@@ -179,6 +179,33 @@ test("refreshing an uploaded session does not expose inference risk for a real s
   assert.equal(f.elements["lock-section-risk"].classList.contains("hidden"), true);
 });
 
+test("lock controller exposes a display-ready summary for the notification monitor card", async () => {
+  const f = mountLock({
+    api: {
+      "/api/lock/rule": {
+        rule: {
+          cinemaName: "寰映影城（大融城激光 IMAX 店）",
+          movieName: "奥德赛",
+          hall: "1号激光IMAX厅",
+          targetDate: "2026-09-28",
+          templateTime: "13:15",
+          timeToleranceMinutes: 180,
+          seats: [{ label: "12排18座" }],
+          state: "waiting_schedule"
+        }
+      }
+    }
+  });
+  await f.controller.refreshRemoteState();
+  assert.deepEqual(JSON.parse(JSON.stringify(f.controller.getPanelSummary())), {
+    exists: true,
+    cinema: "寰映影城（大融城激光 IMAX 店）",
+    movie: "奥德赛",
+    rule: "2026-09-28 13:15 · 1号激光IMAX厅 · ±180分钟 · 12排18座 · 等待目标场次",
+    active: true
+  });
+});
+
 test("a blank inferred tolerance does not block immediate real-show locking or enter its payload", async () => {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" })
     .formatToParts(new Date());
