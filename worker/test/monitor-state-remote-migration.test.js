@@ -58,14 +58,14 @@ test("remote dry-run performs no apply command and does not expose public data",
   const calls = [];
   const run = async (sql) => {
     calls.push(sql);
-    if (sql.startsWith("SELECT name")) return [{ name: "monitor_subscriptions" }, { name: "cinema_batches" }, { name: "cinema_state" }, { name: "notification_outbox" }, { name: "lock_rule" }];
-    if (sql.startsWith("PRAGMA table_info(cinema_state)")) return [{ name: "cinema_id" }, { name: "current_version" }, { name: "current_data" }, { name: "active_run_id" }, { name: "run_state" }];
-    if (sql.startsWith("PRAGMA table_info(monitor_subscriptions)")) return [{ name: "last_run_id" }];
-    if (sql.startsWith("SELECT s.user_id")) return snapshot().subscriptions;
-    if (sql.startsWith("SELECT cinema_id,current_version")) return [];
-    if (sql.startsWith("SELECT b.cinema_id")) return snapshot().latest;
-    if (sql.startsWith("SELECT state,COUNT")) return snapshot().outbox;
-    if (sql.startsWith("SELECT COUNT(*) AS count FROM lock_rule")) return snapshot().lockRules;
+    if (sql.startsWith("SELECT name")) return [{ results: [{ name: "monitor_subscriptions" }, { name: "cinema_batches" }, { name: "cinema_state" }, { name: "notification_outbox" }, { name: "lock_rule" }] }];
+    if (sql.startsWith("PRAGMA table_info(cinema_state)")) return [{ results: [{ name: "cinema_id" }, { name: "current_version" }, { name: "current_data" }, { name: "active_run_id" }, { name: "run_state" }] }];
+    if (sql.startsWith("PRAGMA table_info(monitor_subscriptions)")) return [{ results: [{ name: "last_run_id" }] }];
+    if (sql.startsWith("SELECT s.user_id")) return [{ results: snapshot().subscriptions }];
+    if (sql.startsWith("SELECT cinema_id,current_version")) return [{ results: [] }];
+    if (sql.startsWith("SELECT b.cinema_id")) return [{ results: snapshot().latest }];
+    if (sql.startsWith("SELECT state,COUNT")) return [{ results: snapshot().outbox }];
+    if (sql.startsWith("SELECT COUNT(*) AS count FROM lock_rule")) return [{ results: snapshot().lockRules }];
     throw new Error(`unexpected SQL: ${sql}`);
   };
   const result = await executeRemoteMigration({ database: "ignored", paused: true, run });

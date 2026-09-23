@@ -16,7 +16,10 @@ function sqlNullableText(value) {
 }
 
 function asRows(payload) {
-  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload)) {
+    const wrapped = payload.some((item) => item && (Array.isArray(item.results) || Array.isArray(item.result?.results)));
+    return wrapped ? payload.flatMap((item) => asRows(item)) : payload;
+  }
   if (Array.isArray(payload?.results)) return payload.results;
   if (Array.isArray(payload?.result?.results)) return payload.result.results;
   return [];
