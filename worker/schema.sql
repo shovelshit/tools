@@ -279,12 +279,39 @@ CREATE TABLE IF NOT EXISTS monitor_subscriptions (
   enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
   config_version INTEGER NOT NULL CHECK (config_version > 0),
   baseline_version INTEGER,
+  last_run_id TEXT,
   next_due_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_monitor_subscriptions_due
   ON monitor_subscriptions(enabled, next_due_at, cinema_id, user_id);
+
+CREATE INDEX IF NOT EXISTS idx_monitor_subscriptions_run
+  ON monitor_subscriptions(cinema_id, last_run_id, next_due_at, user_id);
+
+CREATE TABLE IF NOT EXISTS cinema_state (
+  cinema_id TEXT PRIMARY KEY,
+  current_version INTEGER NOT NULL DEFAULT 0 CHECK (current_version >= 0),
+  current_hash TEXT,
+  current_data TEXT,
+  active_run_id TEXT,
+  active_base_version INTEGER,
+  active_base_hash TEXT,
+  active_data TEXT,
+  active_version INTEGER,
+  run_state TEXT NOT NULL DEFAULT 'idle'
+    CHECK (run_state IN ('idle', 'processing', 'retryable', 'completed')),
+  subscriber_cursor TEXT,
+  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+  lease_until INTEGER,
+  started_at INTEGER,
+  completed_at INTEGER,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_cinema_state_active
+  ON cinema_state(run_state, lease_until, cinema_id);
 
 CREATE TABLE IF NOT EXISTS cinema_snapshots (
   cinema_id TEXT NOT NULL,

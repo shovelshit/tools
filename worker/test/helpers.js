@@ -49,7 +49,7 @@ export class MemoryKV {
 // 用真实 SQLite 执行 schema.sql + db.js 的全部语句, 保证测试对 SQL 本身有覆盖。
 // 记录写语句供断言「哪些表被写过/写过几次」(对应 KV 版 MemoryKV.ops)。
 
-const PRODUCTION_SCHEMA_SQL = readFileSync(new URL("../schema.sql", import.meta.url), "utf8");
+export const PRODUCTION_SCHEMA_SQL = readFileSync(new URL("../schema.sql", import.meta.url), "utf8");
 const SCHEMA_SQL = PRODUCTION_SCHEMA_SQL;
 
 export class MemoryD1 {
@@ -143,6 +143,49 @@ export async function createDB(seeds = {}) {
   // 种子写入不计入写操作断言(writeCount 只度量被测代码的落盘)
   d1.writes = [];
   return d1;
+}
+
+// Shared fixture for monitor state migrations: one active account, one current
+// cinema state, an enabled subscription, its lock rule, and a pending outbox row.
+export async function seedMonitorStateFixture(DB, overrides = {}) {
+  const nowMs = Number(overrides.nowMs || Date.now());
+  const userId = overrides.userId || "monitor-user";
+  const cinemaId = overrides.cinemaId || "cinema-1";
+  const currentVersion = Number(overrides.currentVersion ?? 7);
+  const runId = overrides.runId || null;
+  const nextDueAt = Number(overrides.nextDueAt ?? nowMs + 60_000);
+  const lockData = overrides.lockData || { id: "lock-1", state: "waiting_schedule" };
+  const notification = overrides.notification || {
+    eventKey: "monitor:event-1",
+    kind: "lock-terminal",
+    payload: { cinemaId },
+    credentialVersion: 1
+  };
+
+  await DB.prepare(
+    "INSERT INTO users(id,role,remark,state,created_at,expires_at,source,version) VALUES (?,'user',?,'active',?,?,'test',1)"
+  ).bind(userId, "monitor fixture", nowMs, nowMs + 86_400_000).run();
+  await DB.prepare(
+    "INSERT INTO user_config(token_id,data,updated_at,version) VALUES (?,?,?,1)"
+  ).bind(userId, JSON.stringify({ cinemaId }), String(nowMs)).run();
+  await DB.prepare(
+    "INSERT INTO cinema_state(cinema_id,current_version,current_hash,current_data,active_run_id,run_state,updated_at) VALUES (?,?,?,?,?,'idle',?)"
+  ).bind(cinemaId, currentVersion, "current-hash", JSON.stringify({ cinemaId, shows: [] }), runId, nowMs).run();
+  await DB.prepare(
+    "INSERT INTO monitor_subscriptions(user_id,cinema_id,enabled,config_version,baseline_version,last_run_id,next_due_at,updated_at) VALUES (?, ?, 1, 1, NULL, ?, ?, ?)"
+  ).bind(userId, cinemaId, runId, nextDueAt, nowMs).run();
+  await DB.prepare(
+    "INSERT INTO lock_rule(token_id,data,updated_at) VALUES (?,?,?)"
+  ).bind(userId, JSON.stringify(lockData), String(nowMs)).run();
+  await DB.prepare(
+    "INSERT INTO notification_outbox(event_key,user_id,kind,payload,credential_version,state,attempts,next_attempt_at,created_at,updated_at) VALUES (?,?,?,?,?,'pending',0,?,?,?)"
+  ).bind(notification.eventKey, userId, notification.kind, JSON.stringify(notification.payload), notification.credentialVersion, nowMs, nowMs, nowMs).run();
+  return { userId, cinemaId, currentVersion, runId, nextDueAt };
+}
+
+export async function createMonitorStateFixture(overrides = {}) {
+  const DB = new MemoryD1();
+  return { DB, ...(await seedMonitorStateFixture(DB, overrides)) };
 }
 
 export function testEncryptionKey() {
