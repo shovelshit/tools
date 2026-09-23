@@ -21,7 +21,7 @@ export async function migrateActiveMonitorState(DB, { nowMs = Date.now(), userId
     "SELECT s.user_id,s.cinema_id,s.enabled,s.baseline_version " +
     "FROM monitor_subscriptions s JOIN users u ON u.id=s.user_id " +
     "WHERE s.enabled=1 AND s.cinema_id<>'' AND u.business_line='maoyan' " +
-    "AND u.role='user' AND u.state='active' AND u.archived_at IS NULL " +
+    "AND u.role IN ('user','admin') AND u.state='active' AND u.archived_at IS NULL " +
     "AND (u.expires_at IS NULL OR u.expires_at>?) " +
     (userId == null ? "" : "AND s.user_id=?") +
     " ORDER BY s.user_id,s.cinema_id",

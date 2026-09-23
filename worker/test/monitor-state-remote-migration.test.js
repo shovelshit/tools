@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { buildMigrationPlan, executeRemoteMigration, readRemoteSnapshot } from "../scripts/migrate-maoyan-monitor-state-remote.mjs";
+import { buildMigrationPlan, executeRemoteMigration, parseWranglerJson, readRemoteSnapshot } from "../scripts/migrate-maoyan-monitor-state-remote.mjs";
 
 function snapshot(overrides = {}) {
   return {
@@ -15,6 +15,11 @@ function snapshot(overrides = {}) {
     activeRuns: [], outbox: [{ state: "pending", count: 2 }], lockRules: [{ count: 2 }], ...overrides
   };
 }
+
+test("Wrangler progress output is ignored when parsing JSON", () => {
+  const payload = parseWranglerJson("\u001b[2K\u001b[1GExecuting...\n[{\"results\":[{\"ok\":1}]}]\nDone");
+  assert.deepEqual(payload, [{ results: [{ ok: 1 }] }]);
+});
 
 test("remote plan uses safe hex literals and initializes one shared cinema for both subscribers", () => {
   const plan = buildMigrationPlan(snapshot(), { paused: true, nowMs: 1000 });
@@ -72,6 +77,7 @@ test("remote dry-run performs no apply command and does not expose public data",
   assert.equal(result.mode, "dry-run");
   assert.equal(calls.some((sql) => sql.startsWith("INSERT") || sql.startsWith("UPDATE")), false);
   assert.equal(result.summary.preservedOutbox, 2);
+  assert.match(calls.find((sql) => sql.startsWith("SELECT s.user_id")), /u\.role IN \('user','admin'\)/);
 });
 
 test("remote snapshot rejects an old schema before generating SQL", async () => {

@@ -25,12 +25,40 @@ function asRows(payload) {
   return [];
 }
 
-function parseWranglerJson(output) {
+export function parseWranglerJson(output) {
   const text = String(output || "").trim();
   if (!text) return {};
-  try { return JSON.parse(text); } catch (error) {
-    throw new Error(`wrangler returned non-JSON output: ${error.message}`);
+  try { return JSON.parse(text); } catch {}
+  let last;
+  for (let start = 0; start < text.length; start += 1) {
+    if (text[start] !== "{" && text[start] !== "[") continue;
+    const stack = [];
+    let quoted = false;
+    let escaped = false;
+    for (let index = start; index < text.length; index += 1) {
+      const char = text[index];
+      if (quoted) {
+        if (escaped) escaped = false;
+        else if (char === "\\") escaped = true;
+        else if (char === '"') quoted = false;
+        continue;
+      }
+      if (char === '"') { quoted = true; continue; }
+      if (char === "{" || char === "[") stack.push(char);
+      else if (char === "}" || char === "]") {
+        const expected = char === "}" ? "{" : "[";
+        if (stack.pop() !== expected) break;
+        if (!stack.length) {
+          if (last === undefined) {
+            try { last = JSON.parse(text.slice(start, index + 1)); } catch {}
+          }
+          break;
+        }
+      }
+    }
   }
+  if (last !== undefined) return last;
+  throw new Error("wrangler returned non-JSON output");
 }
 
 export function commandRunner({ database, config, command, file }) {
@@ -64,7 +92,7 @@ export async function readRemoteSnapshot(run, { nowMs = Date.now() } = {}) {
   const subscriptions = await queryRemote(run,
     "SELECT s.user_id,s.cinema_id,s.enabled,s.baseline_version,s.last_run_id,s.config_version " +
     "FROM monitor_subscriptions s JOIN users u ON u.id=s.user_id " +
-    "WHERE s.enabled=1 AND s.cinema_id<>'' AND u.business_line='maoyan' AND u.role='user' " +
+    "WHERE s.enabled=1 AND s.cinema_id<>'' AND u.business_line='maoyan' AND u.role IN ('user','admin') " +
     "AND u.state='active' AND u.archived_at IS NULL AND (u.expires_at IS NULL OR u.expires_at>" + Number(nowMs) + ") " +
     "ORDER BY s.cinema_id,s.user_id");
   const cinemas = [...new Set(subscriptions.map((row) => String(row.cinema_id)))];
