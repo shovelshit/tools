@@ -1,7 +1,7 @@
 import { fetchCinemaDetail } from "./api.js";
 import { newShowsNotification } from "./notification-copy.js";
 import { wakeNotificationDispatcher } from "./notification-outbox.js";
-import { advanceSubscriber, beginCinemaRun, completeCinemaRun, completeRunSubscriber, getCommittedCinemaBatch, listRunSubscribers, listSubscribers, persistCinemaSnapshot } from "./monitor-store.js";
+import { beginCinemaRun, completeCinemaRun, completeRunSubscriber, listRunSubscribers } from "./monitor-store.js";
 import { diffCinemaSnapshot } from "./monitor-store.js";
 import { chinaDate, resolveLockTarget, runScheduledLockAfterMonitor } from "./lock-runner.js";
 import { orderLockCandidates, runBounded } from "./lock-lottery.js";
@@ -160,99 +160,6 @@ async function fetchWithTimeout(fetchCinema, cinemaId) {
   }
 }
 
-export async function processCinemaBatch(env, {
-  cinemaId, batchId, nowMs = Date.now(), fetchCinema = fetchCinemaDetail,
-  runLock = runScheduledLockAfterMonitor, lockConcurrency = 4
-}) {
-  let persisted = await getCommittedCinemaBatch(env.DB, String(cinemaId), String(batchId));
-  if (persisted) persisted = { ...persisted, replayed: true };
-  else {
-    const fetched = await fetchWithTimeout(fetchCinema, String(cinemaId));
-    persisted = await persistCinemaSnapshot(env.DB, {
-      cinemaId: String(cinemaId), batchId: String(batchId), data: fetched, capturedAt: Number(nowMs)
-    });
-  }
-  const data = persisted.data;
-  let afterUserId = "";
-  let subscribers = 0;
-  let notifications = 0;
-  const lockCandidates = [];
-  const terminalCandidates = [];
-  do {
-    const page = await listSubscribers(env.DB, {
-      cinemaId: String(cinemaId), afterUserId, limit: 10, nowMs: Number(nowMs)
-    });
-    for (const subscription of page.items) {
-      const selected = new Set((subscription.config.selectedMovieIds || []).map(String));
-      const relevant = subscription.baselineVersion == null ? []
-        : persisted.events.filter((event) => selected.has(String(event.movieId)));
-      const changeEvents = relevant.map((event) => ({ type: "new", text: eventText(event) }));
-      const queuedNotifications = relevant.map((event) => {
-        const notification = newShowsNotification({
-          cinemaName: data?.showData?.cinemaName || "",
-          movieName: event.movieName,
-          shows: event.shows
-        });
-        return {
-          eventKey: `cinema:${cinemaId}:${batchId}:${subscription.userId}:${event.movieId}`,
-          kind: "new-shows",
-          detectedAt: Date.now(),
-          title: notification.title,
-          content: notification.content,
-          credentialVersion: subscription.configVersion
-        };
-      });
-      const advanced = await advanceSubscriber(env.DB, {
-        userId: subscription.userId,
-        cinemaId: String(cinemaId),
-        configVersion: subscription.configVersion,
-        snapshotVersion: persisted.snapshot.version,
-        events: changeEvents,
-        notifications: queuedNotifications,
-        nowMs: Number(nowMs)
-      });
-      if (!advanced.applied) continue;
-      subscribers += 1;
-      notifications += Number(advanced.notificationsCreated || 0);
-      if (advanced.notificationsCreated) {
-        try {
-          await wakeNotificationDispatcher(env, { kind: "new-shows", userId: subscription.userId });
-        } catch {
-          monitorError("notification_wake", { state: "failed", reason: "dispatch_unavailable" });
-        }
-      }
-      if (subscription.lockRule?.state === "waiting_schedule" && typeof runLock === "function") {
-        const target = resolveLockTarget(subscription.lockRule, data);
-        const candidate = {
-          userId: subscription.userId,
-          lotteryKey: subscription.lockRule.lotteryKey,
-          target
-        };
-        if (target.status === "matched") lockCandidates.push(candidate);
-        else if (target.status === "ambiguous" ||
-          (target.status === "waiting" && subscription.lockRule.targetDate < chinaDate(new Date(Number(nowMs))))) {
-          terminalCandidates.push(candidate);
-        }
-      }
-    }
-    afterUserId = page.nextCursor || "";
-  } while (afterUserId);
-  const queue = [...orderLockCandidates(lockCandidates, data), ...terminalCandidates];
-  const lockResults = await runBounded(queue, lockConcurrency, (candidate) => runLock(env, candidate.userId, data));
-  const lockFailures = lockResults.filter((result) => result.status === "rejected").length;
-  return {
-    ok: true,
-    cinemaId: String(cinemaId),
-    batchId: String(batchId),
-    snapshotVersion: persisted.snapshot.version,
-    replayed: persisted.replayed,
-    subscribers,
-    notifications,
-    lockAttempts: queue.length,
-    lockFailures
-  };
-}
-
 export class MonitorCoordinator {
   constructor(state, env, deps = {}) {
     this.state = state;
@@ -300,8 +207,8 @@ export class MonitorCoordinator {
     }
     try {
       const body = await request.json();
-      const operation = body.runId ? processCinemaRun : processCinemaBatch;
-      const result = await this.exclusive(() => operation(this.env, { ...body, ...this.deps }));
+      if (!body.runId) return Response.json({ ok: false, error: "runId required" }, { status: 400 });
+      const result = await this.exclusive(() => processCinemaRun(this.env, { ...body, ...this.deps }));
       return Response.json(result);
     } catch {
       return Response.json({ ok: false, error: "影院批次处理失败" }, { status: 502 });

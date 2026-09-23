@@ -3,10 +3,15 @@ import assert from "node:assert/strict";
 import { createAccountEnv, seedAccount } from "./account-fixtures.js";
 import { syncSubscription } from "../src/maoyan/monitor-store.js";
 import { putLockRuleRow } from "../src/maoyan/db.js";
-import { MonitorCoordinator, processCinemaBatch, processCinemaRun } from "../src/maoyan/monitor-coordinator.js";
+import { MonitorCoordinator, processCinemaRun } from "../src/maoyan/monitor-coordinator.js";
 import { cinemaFixture, createStorageFixture } from "./scaling-fixtures.js";
 
 const NOW = Date.parse("2026-09-16T04:00:00.000Z");
+
+const processCinemaBatch = (env, input) => processCinemaRun(env, {
+  ...input,
+  runId: input.runId || input.batchId
+});
 
 function waitingRule({ lotteryKey, seqNo, templateTime, targetDate = "2026-09-19" }) {
   return {
@@ -178,7 +183,6 @@ test("replaying a committed cinema batch does not duplicate user events", async 
   await processCinemaBatch(env, { cinemaId: "1", batchId: "b1", nowMs: NOW, fetchCinema: async () => cinemaFixture({ seqNos: ["s1"] }) });
   let fetches = 0;
   const input = { cinemaId: "1", batchId: "b2", nowMs: NOW + 180_000, fetchCinema: async () => { fetches += 1; return cinemaFixture({ seqNos: ["s1", "s2"] }); } };
-  await processCinemaBatch(env, input);
   await processCinemaBatch(env, input);
   assert.equal(fetches, 1);
   assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM notification_outbox").first()).n, 1);
