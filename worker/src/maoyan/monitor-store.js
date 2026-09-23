@@ -65,6 +65,13 @@ export async function beginCinemaRun(DB, { cinemaId, runId, nowMs = Date.now(), 
   if (existing?.active_run_id === rid && existing.active_data != null) {
     return { runId: rid, baseVersion: Number(existing.active_base_version || 0), version: Number(existing.active_version || existing.current_version || 0), data: decodeCinemaData(existing.active_data), changed: Number(existing.active_version || 0) !== Number(existing.active_base_version || 0) };
   }
+  if (existing?.active_run_id && existing.active_run_id !== rid &&
+      ["processing", "retryable"].includes(String(existing.run_state))) {
+    const error = new Error("影院已有运行中的监控任务");
+    error.code = "RUN_IN_PROGRESS";
+    error.activeRunId = String(existing.active_run_id);
+    throw error;
+  }
   const data = normalizeCinemaData(fetchedData);
   const hash = hashCinemaData(data);
   const baseVersion = Number(existing?.current_version || 0);
@@ -73,7 +80,12 @@ export async function beginCinemaRun(DB, { cinemaId, runId, nowMs = Date.now(), 
   const statement = existing
     ? DB.prepare("UPDATE cinema_state SET active_run_id=?,active_base_version=?,active_base_hash=?,active_data=?,active_version=?,run_state='processing',subscriber_cursor=NULL,attempt_count=attempt_count+1,started_at=?,completed_at=NULL,updated_at=? WHERE cinema_id=? AND (active_run_id IS NULL OR active_run_id=? OR run_state IN ('completed','idle','retryable'))").bind(rid, baseVersion, existing.current_hash || null, JSON.stringify(data), version, timestamp, timestamp, id, rid)
     : DB.prepare("INSERT INTO cinema_state(cinema_id,current_version,current_hash,current_data,active_run_id,active_base_version,active_base_hash,active_data,active_version,run_state,attempt_count,started_at,updated_at) VALUES (?,?,?,?,?,?,?,? ,?,'processing',1,?,?)").bind(id, 0, null, null, rid, baseVersion, null, JSON.stringify(data), version, timestamp, timestamp);
-  await DB.batch([statement]);
+  const results = await DB.batch([statement]);
+  if (Number(results[0]?.meta?.changes || 0) !== 1) {
+    const error = new Error("影院监控任务竞争冲突");
+    error.code = "RUN_CONFLICT";
+    throw error;
+  }
   return { runId: rid, baseVersion, version, data, changed };
 }
 
@@ -108,12 +120,15 @@ export async function completeRunSubscriber(DB, { userId, cinemaId, runId, confi
 export async function completeCinemaRun(DB, { cinemaId, runId, nowMs = Date.now() }) {
   const id = String(cinemaId), rid = String(runId), timestamp = Number(nowMs);
   const row = await DB.prepare("SELECT active_base_version,active_version,active_data,active_run_id FROM cinema_state WHERE cinema_id=? AND active_run_id=? AND active_data IS NOT NULL").bind(id, rid).first();
-  if (!row) return null;
+  if (!row) return { status: "skipped", runId: rid };
   const data = decodeCinemaData(row.active_data);
   const statement = DB.prepare(
     "UPDATE cinema_state SET current_version=active_version,current_hash=?,current_data=active_data,active_run_id=NULL,active_base_version=NULL,active_base_hash=NULL,active_data=NULL,active_version=NULL,run_state='completed',subscriber_cursor=NULL,completed_at=?,updated_at=? WHERE cinema_id=? AND active_run_id=?"
   ).bind(hashCinemaData(data), timestamp, timestamp, id, rid);
-  await DB.batch([statement]);
+  const results = await DB.batch([statement]);
+  if (Number(results[0]?.meta?.changes || 0) !== 1) {
+    return { status: "conflict", runId: rid };
+  }
   return { runId: rid, version: Number(row.active_version), data, changed: Number(row.active_version) !== Number(row.active_base_version || 0) };
 }
 

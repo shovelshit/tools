@@ -51,6 +51,29 @@ test("an active cinema run returns stored data idempotently", async () => {
   assert.deepEqual(retry, started);
 });
 
+test("a different active run cannot replace an in-flight run", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  await beginCinemaRun(env.DB, { cinemaId: "run-conflict", runId: "r1", nowMs: NOW, fetchedData: cinemaFixture() });
+  await assert.rejects(
+    () => beginCinemaRun(env.DB, { cinemaId: "run-conflict", runId: "r2", nowMs: NOW + 1, fetchedData: cinemaFixture({ seqNos: ["other"] }) }),
+    { code: "RUN_IN_PROGRESS" }
+  );
+  const state = await env.DB.prepare("SELECT active_run_id FROM cinema_state WHERE cinema_id=?").bind("run-conflict").first();
+  assert.equal(state.active_run_id, "r1");
+});
+
+test("begin run reports a CAS miss without claiming the run", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  const originalBatch = env.DB.batch.bind(env.DB);
+  env.DB.batch = async () => [{ meta: { changes: 0 } }];
+  await assert.rejects(
+    () => beginCinemaRun(env.DB, { cinemaId: "run-begin-cas", runId: "r1", nowMs: NOW, fetchedData: cinemaFixture() }),
+    { code: "RUN_CONFLICT" }
+  );
+  env.DB.batch = originalBatch;
+  assert.equal(await env.DB.prepare("SELECT COUNT(*) AS n FROM cinema_state WHERE cinema_id=?").bind("run-begin-cas").first().then((row) => Number(row.n)), 0);
+});
+
 test("run subscribers skip completed users but keep failed users selectable", async () => {
   const env = await createAccountEnv({ nowMs: NOW });
   const first = await seedAccount(env, { expiresAt: NOW + 60_000 });
@@ -87,6 +110,19 @@ test("completing a cinema run promotes active data and clears active fields", as
   assert.equal(row.active_run_id, null);
   assert.equal(row.active_data, null);
   assert.equal(row.run_state, "completed");
+  assert.deepEqual(await completeCinemaRun(env.DB, { cinemaId: "run-3", runId: "r3", nowMs: NOW + 2 }), { status: "skipped", runId: "r3" });
+});
+
+test("complete run CAS miss preserves active data", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  await beginCinemaRun(env.DB, { cinemaId: "run-complete-cas", runId: "r1", nowMs: NOW, fetchedData: cinemaFixture() });
+  const originalBatch = env.DB.batch.bind(env.DB);
+  env.DB.batch = async () => [{ meta: { changes: 0 } }];
+  assert.deepEqual(await completeCinemaRun(env.DB, { cinemaId: "run-complete-cas", runId: "r1", nowMs: NOW + 1 }), { status: "conflict", runId: "r1" });
+  env.DB.batch = originalBatch;
+  const state = await env.DB.prepare("SELECT active_run_id,active_data FROM cinema_state WHERE cinema_id=?").bind("run-complete-cas").first();
+  assert.equal(state.active_run_id, "r1");
+  assert.ok(state.active_data);
 });
 
 test("seat-order-free show reorder creates no new event", () => {
