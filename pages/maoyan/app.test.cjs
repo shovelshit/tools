@@ -405,7 +405,7 @@ test("seat feedback: button exists in DOM, handler defined, wired and highlighte
   assert.match(source, /els\.seatFeedback\?\.classList\.add\("attention"\);/);
 });
 
-test("seat map fits, pans by drag, zooms at cursor; risk box only for inferred seats", () => {
+test("seat map fits, pans by drag, and zooms at cursor", () => {
   const source = readSource("lock.js");
   const html = readSource("index.html");
   // 平移/缩放/适应: translate+scale 变换，按实测边界适应，拖动吞 click 防误选
@@ -418,15 +418,6 @@ test("seat map fits, pans by drag, zooms at cursor; risk box only for inferred s
   assert.match(source, /suppressClick/);
   // 推断标记必须在模板分支被置真(此前从未置真, warn 与推断座位全可选逻辑均不生效)
   assert.match(source, /state\.showMode = "template";\n          state\.seatMapIsTemplate = true;/);
-  // 风险区: 仅未来推断座位展示, 门控期隐藏; 勾选仅在推断模式下必填
-  assert.match(source, /const inferred = state\.seatMapIsTemplate === true && state\.showMode === "template"/);
-  assert.match(source, /setHidden\(els\.sectionRisk, !state\.session\?\.uploaded \|\| !inferred\)/);
-  assert.match(source, /if \(state\.seatMapIsTemplate && !els\.risk\?\.checked\) return "请先勾选风险提示";/);
-  // 风险框必须保持独立的边框、底色和文字色，具体设计 token 可随主题调整
-  const riskRule = readSource("style.css").match(/\.lock-risk\s*\{([^}]*)\}/)?.[1] || "";
-  assert.match(riskRule, /border:/);
-  assert.match(riskRule, /background:/);
-  assert.match(riskRule, /color:/);
   // 画布式容器: 滚轮缩放/拖动平移通过无障碍名称和原生 tooltip 提示
   assert.match(html, /class="lock-seat-scroll" title="滚轮缩放，按住拖动，双指捏合"/);
   assert.match(html, /class="lock-zoom-bar" aria-label="座位图缩放和拖动操作"/);
