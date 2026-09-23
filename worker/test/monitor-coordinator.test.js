@@ -253,6 +253,39 @@ test("failed lock resumes the same run without duplicating its notification", as
   assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM notification_outbox WHERE kind='new-shows'").first()).n, 2);
 });
 
+test("a fulfilled waiting lock keeps the subscriber and cinema run retryable", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  const { account } = await seedAccount(env, {
+    expiresAt: NOW + 600_000,
+    config: { enabled: true, cinemaId: "1", selectedMovieIds: ["7"] }
+  });
+  await syncSubscription(env.DB, account.id, { enabled: true, cinemaId: "1" }, 1, NOW);
+  await processCinemaRun(env, {
+    cinemaId: "1", runId: "base", nowMs: NOW,
+    fetchCinema: async () => cinemaFixture({ seqNos: ["s1"] })
+  });
+  await putLockRuleRow(env.DB, account.id, waitingRule({ lotteryKey: "wait", seqNo: "s2", templateTime: "18:41" }));
+  const first = await processCinemaRun(env, {
+    cinemaId: "1", runId: "wait-run", nowMs: NOW + 180_000,
+    fetchCinema: async () => cinemaFixture({ seqNos: ["s1", "s2"] }),
+    runLock: async () => Response.json({ ok: false, waiting: true })
+  });
+  assert.equal(first.completed, false);
+  assert.equal(first.retryable, true);
+  assert.equal(first.lockFailures, 1);
+  assert.equal((await env.DB.prepare("SELECT last_run_id FROM monitor_subscriptions WHERE user_id=?").bind(account.id).first()).last_run_id, "base");
+  assert.equal((await env.DB.prepare("SELECT run_state FROM cinema_state WHERE cinema_id='1'").first()).run_state, "retryable");
+
+  const second = await processCinemaRun(env, {
+    cinemaId: "1", runId: "wait-run", nowMs: NOW + 240_000,
+    fetchCinema: async () => { throw new Error("retry must reuse active cinema data"); },
+    runLock: async () => Response.json({ ok: true })
+  });
+  assert.equal(second.completed, true);
+  assert.equal((await env.DB.prepare("SELECT last_run_id FROM monitor_subscriptions WHERE user_id=?").bind(account.id).first()).last_run_id, "wait-run");
+  assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM notification_outbox WHERE kind='new-shows'").first()).n, 1);
+});
+
 test("concurrent manual checks share one cinema fetch and retain per-user cooldowns", async () => {
   let fetches = 0;
   let release;

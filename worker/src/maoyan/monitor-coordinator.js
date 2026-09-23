@@ -138,6 +138,17 @@ export async function processCinemaRun(env, {
     const result = lockResults[index];
     const candidate = queue[index];
     if (result.status === "rejected") { lockFailures += 1; continue; }
+    let outcome;
+    try {
+      outcome = result.value instanceof Response ? await result.value.json() : result.value;
+    } catch {
+      lockFailures += 1;
+      continue;
+    }
+    if (outcome && (outcome.ok !== true || outcome.waiting === true)) {
+      lockFailures += 1;
+      continue;
+    }
     const subscription = byUser.get(candidate.userId);
     const completed = await completeRunSubscriber(env.DB, { userId: candidate.userId, cinemaId: id, runId: rid, configVersion: subscription.configVersion, nextDueAt: timestamp + 180_000, baselineVersion: run.version });
     if (completed.applied) completedUsers.add(candidate.userId);
@@ -147,7 +158,8 @@ export async function processCinemaRun(env, {
     return { completed: false, retryable: true, runId: rid, subscribers, notifications, lockAttempts: queue.length, lockFailures };
   }
   const committed = await completeCinemaRun(env.DB, { cinemaId: id, runId: rid, nowMs: timestamp });
-  return { completed: committed.status !== "skipped" && committed.status !== "conflict", retryable: false, runId: rid, subscribers, notifications, lockAttempts: queue.length, lockFailures };
+  const completed = committed.status !== "skipped" && committed.status !== "conflict";
+  return { completed, retryable: !completed, runId: rid, subscribers, notifications, lockAttempts: queue.length, lockFailures };
 }
 
 async function fetchWithTimeout(fetchCinema, cinemaId) {

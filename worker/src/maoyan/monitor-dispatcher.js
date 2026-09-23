@@ -10,6 +10,9 @@ export async function dispatchCinema(env, input) {
     body: JSON.stringify(input)
   }));
   if (!response.ok) throw new Error("影院批次处理失败");
+  const result = await response.json().catch(() => null);
+  if (!result || typeof result.completed !== "boolean") throw new Error("影院批次处理结果无效");
+  return result;
 }
 
 export class MonitorDispatcher {
@@ -39,13 +42,27 @@ export class MonitorDispatcher {
     });
     const dispatch = this.deps.dispatchCinema || dispatchCinema;
     await storage.setAlarm(Date.now() + 30_000);
+    let cursor = current.cursor || "";
+    let processed = 0;
     for (const cinemaId of page.items) {
-      await dispatch(this.env, { cinemaId, runId: current.runId || current.batchId, nowMs: current.nowMs });
+      let result;
+      try {
+        result = await dispatch(this.env, { cinemaId, runId: current.runId || current.batchId, nowMs: current.nowMs });
+      } catch (error) {
+        await storage.put("currentBatch", { ...current, cursor });
+        throw error;
+      }
+      if (result && (result.completed === false || result.retryable === true)) {
+        await storage.put("currentBatch", { ...current, cursor });
+        return { processed, pending: true };
+      }
+      cursor = cinemaId;
+      processed += 1;
     }
     if (page.nextCursor) {
       await storage.put("currentBatch", { ...current, cursor: page.nextCursor });
       await storage.setAlarm(Date.now() + 1000);
-      return { processed: page.items.length, pending: true };
+      return { processed, pending: true };
     }
     await storage.delete("currentBatch");
     const pending = await storage.get("pendingBatch");
@@ -53,10 +70,10 @@ export class MonitorDispatcher {
       await storage.delete("pendingBatch");
       await storage.put("currentBatch", pending);
       await storage.setAlarm(Date.now() + 1000);
-      return { processed: page.items.length, pending: true };
+      return { processed, pending: true };
     }
     await storage.deleteAlarm();
-    return { processed: page.items.length, pending: false };
+    return { processed, pending: false };
   }
 
   async fetch(request) {
