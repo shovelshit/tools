@@ -92,7 +92,7 @@ async function notifyTerminal(env, tokenId, rule, deps) {
 }
 
 async function terminal(env, tokenId, rule, state, changes, deps) {
-  if (!deps.putRule && !deps.notify && env.NOTIFICATION_DISPATCHER) {
+  if (!deps.putRule && !deps.notify) {
     const now = (deps.now || (() => new Date()))();
     const next = { ...rule, ...changes, state, updatedAt: new Date(now).toISOString() };
     const config = await (deps.getConfig || getUserConfig)(env, tokenId);
@@ -106,7 +106,7 @@ async function terminal(env, tokenId, rule, state, changes, deps) {
       credentialVersion: config.version,
       nowMs: new Date(now).getTime()
     });
-    try { await wakeNotificationDispatcher(env); } catch {}
+    try { await wakeNotificationDispatcher(env, { kind: "lock-terminal", userId: tokenId }); } catch {}
     lockLog("scheduled_rule", { phase: "complete", state });
     return { ok: true, state };
   }

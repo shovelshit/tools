@@ -37,8 +37,10 @@ export async function readResourceSummary(env, nowMs = Date.now()) {
       "(SELECT COUNT(*) FROM enrollment_reservations r WHERE r.expires_at>?) AS used FROM service_settings s WHERE s.id=1"
     ).bind(nowMs, nowMs).first(),
     env.DB.prepare(
-      "SELECT COUNT(DISTINCT cinema_id) AS n FROM monitor_subscriptions WHERE enabled=1 AND next_due_at IS NOT NULL"
-    ).first(),
+      "SELECT COUNT(DISTINCT NULLIF(s.cinema_id,'')) AS n FROM monitor_subscriptions s " +
+      "JOIN users u ON u.id=s.user_id WHERE s.enabled=1 AND u.role='user' AND u.business_line='maoyan' " +
+      "AND u.state='active' AND u.archived_at IS NULL AND u.expires_at>?"
+    ).bind(nowMs).first(),
     env.DB.prepare("SELECT COUNT(*) AS n FROM notification_outbox o JOIN users u ON u.id=o.user_id WHERE u.business_line='maoyan' AND o.state IN ('pending','sending')").first(),
     env.DB.prepare("SELECT COUNT(*) AS n FROM notification_outbox o JOIN users u ON u.id=o.user_id WHERE u.business_line='maoyan' AND o.state='failed'").first()
   ]);

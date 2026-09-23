@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>账号管理 - 电影场次监控</title>
-  <link rel="stylesheet" href="style.css?v=20260918-notification-details" />
+  <link rel="stylesheet" href="style.css?v=20260923-business-time" />
 </head>
 <body class="admin-page">
   <!-- 管理员登录层 -->
@@ -57,6 +57,16 @@
       <label>默认有效期 <input id="default-valid-days" type="number" min="1" step="1" /><span>天</span></label>
       <label class="admin-toggle"><input id="public-signup-enabled" type="checkbox" /><span>开放申请</span></label>
       <button id="btn-save-settings" class="btn small primary">保存设置</button>
+      </section>
+
+      <section class="admin-toolbar" id="maoyan-business-policy" aria-label="猫眼业务时间设置">
+        <strong>业务时间（北京时间）</strong>
+        <label>监控开始 <input id="monitor-window-start" type="time" step="60" /></label>
+        <label>监控结束 <input id="monitor-window-end" type="time" step="60" /></label>
+        <label>维护开始 <input id="maintenance-window-start" type="time" step="60" /></label>
+        <label>维护结束 <input id="maintenance-window-end" type="time" step="60" /></label>
+        <button id="btn-save-business-policy" class="btn small primary">保存时间</button>
+        <span id="business-policy-version" class="muted"></span>
       </section>
 
       <section class="admin-toolbar resource-summary" id="maoyan-resource-summary" aria-label="资源状态">
@@ -172,6 +182,7 @@
             <h3>通知状态</h3>
             <span id="dashboard-notification-summary" class="muted">暂无数据</span>
           </div>
+          <div id="dashboard-notification-kinds" class="dashboard-status-list"></div>
           <div id="dashboard-notification-list" class="dashboard-status-list">
             <p class="muted empty-tip">暂无通知记录</p>
           </div>
@@ -183,6 +194,7 @@
           </div>
           <dl class="dashboard-health-list">
             <div><dt>最近影院批次</dt><dd id="dashboard-latest-batch">暂无数据</dd></div>
+            <div><dt>最近账号维护</dt><dd id="dashboard-last-maintenance">暂无数据</dd></div>
             <div><dt>最早待发送</dt><dd id="dashboard-oldest-pending">暂无数据</dd></div>
             <div><dt>数据更新时间</dt><dd id="dashboard-health-updated">暂无数据</dd></div>
           </dl>
@@ -205,7 +217,7 @@
 
   <script src="secure-store.js?v=20260911u"></script>
   <script src="ui.js?v=20260911u"></script>
-  <script src="admin-dashboard.js?v=20260922-seat-feedback-actions"></script>
-  <script src="admin.js?v=20260920-dashboard"></script>
+  <script src="admin-dashboard.js?v=20260923-business-time"></script>
+  <script src="admin.js?v=20260923-business-time"></script>
 </body>
 </html>

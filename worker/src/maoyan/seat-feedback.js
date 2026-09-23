@@ -5,7 +5,7 @@
 
 import * as db from "./db.js";
 import { ADMIN_USER_ID, ensureAdminAccount } from "./auth.js";
-import { enqueueNotification, wakeNotificationDispatcher } from "./notification-outbox.js";
+import { wakeNotificationDispatcher } from "./notification-outbox.js";
 
 const PREFIX = "seatfb:";
 
@@ -19,28 +19,17 @@ export function seatFeedbackKey(cinemaId, seqNo) {
   return `${PREFIX}${String(cinemaId || "na")}:${String(seqNo || "na")}`;
 }
 
-async function notifyAdmin(env, key, record) {
-  try {
-    await ensureAdminAccount(env);
-    const result = await enqueueNotification(env.DB, {
-      eventKey: `${key}:${record.reportedAt}`,
-      userId: ADMIN_USER_ID,
-      kind: "seat-feedback",
-      title: "💺 收到座位异常反馈",
-      content: [
-        `来源：${record.source === "manual" ? "用户手动反馈" : "系统自动检测"}`,
-        `影院 ID：${record.cinemaId}`,
-        `影片 ID：${record.movieId || "未提供"}`,
-        `场次 ID：${record.seqNo || "未提供"}`,
-        `反馈时间：${record.reportedAt}`
-      ].join("\n"),
-      credentialVersion: 0,
-      nowMs: new Date(record.reportedAt).getTime()
-    });
-    if (result.created) await wakeNotificationDispatcher(env);
-  } catch {
-    // 反馈已经留档时，通知故障不能让用户误以为反馈失败。
-  }
+function adminNotification(record) {
+  return {
+    title: "💺 收到座位异常反馈",
+    content: [
+      `来源：${record.source === "manual" ? "用户手动反馈" : "系统自动检测"}`,
+      `影院 ID：${record.cinemaId}`,
+      `影片 ID：${record.movieId || "未提供"}`,
+      `场次 ID：${record.seqNo || "未提供"}`,
+      `反馈时间：${record.reportedAt}`
+    ].join("\n")
+  };
 }
 
 // 记录一条反馈。source: "manual"(用户按钮上报) | "auto"(cron/立即锁座解析失败自动留档)。
@@ -65,8 +54,24 @@ export async function recordSeatFeedback(env, input = {}) {
       const existing = await db.getSeatFeedbackRow(env.DB, key).catch(() => null);
       if (existing?.source === "auto" && existing?.day === record.day) return false;
     }
-    await db.putSeatFeedbackRow(env.DB, key, record);
-    await notifyAdmin(env, key, record);
+    await ensureAdminAccount(env);
+    const nowMs = new Date(record.reportedAt).getTime();
+    const results = await env.DB.batch([
+      db.seatFeedbackWrite(env.DB, key, record),
+      env.DB.prepare(
+        "INSERT OR IGNORE INTO notification_outbox(" +
+        "event_key,user_id,kind,payload,credential_version,state,attempts,next_attempt_at,lease_until,created_at,updated_at" +
+        ") VALUES (?,?,?, ?,0,'pending',0,?,NULL,?,?)"
+      ).bind(`${key}:${record.reportedAt}`, ADMIN_USER_ID, "seat-feedback",
+        JSON.stringify(adminNotification(record)), nowMs, nowMs, nowMs)
+    ]);
+    if (Number(results[1]?.meta?.changes || 0) === 1) {
+      try {
+        await wakeNotificationDispatcher(env, { kind: "seat-feedback", userId: ADMIN_USER_ID });
+      } catch {
+        // 已落库的通知仍由下次 cron 补偿唤醒，反馈确认只取决于持久化。
+      }
+    }
     return true;
   } catch {
     return false;

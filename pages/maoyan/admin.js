@@ -6,6 +6,9 @@ const els = {
   businessLine: $("account-business-line"), capacityLabel: $("capacity-label"),
   capacityMax: $("capacity-max"), validDays: $("default-valid-days"), publicSignup: $("public-signup-enabled"),
   btnSaveSettings: $("btn-save-settings"), remark: $("new-account-remark"), btnAdd: $("btn-add-account"),
+  policySection: $("maoyan-business-policy"), monitorStart: $("monitor-window-start"), monitorEnd: $("monitor-window-end"),
+  maintenanceStart: $("maintenance-window-start"), maintenanceEnd: $("maintenance-window-end"),
+  btnSavePolicy: $("btn-save-business-policy"), policyVersion: $("business-policy-version"),
   search: $("account-search"), statusFilter: $("account-status-filter"), btnRefresh: $("btn-refresh-accounts"),
   btnLoadMore: $("btn-load-more"), btnLogout: $("btn-admin-logout"),
   btnEnterMonitor: $("btn-enter-monitor"),
@@ -26,6 +29,7 @@ let adminToken = "";
 let accounts = [];
 let capacity = null;
 let settings = null;
+let businessPolicy = null;
 let nextAfter = null;
 let businessGeneration = 0;
 const dashboard = globalThis.createAdminDashboard ? globalThis.createAdminDashboard({ root: document, request: adminApi }) : null;
@@ -72,7 +76,7 @@ async function login() {
   els.btnLogin.textContent = "验证中...";
   els.loginError.classList.add("hidden");
   try {
-    await Promise.all([refreshAccounts({ reset: true }), loadSettings(), loadResources()]);
+    await Promise.all([refreshAccounts({ reset: true }), loadSettings(), loadBusinessPolicy(), loadResources()]);
     localStorage.setItem("adminWorkerUrl", baseUrl);
     await secureSet("adminToken", adminToken);
     els.adminToken.value = "";
@@ -117,6 +121,39 @@ async function loadSettings(scope = captureBusinessScope()) {
   els.capacityMax.value = settings.maxUsers;
   els.validDays.value = settings.defaultValidDays;
   els.publicSignup.checked = settings.publicSignupEnabled === true;
+  return true;
+}
+
+function formatMinute(minute) {
+  return `${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`;
+}
+
+function parseMinute(value) {
+  if (!/^\d{2}:\d{2}$/.test(value)) throw new Error("请选择完整的业务时间");
+  const [hour, minute] = value.split(":").map(Number);
+  return hour * 60 + minute;
+}
+
+function renderBusinessPolicy() {
+  els.policySection.classList.toggle("hidden", els.businessLine.value !== "maoyan");
+  if (!businessPolicy) return;
+  els.monitorStart.value = formatMinute(businessPolicy.monitorStartMinute);
+  els.monitorEnd.value = formatMinute(businessPolicy.monitorEndMinute);
+  els.maintenanceStart.value = formatMinute(businessPolicy.maintenanceStartMinute);
+  els.maintenanceEnd.value = formatMinute(businessPolicy.maintenanceEndMinute);
+  els.policyVersion.textContent = `当前版本 ${businessPolicy.version}`;
+}
+
+async function loadBusinessPolicy(scope = captureBusinessScope()) {
+  if (!isCurrentBusinessScope(scope)) return false;
+  if (scope.businessLine !== "maoyan") {
+    els.policySection.classList.add("hidden");
+    return true;
+  }
+  const data = await adminApi("/api/admin/business-policy");
+  if (!isCurrentBusinessScope(scope)) return false;
+  businessPolicy = data.policy;
+  renderBusinessPolicy();
   return true;
 }
 
@@ -362,6 +399,34 @@ els.btnSaveSettings.addEventListener("click", async () => {
   }
 });
 
+els.btnSavePolicy.addEventListener("click", async () => {
+  if (!businessPolicy || els.businessLine.value !== "maoyan") return;
+  const scope = captureBusinessScope();
+  els.btnSavePolicy.disabled = true;
+  try {
+    const data = await adminApi("/api/admin/business-policy", {
+      method: "POST",
+      body: JSON.stringify({
+        expectedVersion: businessPolicy.version,
+        monitorStartMinute: parseMinute(els.monitorStart.value),
+        monitorEndMinute: parseMinute(els.monitorEnd.value),
+        maintenanceStartMinute: parseMinute(els.maintenanceStart.value),
+        maintenanceEndMinute: parseMinute(els.maintenanceEnd.value)
+      })
+    });
+    if (!isCurrentBusinessScope(scope)) return;
+    businessPolicy = data.policy;
+    renderBusinessPolicy();
+    showToast("业务时间已保存", "success");
+  } catch (error) {
+    if (!isCurrentBusinessScope(scope)) return;
+    showToast(`保存失败：${error.message}`, "error");
+    if (error.code === "VERSION_CONFLICT") await loadBusinessPolicy(scope).catch(() => {});
+  } finally {
+    els.btnSavePolicy.disabled = false;
+  }
+});
+
 let searchTimer;
 els.search.addEventListener("input", () => {
   clearTimeout(searchTimer);
@@ -375,11 +440,13 @@ els.businessLine.addEventListener("change", () => {
   accounts = [];
   capacity = null;
   settings = null;
+  businessPolicy = null;
   nextAfter = null;
-  Promise.all([refreshAccounts({ reset: true, scope }), loadSettings(scope)])
+  els.policySection.classList.toggle("hidden", scope.businessLine !== "maoyan");
+  Promise.all([refreshAccounts({ reset: true, scope }), loadSettings(scope), loadBusinessPolicy(scope)])
     .catch((error) => showToast(error.message, "error"));
 });
-els.btnRefresh.addEventListener("click", () => Promise.all([refreshAccounts({ reset: true }), loadSettings(), loadResources()]));
+els.btnRefresh.addEventListener("click", () => Promise.all([refreshAccounts({ reset: true }), loadSettings(), loadBusinessPolicy(), loadResources()]));
 els.dashboardButton.addEventListener("click", () => showDashboard(true));
 els.dashboardBack.addEventListener("click", () => showDashboard(false));
 els.dashboardRefresh.addEventListener("click", () => dashboard?.load());

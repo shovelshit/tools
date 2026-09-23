@@ -14,7 +14,7 @@ test("delivery errors retain provider reason and HTTP status while redacting con
   await enqueueNotification(env.DB, {
     eventKey: "detailed-delivery", userId: account.id, kind: "lock-terminal", title: "failed", content: "failure", nowMs: NOW
   });
-  await deliverOutbox(env, { nowMs: NOW, send: async () => {
+  await deliverOutbox(env, { lane: { kind: "lock-terminal", userId: account.id }, nowMs: NOW, send: async () => {
     throw new Error("Bark 推送失败: HTTP 429 quota exceeded for known-device-secret https://api.day.app/known-device-secret/title");
   } });
   const row = await env.DB.prepare("SELECT last_error FROM notification_outbox").first();
@@ -28,11 +28,11 @@ test("terminal diagnostics survive notification retries without leaking delivery
   const event = { userId: account.id, rule: { id: "failed-1", state: "failed" }, title: "failure", content: "failed", failureDetail: '{"status":403}', nowMs: NOW };
   assert.equal((await persistTerminalNotification(env, event)).created, true);
   assert.equal((await persistTerminalNotification(env, event)).created, false);
-  await deliverOutbox(env, { nowMs: NOW, send: async () => { throw new Error("Bark https://api.day.app/secret-device-key/title?token=secret-token failed"); } });
+  await deliverOutbox(env, { lane: { kind: "lock-terminal", userId: account.id }, nowMs: NOW, send: async () => { throw new Error("Bark https://api.day.app/secret-device-key/title?token=secret-token failed"); } });
   let row = await env.DB.prepare("SELECT failure_detail,last_error FROM notification_outbox").first();
   assert.equal(row.failure_detail, '{"status":403}');
   assert.doesNotMatch(row.last_error, /secret-device-key|secret-token/);
-  await deliverOutbox(env, { nowMs: NOW + 30_000, send: async () => {} });
+  await deliverOutbox(env, { lane: { kind: "lock-terminal", userId: account.id }, nowMs: NOW + 30_000, send: async () => {} });
   row = await env.DB.prepare("SELECT failure_detail,last_error FROM notification_outbox").first();
   assert.equal(row.failure_detail, '{"status":403}');
   assert.equal(row.last_error, null);
@@ -60,7 +60,7 @@ test("failed lock removes waiting rule but retains a deliverable failure notific
     credentialVersion: 1, nowMs: NOW
   });
   assert.equal(await env.DB.prepare("SELECT data FROM lock_rule WHERE token_id=?").bind(account.id).first(), null);
-  const result = await deliverOutbox(env, { nowMs: NOW, send: async () => {} });
+  const result = await deliverOutbox(env, { lane: { kind: "lock-terminal", userId: account.id }, nowMs: NOW, send: async () => {} });
   assert.equal(result.sent, 1);
 });
 
@@ -87,7 +87,7 @@ test("delivery failures retry on a bounded schedule and never call lock work", a
   let lockCalls = 0;
   const send = async () => { sends += 1; throw new Error("network"); };
   for (const nowMs of [NOW, NOW + 30_000, NOW + 150_000, NOW + 750_000]) {
-    await deliverOutbox(env, { nowMs, limit: 10, send, runLock: async () => { lockCalls += 1; } });
+    await deliverOutbox(env, { lane: { kind: "lock-terminal", userId: account.id }, nowMs, limit: 10, send, runLock: async () => { lockCalls += 1; } });
   }
   assert.equal(sends, 4);
   assert.equal(lockCalls, 0);
@@ -104,12 +104,127 @@ test("successful delivery is not repeated", async () => {
   });
   let sends = 0;
   const send = async () => { sends += 1; };
-  await deliverOutbox(env, { nowMs: NOW, send });
-  await deliverOutbox(env, { nowMs: NOW + 60_000, send });
+  await deliverOutbox(env, { lane: { kind: "new-shows", userId: account.id }, nowMs: NOW, send });
+  await deliverOutbox(env, { lane: { kind: "new-shows", userId: account.id }, nowMs: NOW + 60_000, send });
   assert.equal(sends, 1);
   const row = await env.DB.prepare("SELECT state,last_error FROM notification_outbox").first();
   assert.equal(row.state, "sent");
   assert.equal(row.last_error, null);
+});
+
+test("provider Retry-After delays retry and delivery timestamps reflect actual attempts", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  const { account } = await seedAccount(env, { expiresAt: NOW + 60_000 });
+  await enqueueNotification(env.DB, {
+    eventKey: "rate-limited", userId: account.id, kind: "lock-terminal",
+    title: "lock", content: "notice", nowMs: NOW - 1000, detectedAt: NOW - 2000
+  });
+  const lane = { kind: "lock-terminal", userId: account.id };
+  await deliverOutbox(env, { lane, nowMs: NOW, send: async () => {
+    throw Object.assign(new Error("HTTP 429"), { retryAfterMs: 120000 });
+  } });
+  let row = await env.DB.prepare(
+    "SELECT state,next_attempt_at,detected_at,created_at,first_attempt_at,sent_at FROM notification_outbox"
+  ).first();
+  assert.deepEqual([
+    row.state, row.next_attempt_at, row.detected_at, row.created_at, row.first_attempt_at, row.sent_at
+  ], ["pending", NOW + 120000, NOW - 2000, NOW - 1000, NOW, null]);
+  await deliverOutbox(env, { lane, nowMs: NOW + 120000, send: async () => {} });
+  row = await env.DB.prepare("SELECT state,first_attempt_at,sent_at FROM notification_outbox").first();
+  assert.deepEqual([row.state, row.first_attempt_at, row.sent_at], ["sent", NOW, NOW + 120000]);
+});
+
+test("slow batches claim each row and timestamp delivery using its actual time", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  const { account } = await seedAccount(env);
+  for (const eventKey of ["slow-first", "slow-second"]) {
+    await enqueueNotification(env.DB, {
+      eventKey, userId: account.id, kind: "lock-terminal",
+      title: eventKey, content: "notice", nowMs: NOW
+    });
+  }
+  let current = NOW;
+  await deliverOutbox(env, {
+    lane: { kind: "lock-terminal", userId: account.id }, nowMs: NOW, clock: () => current,
+    send: async () => { current += 90000; }
+  });
+  const { results } = await env.DB.prepare(
+    "SELECT event_key,first_attempt_at,sent_at FROM notification_outbox ORDER BY id"
+  ).all();
+  assert.deepEqual(results.map((row) => [row.event_key, row.first_attempt_at, row.sent_at]), [
+    ["slow-first", NOW, NOW + 90000],
+    ["slow-second", NOW + 90000, NOW + 180000]
+  ]);
+});
+
+test("urgent lane claims only its kind and user, leaving other work independent", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  const first = await seedAccount(env, { expiresAt: NOW + 60_000 });
+  const second = await seedAccount(env, { expiresAt: NOW + 60_000 });
+  for (const [eventKey, userId, kind] of [
+    ["first-show", first.account.id, "new-shows"],
+    ["first-lock", first.account.id, "lock-terminal"],
+    ["second-show", second.account.id, "new-shows"]
+  ]) {
+    await enqueueNotification(env.DB, { eventKey, userId, kind, title: eventKey, content: "notice", nowMs: NOW });
+  }
+  const delivered = [];
+  const send = async (_config, title) => delivered.push(title);
+  await deliverOutbox(env, { lane: { kind: "new-shows", userId: first.account.id }, nowMs: NOW, send });
+  assert.deepEqual(delivered, ["first-show"]);
+  assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM notification_outbox WHERE state='pending'").first()).n, 2);
+});
+
+test("routine reminders never send outside the maintenance window", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  const { account } = await seedAccount(env, { expiresAt: NOW + 2 * 86400000 });
+  await enqueueNotification(env.DB, {
+    eventKey: "expiry-window", userId: account.id, kind: "account-expiry",
+    title: "reminder", content: "notice", meta: { expiresAt: account.expiresAt, stage: "three-day" }, nowMs: NOW
+  });
+  let sends = 0;
+  await deliverOutbox(env, {
+    lane: { kind: "account-expiry" }, nowMs: NOW,
+    send: async () => { sends += 1; }
+  });
+  assert.equal(sends, 0);
+  assert.equal((await env.DB.prepare("SELECT state FROM notification_outbox WHERE event_key='expiry-window'").first()).state, "pending");
+});
+
+test("urgent lanes do not send account-expiry reminders outside maintenance", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  const { account } = await seedAccount(env, { expiresAt: NOW + 60_000 });
+  for (let i = 0; i < 3; i++) {
+    await enqueueNotification(env.DB, {
+      eventKey: `expiry:${i}`, userId: account.id, kind: "account-expiry",
+      title: `expiry:${i}`, content: "notice", nowMs: NOW
+    });
+  }
+  for (let i = 0; i < 11; i++) {
+    await enqueueNotification(env.DB, {
+      eventKey: `monitor:${i}`, userId: account.id, kind: i === 0 ? "lock-terminal" : "new-shows",
+      title: `monitor:${i}`, content: "notice", nowMs: NOW
+    });
+  }
+  const delivered = [];
+  const send = async (_config, title) => delivered.push(title);
+  await deliverOutbox(env, { lane: { kind: "new-shows", userId: account.id }, nowMs: NOW, send });
+  await deliverOutbox(env, { lane: { kind: "lock-terminal", userId: account.id }, nowMs: NOW, send });
+  assert.deepEqual(delivered, [...Array.from({ length: 10 }, (_, i) => `monitor:${i + 1}`), "monitor:0"]);
+  assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM notification_outbox WHERE kind='account-expiry' AND state='pending'").first()).n, 3);
+});
+
+test("urgent lanes retain independent batch limits", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  const { account } = await seedAccount(env, { expiresAt: NOW + 60_000 });
+  for (const [kind, title] of [["account-expiry", "expiry"], ["new-shows", "new"], ["lock-terminal", "lock"]]) {
+    await enqueueNotification(env.DB, { eventKey: title, userId: account.id, kind, title, content: "notice", nowMs: NOW });
+  }
+  const delivered = [];
+  const send = async (_config, title) => delivered.push(title);
+  await deliverOutbox(env, { lane: { kind: "new-shows", userId: account.id }, nowMs: NOW, limit: 2, send });
+  await deliverOutbox(env, { lane: { kind: "lock-terminal", userId: account.id }, nowMs: NOW, limit: 2, send });
+  assert.deepEqual(delivered, ["new", "lock"]);
 });
 
 test("notification delivery ignores Store outbox rows", async () => {
@@ -126,7 +241,7 @@ test("notification delivery ignores Store outbox rows", async () => {
   });
   const delivered = [];
   const result = await deliverOutbox(env, {
-    nowMs: NOW,
+    lane: { kind: "new-shows", userId: maoyan.account.id }, nowMs: NOW,
     send: async (_config, title, _content, row) => delivered.push({ title, userId: row.user_id })
   });
   assert.deepEqual(delivered, [{ title: "maoyan", userId: maoyan.account.id }]);
@@ -137,11 +252,12 @@ test("notification delivery ignores Store outbox rows", async () => {
 });
 
 test("account expiry reminders are idempotent and keyed to the current expiry", async () => {
-  const env = await createAccountEnv({ nowMs: NOW });
-  const expiresAt = NOW + 86400000;
+  const maintenance = Date.parse("2026-09-15T17:10:00.000Z");
+  const env = await createAccountEnv({ nowMs: maintenance });
+  const expiresAt = maintenance + 86400000;
   const { account } = await seedAccount(env, { expiresAt });
-  assert.deepEqual(await runScheduledMaintenance(env, NOW), { queued: 1 });
-  assert.deepEqual(await runScheduledMaintenance(env, NOW), { queued: 0 });
+  assert.deepEqual(await runScheduledMaintenance(env, maintenance), { queued: 1 });
+  assert.deepEqual(await runScheduledMaintenance(env, maintenance), { queued: 0 });
   const renewedExpiry = expiresAt + 15 * 86400000;
   await env.DB.prepare("UPDATE users SET expires_at=?,version=version+1 WHERE id=?")
     .bind(renewedExpiry, account.id).run();

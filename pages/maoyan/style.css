@@ -1409,6 +1409,16 @@ summary:focus-visible {
 }
 .admin-page .capacity-meter { min-width: 110px; }
 .admin-page .admin-toolbar input[type="number"] { width: 68px; min-height: 30px; padding: 4px 7px; }
+.admin-page #maoyan-business-policy input[type="time"] {
+  width: 104px;
+  min-height: 30px;
+  padding: 4px 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--surface-field);
+  color: var(--text);
+  color-scheme: dark;
+}
 .admin-page .admin-create { margin-right: auto; }
 .admin-page .admin-create input { width: min(260px, 38vw); }
 .admin-page .admin-filters input { width: min(240px, 34vw); }

@@ -58,7 +58,10 @@ test("收到座位反馈时为管理员排队通知", async () => {
   const env = {
     DB: new MemoryD1(),
     NOTIFICATION_DISPATCHER: {
-      idFromName: () => "main",
+      idFromName: (name) => {
+        assert.equal(name, "urgent:seat-feedback:00000000-0000-4000-8000-000000000001");
+        return name;
+      },
       get: () => ({ fetch: async () => { wakes += 1; return new Response("{}"); } })
     }
   };
@@ -156,6 +159,15 @@ test("座位反馈接口不需要已上传会话, 记录带令牌标识", async 
   assert.equal(records[0].key, "seatfb:25428:100");
   assert.equal(records[0].tokenId, tokenId);
   assert.equal(records[0].source, "manual");
+});
+
+test("座位反馈持久化失败不返回已记录", async () => {
+  const env = lockApiEnv({ DB: { prepare: () => { throw new Error("database unavailable"); } } });
+  const response = await callLockApi("/api/lock/seat-feedback", {
+    method: "POST", body: JSON.stringify({ cinemaId: "25428", movieId: "7", seqNo: "100" })
+  }, env);
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).recorded, false);
 });
 
 test("座位反馈接口参数校验: 非数字/缺参 400, 方法不符 405", async () => {

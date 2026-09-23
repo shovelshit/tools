@@ -2,6 +2,18 @@
 // 与具体业务无关: 只负责把 (标题, 内容) 发到某个渠道
 // 用哪个渠道、凭据从哪读取, 由业务模块(如 maoyan)自己决定
 
+function providerError(channel, response) {
+  const error = new Error(`${channel} 推送失败: HTTP ${response.status}`);
+  if (response.status === 429) {
+    const value = response.headers.get("Retry-After");
+    const seconds = Number(value);
+    const delay = Number.isFinite(seconds) && seconds >= 0
+      ? seconds * 1000 : Date.parse(value) - Date.now();
+    if (Number.isFinite(delay) && delay > 0) error.retryAfterMs = delay;
+  }
+  return error;
+}
+
 export async function pushBark(key, title, content, { fetchImpl = fetch } = {}) {
   let base = String(key || "").trim();
   if (!base) throw new Error("Bark 未配置");
@@ -9,7 +21,7 @@ export async function pushBark(key, title, content, { fetchImpl = fetch } = {}) 
   base = base.replace(/\/+$/, "");
   const url = `${base}/${encodeURIComponent(title)}/${encodeURIComponent(content)}?group=maoyan`;
   const res = await fetchImpl(url, { signal: AbortSignal.timeout(15e3) });
-  if (!res.ok) throw new Error("Bark 推送失败: HTTP " + res.status);
+  if (!res.ok) throw providerError("Bark", res);
   const data = await res.json().catch(() => null);
   if (!data || Number(data.code) !== 200) throw new Error("Bark 推送失败: 服务未接受消息");
 }
@@ -31,7 +43,7 @@ export async function pushServerChan(key, title, content, { fetchImpl = fetch } 
     body: new URLSearchParams({ title, desp: content }),
     signal: AbortSignal.timeout(15e3),
   });
-  if (!res.ok) throw new Error("Server酱 推送失败: HTTP " + res.status);
+  if (!res.ok) throw providerError("Server酱", res);
   const data = await res.json().catch(() => null);
   if (!data || !(Number(data.code) === 0 || data.success === true)) throw new Error("Server酱 推送失败: 服务未接受消息");
 }

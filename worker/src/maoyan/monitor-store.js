@@ -285,14 +285,16 @@ export async function advanceSubscriber(DB, {
   const notificationIndexes = [];
   for (const notification of notifications) {
     notificationIndexes.push(statements.length);
+    const enqueuedAt = Date.now();
     statements.push(DB.prepare(
       "INSERT OR IGNORE INTO notification_outbox(" +
-      "event_key,user_id,kind,payload,credential_version,state,attempts,next_attempt_at,lease_until,created_at,updated_at" +
-      ") VALUES (?,?,?,?,?,'pending',0,?,NULL,?,?)"
+      "event_key,user_id,kind,payload,credential_version,state,attempts,next_attempt_at,lease_until,created_at,updated_at,detected_at" +
+      ") VALUES (?,?,?,?,?,'pending',0,?,NULL,?,?,?)"
     ).bind(
       String(notification.eventKey), userId, String(notification.kind),
       JSON.stringify({ title: String(notification.title), content: String(notification.content) }),
-      Number(notification.credentialVersion || configVersion), Number(nowMs), Number(nowMs), Number(nowMs)
+      Number(notification.credentialVersion || configVersion), enqueuedAt, enqueuedAt, enqueuedAt,
+      Number(notification.detectedAt || enqueuedAt)
     ));
   }
   statements.push(DB.prepare(

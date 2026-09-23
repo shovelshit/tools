@@ -113,6 +113,30 @@ INSERT OR IGNORE INTO service_settings
   (id, business_line, max_users, default_valid_days, public_signup_enabled, version, updated_at)
 VALUES (2, 'store', 20, 15, 0, 1, 0);
 
+CREATE TABLE IF NOT EXISTS maoyan_business_policy (
+  id INTEGER PRIMARY KEY CHECK (id=1),
+  monitor_start_minute INTEGER NOT NULL CHECK (monitor_start_minute BETWEEN 0 AND 1439),
+  monitor_end_minute INTEGER NOT NULL CHECK (monitor_end_minute BETWEEN 0 AND 1439),
+  maintenance_start_minute INTEGER NOT NULL CHECK (maintenance_start_minute BETWEEN 0 AND 1439),
+  maintenance_end_minute INTEGER NOT NULL CHECK (maintenance_end_minute BETWEEN 1 AND 1439),
+  version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+  updated_at INTEGER NOT NULL
+);
+
+INSERT OR IGNORE INTO maoyan_business_policy
+  (id,monitor_start_minute,monitor_end_minute,maintenance_start_minute,maintenance_end_minute,version,updated_at)
+VALUES (1,420,1380,60,120,1,0);
+
+CREATE TABLE IF NOT EXISTS maoyan_maintenance_runs (
+  job_id TEXT NOT NULL,
+  local_date TEXT NOT NULL,
+  cursor TEXT,
+  lease_until INTEGER,
+  completed_at INTEGER,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (job_id, local_date)
+);
+
 CREATE TABLE IF NOT EXISTS audit_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   event_type TEXT NOT NULL,
@@ -310,12 +334,24 @@ CREATE TABLE IF NOT EXISTS notification_outbox (
   failure_detail TEXT,
   next_attempt_at INTEGER,
   lease_until INTEGER,
+  detected_at INTEGER,
+  first_attempt_at INTEGER,
+  sent_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_notification_outbox_due
   ON notification_outbox(state, next_attempt_at, lease_until, id);
+
+CREATE INDEX IF NOT EXISTS idx_notification_outbox_lane
+  ON notification_outbox(user_id, kind, state, next_attempt_at, id);
+CREATE INDEX IF NOT EXISTS idx_notification_outbox_lane_lease
+  ON notification_outbox(user_id, kind, state, lease_until, id);
+CREATE INDEX IF NOT EXISTS idx_notification_outbox_routine
+  ON notification_outbox(kind, state, next_attempt_at, id);
+CREATE INDEX IF NOT EXISTS idx_notification_outbox_routine_lease
+  ON notification_outbox(kind, state, lease_until, id);
 
 CREATE TABLE IF NOT EXISTS seat_feedback (
   fb_key TEXT PRIMARY KEY,          -- 原 KV key: seatfb:{cinemaId}:{seqNo||"na"}

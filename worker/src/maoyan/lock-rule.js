@@ -271,7 +271,7 @@ export async function createLockRule(env, tokenId, input, options = {}) {
         failureDetail: error?.failureDetail, credentialVersion: config.version,
         nowMs: new Date(now).getTime()
       });
-      try { await wakeNotificationDispatcher(env); } catch {}
+      try { await wakeNotificationDispatcher(env, { kind: "lock-terminal", userId: tokenId }); } catch {}
       if (error instanceof OrderAttemptError && !error.uncertain) {
         lockError("rule_create", { phase: "complete", state: "failed", reason: "provider_rejected" });
         // 标记为上游拒绝: 协调器与 API 边界据此返回 502 并保留原文案, 而不是降级成笼统的 500
@@ -292,6 +292,15 @@ export async function createLockRule(env, tokenId, input, options = {}) {
       payLeftSecond: order.payLeftSecond ?? null,
       lockedAt: timestamp
     });
+    if (!options.notify) {
+      const notification = lockNotification(rule);
+      await persistTerminalNotification(env, {
+        userId: tokenId, rule, ...notification,
+        credentialVersion: config.version, nowMs: new Date(now).getTime()
+      });
+      try { await wakeNotificationDispatcher(env, { kind: "lock-terminal", userId: tokenId }); } catch {}
+      return publicLockRule(rule, String(env.LOCK_SERVICE_ENABLED) === "true");
+    }
     await putLockRule(env, tokenId, rule);
     try {
       await notifyLockedRule(config, rule, options.notify);

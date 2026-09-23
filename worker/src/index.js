@@ -2,9 +2,9 @@
 
 import { CORS, json } from "./common/http.js";
 import { NOTIFY_CHANNELS } from "./common/notify.js";
-import { getUserConfig, retryPendingRevocationCleanups, saveUserConfig } from "./maoyan/user.js";
+import { getUserConfig, saveUserConfig } from "./maoyan/user.js";
 import * as db from "./maoyan/db.js";
-import { CITY_LIST, fetchCinemaDetail, publicCinemaShows, searchCinemasByKw, runCheck, appendChange, pushNotify, currentChannel, currentCredential, isNotificationVerified, notificationVerification, minBatchMinutes, describeCrons, isMinuteStepCrons, resolveCronExprs, handleAdminTokens, handleLockApi, runScheduledChecks, runScheduledLockAfterMonitor, runScheduledMaintenance, MONITOR_WINDOW_LABEL, inMonitorWindow } from "./maoyan/index.js";
+import { CITY_LIST, fetchCinemaDetail, publicCinemaShows, searchCinemasByKw, runCheck, appendChange, pushNotify, currentChannel, currentCredential, isNotificationVerified, notificationVerification, minBatchMinutes, describeCrons, isMinuteStepCrons, resolveCronExprs, handleAdminTokens, handleLockApi, runScheduledChecks, runScheduledLockAfterMonitor, runScheduledMaintenance } from "./maoyan/index.js";
 import { authenticate, requireActiveAccount, serviceNow } from "./maoyan/auth.js";
 import { accountErrorResponse, handleAccountApi, handlePublicAccountApi } from "./maoyan/account-api.js";
 import { requireBusinessAccess } from "./common/business.js";
@@ -17,6 +17,9 @@ export { MonitorDispatcher } from "./maoyan/monitor-dispatcher.js";
 export { MonitorCoordinator } from "./maoyan/monitor-coordinator.js";
 export { NotificationDispatcher } from "./maoyan/notification-outbox.js";
 import { dispatchMonitorBatch } from "./maoyan/monitor-dispatcher.js";
+import { readBusinessPolicy } from "./maoyan/business-policy-store.js";
+import { businessTime, formatMonitorWindowLabel } from "./maoyan/business-time.js";
+import { recoverPendingNotifications } from "./maoyan/notification-outbox.js";
 import { handleStatusApi } from "./maoyan/status-api.js";
 import { checkManualOperationThroughCoordinator } from "./maoyan/lock-runner.js";
 import { fetchManualCinemaThroughCoordinator } from "./maoyan/monitor-coordinator.js";
@@ -227,13 +230,14 @@ export default {
       if (url.pathname === "/api/config" && request.method === "GET") {
         const cfg = await getUserConfig(env, token);
         const cronExprs = await resolveCronExprs(env);
+        const policy = await readBusinessPolicy(env.DB);
         return json({
           ok: true,
           config: {
             ...await publicConfig(cfg),
             cronMinutes: minBatchMinutes(cronExprs),
             cronExprs,
-            cronText: describeCrons(cronExprs) + " · " + MONITOR_WINDOW_LABEL,
+            cronText: describeCrons(cronExprs) + " · " + formatMonitorWindowLabel(policy),
             cronMinuteStep: isMinuteStepCrons(cronExprs),
           },
         });
@@ -332,6 +336,7 @@ export default {
       if (url.pathname === "/api/status" && request.method === "GET") {
         const cfg = await getUserConfig(env, token);
         const cronExprs = await resolveCronExprs(env);
+        const policy = await readBusinessPolicy(env.DB);
         const st = await db.getStatus(env.DB, token) || {};
         const status = {
           lastCheckTs: st.lastCheckTs,
@@ -350,7 +355,7 @@ export default {
           changes,
           cronMinutes: minBatchMinutes(cronExprs),
           cronExprs,
-          cronText: describeCrons(cronExprs) + " · " + MONITOR_WINDOW_LABEL,
+          cronText: describeCrons(cronExprs) + " · " + formatMonitorWindowLabel(policy),
           cronMinuteStep: isMinuteStepCrons(cronExprs),
         });
       }
@@ -362,17 +367,20 @@ export default {
   },
 
   async scheduled(event, env) {
-    const nowMs = Number(event?.scheduledTime || Date.now());
-    await retryPendingRevocationCleanups(env, { nowMs });
+    const nowMs = serviceNow(env);
+    await recoverPendingNotifications(env, { nowMs, limit: 10 });
+    const policy = await readBusinessPolicy(env.DB);
+    const { monitorOpen, maintenanceOpen } = businessTime(nowMs, policy);
+    if (maintenanceOpen) await runScheduledMaintenance(env, nowMs, policy);
+    if (!monitorOpen) return;
     if (!env.MONITOR_DISPATCHER || !env.MONITOR_COORDINATOR) {
       await runScheduledChecks(env, (tokenId, cinemaData) =>
-        runScheduledLockAfterMonitor(env, tokenId, cinemaData), { now: new Date(nowMs) });
+        runScheduledLockAfterMonitor(env, tokenId, cinemaData), { now: new Date(nowMs), policy });
       return;
     }
-    await runScheduledMaintenance(env, nowMs);
-    if (!inMonitorWindow(new Date(nowMs))) return;
     const batchMinutes = minBatchMinutes(await resolveCronExprs(env));
-    const batchId = String(Math.floor(nowMs / (batchMinutes * 60_000)));
+    const scheduledTime = Number(event?.scheduledTime);
+    const batchId = String(Math.floor((Number.isFinite(scheduledTime) && scheduledTime > 0 ? scheduledTime : nowMs) / (batchMinutes * 60_000)));
     await dispatchMonitorBatch(env, { batchId, nowMs });
   }
 };

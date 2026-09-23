@@ -23,3 +23,12 @@ test("valid business responses are accepted", async () => {
     fetchImpl: async (url) => { assert.equal(url, serverChanEndpoint("sctp123tabc")); return Response.json({ code: 0 }); }
   });
 });
+
+test("provider 429 Retry-After is available to the outbox scheduler", async () => {
+  await assert.rejects(
+    () => pushBark("key", "title", "body", {
+      fetchImpl: async () => new Response("", { status: 429, headers: { "Retry-After": "120" } })
+    }),
+    (error) => error.retryAfterMs === 120000 && /HTTP 429/.test(error.message)
+  );
+});

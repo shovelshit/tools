@@ -21,7 +21,7 @@ async function envWithConfig(config = { cinemaId: "25428", selectedMovieIds: ["7
   return {
     LOCK_SERVICE_ENABLED: "true",
     SESSION_ENCRYPTION_KEY: testEncryptionKey(),
-    DB: await createDB({ configs: { "token-a": config } })
+    DB: await createDB({ tokens: [{ id: "token-a", token: "test-token" }], configs: { "token-a": config } })
   };
 }
 

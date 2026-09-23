@@ -205,6 +205,34 @@ test("admin settings cannot enable public enrollment with incomplete security co
   assert.match((await response.json()).error, /TURNSTILE_SITE_KEY/);
 });
 
+test("admin can change Maoyan business windows with version protection and audit", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  env.NOW_MS = String(NOW);
+  const path = "/api/admin/business-policy";
+  const initial = await worker.fetch(request(path), env);
+  assert.equal(initial.status, 200);
+  assert.equal((await initial.json()).policy.monitorStartMinute, 420);
+  const denied = await worker.fetch(request(path, { adminToken: "wrong" }), env);
+  assert.equal(denied.status, 401);
+  const saved = await worker.fetch(request(path, { method: "POST", body: {
+    expectedVersion: 1, monitorStartMinute: 1320, monitorEndMinute: 120,
+    maintenanceStartMinute: 180, maintenanceEndMinute: 240
+  } }), env);
+  assert.equal(saved.status, 200);
+  assert.equal((await saved.json()).policy.version, 2);
+  assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE event_type='maoyan_business_policy_updated'").first()).n, 1);
+  const stale = await worker.fetch(request(path, { method: "POST", body: {
+    expectedVersion: 1, monitorStartMinute: 1320, monitorEndMinute: 120,
+    maintenanceStartMinute: 180, maintenanceEndMinute: 240
+  } }), env);
+  assert.equal(stale.status, 409);
+  const invalid = await worker.fetch(request(path, { method: "POST", body: {
+    expectedVersion: 2, monitorStartMinute: 1320, monitorEndMinute: 120,
+    maintenanceStartMinute: 60, maintenanceEndMinute: 120
+  } }), env);
+  assert.equal(invalid.status, 400);
+});
+
 test("admin accounts, creation, and settings are independently scoped by business line", async () => {
   const env = await createAccountEnv({ nowMs: NOW, maxUsers: 2 });
   env.NOW_MS = String(NOW);

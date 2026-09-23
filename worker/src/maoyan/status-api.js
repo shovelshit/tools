@@ -1,6 +1,8 @@
 import * as db from "./db.js";
 import { json } from "../common/http.js";
 import { describeCrons, isMinuteStepCrons, minBatchMinutes, resolveCronExprs } from "./cron.js";
+import { readBusinessPolicy } from "./business-policy-store.js";
+import { formatMonitorWindowLabel } from "./business-time.js";
 
 function lockSummary(data) {
   if (!data) return null;
@@ -28,7 +30,7 @@ export async function readStatusSummary(env, principal) {
   let config = {};
   try { status = JSON.parse(row?.status_data || "{}"); } catch {}
   try { config = JSON.parse(row?.config_data || "{}"); } catch {}
-  const cronExprs = await resolveCronExprs(env);
+  const [cronExprs, policy] = await Promise.all([resolveCronExprs(env), readBusinessPolicy(env.DB)]);
   return {
     account: {
       userId: principal.userId,
@@ -51,7 +53,7 @@ export async function readStatusSummary(env, principal) {
     pollAfterSeconds: config.enabled === true ? 180 : null,
     cronMinutes: minBatchMinutes(cronExprs),
     cronExprs,
-    cronText: describeCrons(cronExprs) + " · 监控时段 07:00~22:59",
+    cronText: describeCrons(cronExprs) + " · " + formatMonitorWindowLabel(policy),
     cronMinuteStep: isMinuteStepCrons(cronExprs)
   };
 }

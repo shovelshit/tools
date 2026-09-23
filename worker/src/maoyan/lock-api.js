@@ -208,7 +208,9 @@ export async function handleLockApi(request, env, url, tokenId) {
       const movieId = exactDecimal(body?.movieId, "movieId");
       const seqNo = body?.seqNo == null ? "" : String(body.seqNo);
       if (seqNo && !DECIMAL.test(seqNo)) throw inputError("seqNo 无效");
-      await recordSeatFeedback(env, { tokenId, cinemaId, movieId, seqNo, source: "manual" });
+      if (!await recordSeatFeedback(env, { tokenId, cinemaId, movieId, seqNo, source: "manual" })) {
+        return response({ recorded: false, error: "反馈保存失败，请重试" }, 503);
+      }
       return response({ recorded: true });
     }
     if (url.pathname === "/api/lock/rule/cancel" && request.method === "POST") {

@@ -6,7 +6,8 @@ import { isNotificationVerified } from "./notify.js";
 import { getUserConfig, userKey } from "./user.js";
 import { runCheck } from "./check.js";
 import { prepareAccountCleanupThroughCoordinator, runScheduledLockAfterMonitor } from "./lock-runner.js";
-import { inMonitorWindow } from "./cron.js";
+import { readBusinessPolicy } from "./business-policy-store.js";
+import { businessTime } from "./business-time.js";
 
 const SHANGHAI_OFFSET = "+08:00";
 const MATCH_WINDOW_MS = 30 * 60 * 1000;
@@ -71,7 +72,7 @@ export async function resumeAfterRenewal(env, userId, accountVersion, nowMs = Da
     sessionUsable,
     nowMs
   });
-  if (result.monitor && inMonitorWindow(nowMs)) {
+  if (result.monitor && businessTime(nowMs, await readBusinessPolicy(env.DB)).monitorOpen) {
     try {
       await runCheck(env, false, userId, {
         afterPersist: result.lock

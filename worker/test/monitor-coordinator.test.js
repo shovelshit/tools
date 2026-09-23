@@ -125,7 +125,47 @@ test("twenty subscribers share one cinema fetch and receive isolated events", as
   assert.equal(fetches, 2);
   assert.equal(result.subscribers, 20);
   assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM notification_outbox").first()).n, 20);
+  const timestamp = await env.DB.prepare("SELECT detected_at,created_at FROM notification_outbox LIMIT 1").first();
+  assert.ok(timestamp.detected_at >= NOW);
+  assert.ok(timestamp.created_at >= timestamp.detected_at);
   assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM change_log").first()).n, 20);
+});
+
+test("new show wakes its notification lane before a matching lock finishes", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  const { account } = await seedAccount(env, {
+    expiresAt: NOW + 600_000,
+    config: { enabled: true, cinemaId: "1", selectedMovieIds: ["7"] }
+  });
+  await syncSubscription(env.DB, account.id, { enabled: true, cinemaId: "1" }, 1, NOW);
+  await processCinemaBatch(env, {
+    cinemaId: "1", batchId: "baseline", nowMs: NOW,
+    fetchCinema: async () => cinemaFixture({ seqNos: ["s1"] })
+  });
+  await putLockRuleRow(env.DB, account.id, waitingRule({
+    lotteryKey: "notify-first", seqNo: "s2", templateTime: "18:41"
+  }));
+  const wakes = [];
+  env.NOTIFICATION_DISPATCHER = {
+    idFromName: (name) => name,
+    get: (name) => ({ fetch: async () => { wakes.push(name); return Response.json({ ok: true }); } })
+  };
+  let release;
+  let started;
+  const blocked = new Promise((resolve) => { release = resolve; });
+  const lockStarted = new Promise((resolve) => { started = resolve; });
+  const pending = processCinemaBatch(env, {
+    cinemaId: "1", batchId: "new-show", nowMs: NOW + 180_000,
+    fetchCinema: async () => cinemaFixture({ seqNos: ["s1", "s2"] }),
+    runLock: async () => { started(); await blocked; }
+  });
+  try {
+    await lockStarted;
+    assert.ok(wakes.some((name) => name === `urgent:new-shows:${account.id}`));
+  } finally {
+    release();
+    await pending;
+  }
 });
 
 test("replaying a committed cinema batch does not duplicate user events", async () => {

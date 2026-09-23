@@ -6,6 +6,8 @@ import { resumeAfterRenewal } from "./account-lifecycle.js";
 import { readAdminNotificationFailures, readResourceSummary } from "./resource-budget.js";
 import { getReleaseDownloads } from "./releases.js";
 import { readAdminDashboard } from "./dashboard.js";
+import { readBusinessPolicy, updateBusinessPolicy } from "./business-policy-store.js";
+import { wakeNotificationDispatcher } from "./notification-outbox.js";
 
 export async function handlePublicAccountApi(request, env, url) {
   if (url.pathname === "/api/releases" && request.method === "GET") {
@@ -105,6 +107,19 @@ export async function listAdminAccounts(env, url, nowMs) {
 
 export async function handleAdminAccountApi(request, env, url) {
   const nowMs = serviceNow(env);
+  if (url.pathname === "/api/admin/business-policy" && request.method === "GET") {
+    return json({ ok: true, policy: await readBusinessPolicy(env.DB) }, 200, { "Cache-Control": "no-store" });
+  }
+  if (url.pathname === "/api/admin/business-policy" && request.method === "POST") {
+    const body = await request.json().catch(() => ({}));
+    const policy = await updateBusinessPolicy(env.DB, { ...body, nowMs });
+    try {
+      await wakeNotificationDispatcher(env, { kind: "account-expiry" });
+    } catch (error) {
+      console.error("maoyan business policy routine wake failed", error);
+    }
+    return json({ ok: true, policy }, 200, { "Cache-Control": "no-store" });
+  }
   if (url.pathname === "/api/admin/dashboard" && request.method === "GET") {
     const businessLine = String(url.searchParams.get("businessLine") || "maoyan").trim();
     const window = String(url.searchParams.get("window") || "24h").trim();

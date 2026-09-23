@@ -308,8 +308,8 @@ export async function getSeatFeedbackRow(db, key) {
   ).bind(key).first();
 }
 
-export async function putSeatFeedbackRow(db, key, record) {
-  await db.prepare(
+export function seatFeedbackWrite(db, key, record) {
+  return db.prepare(
     "INSERT INTO seat_feedback (fb_key, reported_at, day, token_id, cinema_id, movie_id, seq_no, source, status) " +
     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) " +
     "ON CONFLICT(fb_key) DO UPDATE SET reported_at = excluded.reported_at, day = excluded.day, " +
@@ -318,7 +318,11 @@ export async function putSeatFeedbackRow(db, key, record) {
   ).bind(
     key, record.reportedAt, record.day || null, record.tokenId || null, record.cinemaId || null,
     record.movieId || null, record.seqNo || null, record.source || null, record.status || "unprocessed"
-  ).run();
+  );
+}
+
+export async function putSeatFeedbackRow(db, key, record) {
+  await seatFeedbackWrite(db, key, record).run();
 }
 
 // 管理端列表: 形状与 KV 版一致 {key, reportedAt, day, tokenId, cinemaId, movieId, seqNo, source}, 按 reportedAt 倒序

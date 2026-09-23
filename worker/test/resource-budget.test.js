@@ -83,3 +83,27 @@ test("Maoyan resource capacity excludes active Store accounts", async () => {
 
   assert.deepEqual((await readResourceSummary(env, NOW)).capacity, { used: 1, maxUsers: 20 });
 });
+
+test("active cinemas only include enabled subscriptions of current Maoyan users", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  const fixtures = [
+    { cinemaId: "active", expiresAt: NOW + 1 },
+    { cinemaId: "expired", expiresAt: NOW - 1 },
+    { cinemaId: "revoked", expiresAt: NOW + 1, state: "revoked" },
+    { cinemaId: "suspended", expiresAt: NOW + 1, state: "suspended" },
+    { cinemaId: "archived", expiresAt: NOW + 1, archived: true },
+    { cinemaId: "store", expiresAt: NOW + 1, businessLine: "store" },
+    { cinemaId: "disabled", expiresAt: NOW + 1, enabled: false }
+  ];
+  for (const entry of fixtures) {
+    const { account } = await seedAccount(env, { ...entry, state: entry.state === "revoked" ? "active" : entry.state });
+    await syncSubscription(env.DB, account.id, { enabled: entry.enabled !== false, cinemaId: entry.cinemaId }, 1, NOW);
+    if (entry.state === "revoked") {
+      await env.DB.prepare("UPDATE users SET state='revoked' WHERE id=?").bind(account.id).run();
+    }
+    if (entry.archived) {
+      await env.DB.prepare("UPDATE users SET archived_at=? WHERE id=?").bind(NOW, account.id).run();
+    }
+  }
+  assert.equal((await readResourceSummary(env, NOW)).activeCinemas, 1);
+});

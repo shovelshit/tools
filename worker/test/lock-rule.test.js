@@ -56,10 +56,46 @@ test("immediate explicit rejection queues failure and ignores legacy raw detail"
   assert.equal(await getLockRule(env, "token-a"), null);
 });
 
+test("immediate successful lock persists its terminal notice and wakes its own lane", async () => {
+  const env = await envWithConfig();
+  env.DB = await createDB({
+    tokens: [{ id: "token-a", token: "test-token" }],
+    configs: { "token-a": { cinemaId: "25428", selectedMovieIds: ["7"] } }
+  });
+  const wakes = [];
+  env.NOTIFICATION_DISPATCHER = {
+    idFromName: (name) => name,
+    get: (name) => ({ fetch: async () => { wakes.push(name); return Response.json({ ok: true }); } })
+  };
+  const rule = await createLockRule(env, "token-a", validInput({ targetDate: "2026-09-11" }), dependencies({
+    placeOrder: async () => ({ orderId: "order-123", payLeftSecond: 300 })
+  }));
+  const row = await env.DB.prepare("SELECT kind,state,payload FROM notification_outbox").first();
+  assert.equal(rule.state, "locked");
+  assert.equal(row.kind, "lock-terminal");
+  assert.equal(row.state, "pending");
+  assert.deepEqual(wakes, ["urgent:lock-terminal:token-a"]);
+});
+
+test("missing notification binding still persists an immediate lock notice for later recovery", async () => {
+  const env = await envWithConfig();
+  env.DB = await createDB({
+    tokens: [{ id: "token-a", token: "test-token" }],
+    configs: { "token-a": { cinemaId: "25428", selectedMovieIds: ["7"] } }
+  });
+  const rule = await createLockRule(env, "token-a", validInput({ targetDate: "2026-09-11" }), dependencies({
+    placeOrder: async () => ({ orderId: "order-123", payLeftSecond: 300 })
+  }));
+  assert.equal(rule.state, "locked");
+  const row = await env.DB.prepare("SELECT kind,state FROM notification_outbox").first();
+  assert.equal(row.kind, "lock-terminal");
+  assert.equal(row.state, "pending");
+});
+
 async function envWithConfig(config = { cinemaId: "25428", selectedMovieIds: ["7"] }) {
   const env = {
     LOCK_SERVICE_ENABLED: "true",
-    DB: await createDB(),
+    DB: await createDB({ tokens: [{ id: "token-a", token: "test-token" }] }),
     MAOYAN_KV: new MemoryKV(),
     SESSION_ENCRYPTION_KEY: testEncryptionKey()
   };
@@ -453,6 +489,7 @@ test("cleanup deletes the encrypted session (KV) and the lock rule (D1)", async 
 
 test("rule logs are structured and omit user, show, seat, and order identifiers", async () => {
   const env = await envWithConfig();
+  env.DB = await createDB({ tokens: [{ id: "token-a-sensitive", token: "test-token" }] });
   await putConfig(env.DB, "token-a-sensitive", {
     cinemaId: "25428",
     selectedMovieIds: ["7"]

@@ -20,14 +20,15 @@ async function insertSubscription(env, userId, cinemaId, nowMs = NOW) {
 
 async function insertNotification(env, {
   eventKey, userId, state, createdAt = NOW, kind = "lock-terminal",
-  lastError = null, failureDetail = null
+  lastError = null, failureDetail = null, detectedAt = null, firstAttemptAt = null, sentAt = null
 }) {
   await env.DB.prepare(
-    "INSERT INTO notification_outbox(event_key,user_id,kind,payload,credential_version,state,attempts,last_error,failure_detail,next_attempt_at,created_at,updated_at) " +
-    "VALUES (?,?,?,?,?, ?,0,?,?,?,?,?)"
+    "INSERT INTO notification_outbox(event_key,user_id,kind,payload,credential_version,state,attempts,last_error,failure_detail,next_attempt_at,created_at,updated_at,detected_at,first_attempt_at,sent_at) " +
+    "VALUES (?,?,?,?,?, ?,0,?,?,?,?,?,?,?,?)"
   ).bind(
     eventKey, userId, kind, JSON.stringify({ title: eventKey, content: eventKey }), 1,
-    state, lastError, failureDetail, state === "pending" ? createdAt : null, createdAt, createdAt
+    state, lastError, failureDetail, state === "pending" ? createdAt : null, createdAt, createdAt,
+    detectedAt, firstAttemptAt, sentAt
   ).run();
 }
 
@@ -81,7 +82,10 @@ test("admin dashboard aggregates active maoyan users and excludes revoked/store 
     "INSERT INTO cinema_events(cinema_id,batch_id,movie_id,payload,created_at) VALUES (?,?,?,?,?)"
   ).bind("cinema-a", "batch-a", "movie-a", JSON.stringify({ movieName: "测试电影", shows: [{ seqNo: "1" }] }), NOW - 10 * 60 * 1000).run();
 
-  await insertNotification(env, { eventKey: "lock:rule-a:locked", userId: active.account.id, state: "sent" });
+  await insertNotification(env, {
+    eventKey: "lock:rule-a:locked", userId: active.account.id, state: "sent",
+    detectedAt: NOW - 5_000, firstAttemptAt: NOW - 1_000, sentAt: NOW
+  });
   await insertNotification(env, {
     eventKey: "lock:rule-b:failed", userId: active.account.id, state: "failed",
     lastError: "上游返回 HTTP 403", failureDetail: '{"status":403}'
@@ -91,6 +95,10 @@ test("admin dashboard aggregates active maoyan users and excludes revoked/store 
     createdAt: NOW - 2 * DAY, lastError: "过期失败"
   });
   await insertNotification(env, { eventKey: "lock:pending", userId: active.account.id, state: "pending" });
+  await insertNotification(env, {
+    eventKey: "account-expiry:pending", userId: active.account.id,
+    kind: "account-expiry", state: "pending"
+  });
   await env.DB.prepare(
     "INSERT INTO seat_feedback(fb_key,reported_at,day,token_id,cinema_id,movie_id,seq_no,source) VALUES (?,?,?,?,?,?,?,?)"
   ).bind("seatfb:cinema-a:1", new Date(NOW - 60 * 1000).toISOString(), "2026-09-20", active.account.id, "cinema-a", "movie-a", "1", "auto").run();
@@ -114,9 +122,14 @@ test("admin dashboard aggregates active maoyan users and excludes revoked/store 
   assert.equal(payload.users[0].lockState, "waiting_schedule");
   assert.deepEqual(payload.cinemas.map((row) => row.cinemaId), ["cinema-a"]);
   assert.equal(payload.cinemas[0].newShows, 1);
-  assert.equal(payload.notifications.pending, 1);
+  assert.equal(payload.notifications.pending, 2);
   assert.equal(payload.notifications.failed, 1);
-  assert.equal(payload.notifications.recent.length, 3);
+  assert.equal(payload.notifications.recent.length, 4);
+  assert.equal(payload.notifications.byKind["lock-terminal"].pending, 1);
+  assert.equal(payload.notifications.byKind["account-expiry"].pending, 1);
+  assert.equal(payload.notifications.recent.find((row) => row.eventKey === "lock:rule-a:locked").discoveryToFirstAttemptMs, 4_000);
+  assert.equal(payload.notifications.recent.find((row) => row.eventKey === "lock:rule-b:failed").discoveryToFirstAttemptMs, null);
+  assert.equal(payload.health.lastMaintenanceDate, null);
   assert.equal(
     payload.notifications.recent.find((row) => row.eventKey === "lock:rule-b:failed").failureDetail,
     '{"status":403}'

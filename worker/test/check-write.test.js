@@ -113,8 +113,13 @@ test("心跳未到且无变化: status 不写(心跳节流生效)", async () => 
   assert.equal(env.DB.writeCount(ST), 0);
 });
 
-test("新增场次: snapshot+changes+status 全落盘, 推送恰好一次", async () => {
+test("新增场次: snapshot+changes+status 和通知同事务落盘, 立即唤醒但不在检查中直推", async () => {
   const env = await runtime({ snapshot: { "900": ["A1"] } });
+  const wakes = [];
+  env.NOTIFICATION_DISPATCHER = {
+    idFromName: (name) => name,
+    get: (name) => ({ fetch: async () => { wakes.push(name); return Response.json({ ok: true }); } })
+  };
   const counters = { pushCalls: 0 };
   const data = cinemaData([{ id: "900", nm: "片X", seqNos: ["A1", "A2"] }]);
   const res = await withMockFetch(
@@ -123,16 +128,20 @@ test("新增场次: snapshot+changes+status 全落盘, 推送恰好一次", asyn
   );
   assert.equal(res.ok, true);
   assert.equal(res.newTotal, 1);
-  assert.equal(counters.pushCalls, 1);
-  assert.equal(counters.notification.title, "🎬 新增 1 场｜片X");
-  assert.equal(counters.notification.content, "🏢 测试影院\n🎞 片X\n\n🗓 新增场次\n• 2026-09-15 19:00 · 1号厅 · 国语 2D\n\n🔎 进入监控页查看并选择场次");
+  assert.equal(counters.pushCalls, 0);
+  assert.deepEqual(wakes, [`urgent:new-shows:${tokenId}`]);
+  const queued = await env.DB.prepare("SELECT kind,state,payload FROM notification_outbox").first();
+  assert.equal(queued.kind, "new-shows");
+  assert.equal(queued.state, "pending");
+  const payload = JSON.parse(queued.payload);
+  assert.equal(payload.title, "🎬 新增 1 场｜片X");
+  assert.equal(payload.content, "🏢 测试影院\n🎞 片X\n\n🗓 新增场次\n• 2026-09-15 19:00 · 1号厅 · 国语 2D\n\n🔎 进入监控页查看并选择场次");
   assert.equal(env.DB.writeCount(SNAP), 1);
   assert.deepEqual((await db.getSnapshot(env.DB, tokenId))["900"], ["A1", "A2"]);
-  assert.equal(env.DB.writeCount(CHG), 2); // new + ok 两条
+  assert.equal(env.DB.writeCount(CHG), 1);
   const changes = await db.listChanges(env.DB, tokenId);
-  assert.equal(changes.length, 2);
-  assert.equal(changes[0].type, "ok");
-  assert.equal(changes[1].type, "new");
+  assert.equal(changes.length, 1);
+  assert.equal(changes[0].type, "new");
   assert.equal(env.DB.writeCount(ST), 1);
   const st = await db.getStatus(env.DB, tokenId);
   assert.equal(st.newTotal, 1);

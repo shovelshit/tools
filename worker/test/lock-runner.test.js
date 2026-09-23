@@ -389,6 +389,22 @@ test("production expiration removes the rule and queues its notification atomica
   assert.equal(wakes, 1);
 });
 
+test("missing notification binding still queues a scheduled terminal notice", async () => {
+  const DB = await createDB({
+    tokens: [{ id: tokenId, token: "access-token" }],
+    configs: { [tokenId]: { enabled: true, cinemaId: "25428" } },
+    lockRules: { [tokenId]: rule({ targetDate: "2026-09-10" }) }
+  });
+  const env = await runtime({ DB });
+  const result = await runOneLockRule(env, tokenId, {
+    now: () => now,
+    getConfig: async () => ({ version: 1 })
+  });
+  assert.equal(result.state, "expired");
+  assert.equal(await db.getLockRuleRow(DB, tokenId), null);
+  assert.equal((await DB.prepare("SELECT kind,state FROM notification_outbox").first()).state, "pending");
+});
+
 test("production order failure deletes the rule, queues failure once, and never retries", async () => {
   const stored = rule();
   const DB = await createDB({

@@ -35,10 +35,10 @@ binding = "ASSETS"
 run_worker_first = ["/api/*", "/store", "/store/", "/store/*.html", "/store/auth/*", "/store/api/*", "/store/file*", "/maoyan", "/maoyan/", "/maoyan/*.html"]
 
 # ============ 定时触发 ============
-# 监控与未来锁座共用此 cron。Dashboard 调整后两者频率同步变化。
+# 猫眼监控、账号维护共用三分钟 cron，具体时段由管理员在 D1 业务策略中配置。
 # 表达式保持分钟步进型: check.js 去抖与前端下批次推算依赖 minBatchMinutes 解析,
 # 窗口型表达式(如 "*/3 23 * * *")会解析失败回落 10 分钟, 把 3 分钟批次误杀。
-# 北京时间 07:00~22:59 之外的批次在 runScheduledChecks 入口整体跳过(见 cron.js inMonitorWindow)。
+# 在每次触发时读取 D1 中的北京时间业务窗口；非对应窗口不启动相关业务。
 # 默认值需同步 src/maoyan/cron.js 的 CRON_EXPRESSION，供 API 查询失败时回落。
 [triggers]
 crons = ["*/3 * * * *"]

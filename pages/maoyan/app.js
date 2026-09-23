@@ -1467,7 +1467,7 @@ els.btnRefresh.addEventListener("click", () =>
 
 // ---------------- 初始化 ----------------
 let cronMinutes = 10; // 云端 cron 批次(分钟), 连接后以服务端下发为准
-let cronText = "每 3 分钟一批 · 监控时段 07:00~22:59"; // cron 的人话描述(简单表达式)或原始表达式(复杂), 以服务端返回为准
+let cronText = "每 3 分钟一批"; // 连接后按服务端当前策略显示监控时段
 let cronMinuteStep = true; // 是否分钟步进型 cron(可推算下一批时间)
 
 // 批次提示: 检查频率完全跟随 worker 的 cron, 界面不再提供间隔设置

@@ -19,6 +19,7 @@ function safeJson(text) {
 }
 
 function numberOrNull(value) {
+  if (value == null || value === "") return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
@@ -229,16 +230,29 @@ async function readNotifications(DB, businessLine, windowStart) {
   );
   const rows = await all(DB,
     "SELECT o.id,o.event_key,o.user_id,o.kind,o.payload,o.state,o.attempts,o.last_error,o.failure_detail," +
-    "o.next_attempt_at,o.lease_until,o.created_at,o.updated_at,u.remark " +
+    "o.next_attempt_at,o.lease_until,o.created_at,o.updated_at,o.detected_at,o.first_attempt_at,o.sent_at,u.remark " +
     "FROM notification_outbox o JOIN users u ON u.id=o.user_id " +
     "WHERE u.business_line=? AND o.created_at>=? " +
     "ORDER BY o.id DESC LIMIT ?",
     businessLine, windowStart, RECENT_LIMIT
   );
+  const kinds = await all(DB,
+    "SELECT o.kind," +
+    "SUM(CASE WHEN o.state='pending' THEN 1 ELSE 0 END) AS pending," +
+    "SUM(CASE WHEN o.state='sending' THEN 1 ELSE 0 END) AS sending," +
+    "SUM(CASE WHEN o.state='failed' AND o.created_at>=? THEN 1 ELSE 0 END) AS failed," +
+    "MIN(CASE WHEN o.state IN ('pending','sending') THEN o.created_at END) AS oldest_created_at " +
+    "FROM notification_outbox o JOIN users u ON u.id=o.user_id WHERE u.business_line=? GROUP BY o.kind",
+    windowStart, businessLine
+  );
   return {
     pending: Number(counts?.pending || 0),
     sending: Number(counts?.sending || 0),
     failed: Number(counts?.failed || 0),
+    byKind: Object.fromEntries(kinds.map((row) => [row.kind, {
+      pending: Number(row.pending || 0), sending: Number(row.sending || 0),
+      failed: Number(row.failed || 0), oldestPendingAt: numberOrNull(row.oldest_created_at)
+    }])),
     recent: rows.map((row) => ({
       id: Number(row.id),
       eventKey: String(row.event_key),
@@ -254,6 +268,11 @@ async function readNotifications(DB, businessLine, windowStart) {
       leaseUntil: numberOrNull(row.lease_until),
       createdAt: numberOrNull(row.created_at),
       updatedAt: numberOrNull(row.updated_at),
+      detectedAt: numberOrNull(row.detected_at),
+      firstAttemptAt: numberOrNull(row.first_attempt_at),
+      sentAt: numberOrNull(row.sent_at),
+      discoveryToFirstAttemptMs: row.detected_at == null || row.first_attempt_at == null
+        ? null : Math.max(0, Number(row.first_attempt_at) - Number(row.detected_at)),
       ...payloadSummary(row.payload)
     }))
   };
@@ -267,9 +286,14 @@ async function readHealth(DB, businessLine) {
     "WHERE u.business_line=? AND o.state IN ('pending','sending')",
     businessLine
   );
+  const maintenance = await first(DB,
+    "SELECT MAX(local_date) AS local_date FROM maoyan_maintenance_runs " +
+    "WHERE job_id='reminder' AND completed_at IS NOT NULL"
+  );
   return {
     latestBatchAt: numberOrNull(latestBatch?.at),
-    oldestPendingNotificationAt: numberOrNull(oldestPending?.at)
+    oldestPendingNotificationAt: numberOrNull(oldestPending?.at),
+    lastMaintenanceDate: maintenance?.local_date || null
   };
 }
 

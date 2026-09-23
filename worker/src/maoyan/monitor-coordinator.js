@@ -5,6 +5,7 @@ import { advanceSubscriber, getCommittedCinemaBatch, listSubscribers, persistCin
 import { chinaDate, resolveLockTarget, runScheduledLockAfterMonitor } from "./lock-runner.js";
 import { orderLockCandidates, runBounded } from "./lock-lottery.js";
 import { allowManualOperation } from "./resource-budget.js";
+import { monitorError } from "./log.js";
 
 function eventText(event) {
   const first = event.shows[0] || {};
@@ -57,6 +58,7 @@ export async function processCinemaBatch(env, {
         return {
           eventKey: `cinema:${cinemaId}:${batchId}:${subscription.userId}:${event.movieId}`,
           kind: "new-shows",
+          detectedAt: Date.now(),
           title: notification.title,
           content: notification.content,
           credentialVersion: subscription.configVersion
@@ -74,6 +76,13 @@ export async function processCinemaBatch(env, {
       if (!advanced.applied) continue;
       subscribers += 1;
       notifications += Number(advanced.notificationsCreated || 0);
+      if (advanced.notificationsCreated) {
+        try {
+          await wakeNotificationDispatcher(env, { kind: "new-shows", userId: subscription.userId });
+        } catch {
+          monitorError("notification_wake", { state: "failed", reason: "dispatch_unavailable" });
+        }
+      }
       if (subscription.lockRule?.state === "waiting_schedule" && typeof runLock === "function") {
         const target = resolveLockTarget(subscription.lockRule, data);
         const candidate = {
@@ -93,7 +102,6 @@ export async function processCinemaBatch(env, {
   const queue = [...orderLockCandidates(lockCandidates, data), ...terminalCandidates];
   const lockResults = await runBounded(queue, lockConcurrency, (candidate) => runLock(env, candidate.userId, data));
   const lockFailures = lockResults.filter((result) => result.status === "rejected").length;
-  if (notifications) await wakeNotificationDispatcher(env);
   return {
     ok: true,
     cinemaId: String(cinemaId),

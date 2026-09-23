@@ -69,8 +69,31 @@ npx wrangler deploy --config wrangler.local.toml
 
 ## 后续部署
 
-本仓库只支持使用当前 `schema.sql` 初始化全新的 D1，不支持对旧版本 schema 做原地升级。更新代码后如果数据库 schema 已过期，请创建新的 D1，重新执行第 4 节的初始化命令，并把新 `database_id` 写入配置后再部署；不要把当前 Worker 部署到旧 schema，也不要尝试拼接历史 SQL 升级现有数据库。
+2026-09-23 猫眼业务时间与通知调度版本支持保留现有 D1 数据的加法迁移。新建库直接使用当前 `schema.sql`，**不要再执行下面的迁移脚本**。已有库升级前先通过 Cloudflare D1 备份或导出保留恢复点，并确认当前 `notification_outbox` 有 `event_key` 唯一约束，记录原有 `pending`/`sending` 数量。以下命令在 `worker/` 目录执行，库名和配置文件替换成实际环境：
 
-更换 D1 会从空数据库开始，旧库数据不会自动迁移。切换前请自行确认需要保留的数据，并按当前 schema 重新导入；访问密钥明文无法从数据库找回。
+```bash
+npx wrangler d1 execute my-maoyan-db --remote --command "PRAGMA table_info(notification_outbox)" --config wrangler.local.toml
+npx wrangler d1 execute my-maoyan-db --remote --command "SELECT state,COUNT(*) AS n FROM notification_outbox GROUP BY state" --config wrangler.local.toml
+```
+
+确认 `notification_outbox` 中尚无 `detected_at`、`first_attempt_at`、`sent_at` 三列后，按顺序各执行一次：
+
+```bash
+npx wrangler d1 execute my-maoyan-db --remote --file sql/maoyan-business-policy.sql --config wrangler.local.toml
+npx wrangler d1 execute my-maoyan-db --remote --file sql/maoyan-maintenance-checkpoint.sql --config wrangler.local.toml
+npx wrangler d1 execute my-maoyan-db --remote --file sql/maoyan-notification-lanes.sql --config wrangler.local.toml
+```
+
+通知迁移中的三条 `ALTER TABLE` 不能重放。如果已有其中部分列，先按 `PRAGMA table_info` 逐条确认并只执行缺失的 `ALTER`，再执行该文件中的 `CREATE INDEX IF NOT EXISTS`；不要对旧库直接运行完整 `schema.sql`。部署前验证策略初始行、维护表、新列和四个索引存在，且原有出箱状态数量未减少：
+
+```bash
+npx wrangler d1 execute my-maoyan-db --remote --command "SELECT * FROM maoyan_business_policy WHERE id=1" --config wrangler.local.toml
+npx wrangler d1 execute my-maoyan-db --remote --command "PRAGMA table_info(maoyan_maintenance_runs)" --config wrangler.local.toml
+npx wrangler d1 execute my-maoyan-db --remote --command "PRAGMA table_info(notification_outbox)" --config wrangler.local.toml
+npx wrangler d1 execute my-maoyan-db --remote --command "PRAGMA index_list(notification_outbox)" --config wrangler.local.toml
+npx wrangler d1 execute my-maoyan-db --remote --command "SELECT state,COUNT(*) AS n FROM notification_outbox GROUP BY state" --config wrangler.local.toml
+```
+
+再构建和部署 Worker。首次部署后确认后台策略默认为监控 07:00-23:00、维护 01:00-02:00，检查通知成功率、积压和最近维护日期。此处只提供操作步骤，不会自动变更远程 D1 或发布 Worker。
 
 Wrangler 配置中的 `[[migrations]]` 与上述 D1 策略无关。它们只用于注册 Durable Object 类，部署新环境和后续发布时都应保留。
