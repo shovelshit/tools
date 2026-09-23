@@ -36,23 +36,17 @@ test("lock layout source keeps the separate shell and scoped glass surfaces", ()
   assert.match(css, /\.workflow-progress\s*\{[^}]*background:\s*rgba\(27,\s*35,\s*40,\s*0\.62\)/);
 });
 
-test("inferred lock mode keeps the bounded tolerance control inside the risk panel and rejects blank input", () => {
+test("inferred lock controls live only inside the confirmation dialog", () => {
   const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
-  const source = fs.readFileSync(path.join(__dirname, "lock.js"), "utf8");
-  const riskStart = html.indexOf('<section class="lock-section lock-risk" id="lock-section-risk">');
+  const dialogStart = html.indexOf('id="lock-confirm-overlay"');
   const tolerance = html.indexOf('id="lock-time-tolerance"');
   const acceptance = html.indexOf('id="lock-risk-accepted"');
-  const riskEnd = html.indexOf("</section>", riskStart);
   assert.match(html, /id="lock-time-tolerance"[^>]*type="number"[^>]*min="0"[^>]*max="180"/);
   assert.match(html, /id="lock-inference-warning"/);
-  assert.ok(riskStart < tolerance && tolerance < acceptance && acceptance < riskEnd);
-  assert.equal(html.slice(0, riskStart).includes('id="lock-time-tolerance-row"'), false);
-  assert.match(source, /els\.timeTolerance\.value = "30"/);
-  assert.match(source, /const raw = String\(value \?\? ""\)\.trim\(\);/);
-  assert.match(source, /if \(!raw\) return null;/);
-  assert.match(source, /const timeToleranceMinutes = inferred \? selectedTimeTolerance\(\) : null;/);
-  assert.match(source, /\.\.\.\(inferred \? \{ timeToleranceMinutes \} : \{\}\)/);
-  assert.match(source, /模板场次.*前后.*分钟内推断匹配/);
+  assert.ok(dialogStart > 0 && dialogStart < tolerance && tolerance < acceptance);
+  assert.equal(html.includes('id="lock-section-risk"'), false);
+  assert.match(html.slice(dialogStart), /lock-confirm-danger/);
+  assert.match(html.slice(dialogStart), /目标场次尚未确定.*场次可售.*需自行支付/);
 });
 
 test("time tolerance parsing rejects blank values instead of treating them as zero", () => {
@@ -105,16 +99,18 @@ function mountLock({
   const ids = [
     "btn-lock-seats", "lock-overlay", "btn-lock-close", "lock-cinema", "lock-movie", "lock-template",
     "lock-target-date", "lock-session-file", "btn-lock-login", "btn-lock-upload", "btn-lock-remove-session",
-    "lock-time-tolerance",
-    "lock-inference-warning",
+    "lock-confirm-overlay", "lock-confirm-target", "lock-confirm-cinema", "lock-confirm-movie",
+    "lock-confirm-template", "lock-confirm-window", "lock-confirm-seats", "lock-confirm-error",
+    "btn-lock-confirm-cancel", "btn-lock-confirm-save", "lock-time-tolerance", "lock-inference-warning",
     "lock-session-status", "lock-seat-grid", "lock-seat-count", "lock-risk-accepted", "lock-rule-status",
     "btn-lock-cancel-rule", "lock-template-label", "lock-seat-source", "btn-lock-seat-feedback", "lock-official-toggle",
     "lock-official-wrap", "lock-official-frame", "btn-official-zoom-in", "btn-official-zoom-out",
     "btn-official-zoom-reset", "official-zoom-label", "lock-official-gesture", "lock-gate-hint",
-    "lock-section-schedule", "lock-section-seats", "lock-section-risk", "lock-section-rules", "btn-lock-cancel",
+    "lock-section-schedule", "lock-section-seats", "lock-section-rules", "btn-lock-cancel",
     "btn-lock-submit", "btn-lock-zoom-in", "btn-lock-zoom-out", "btn-lock-zoom-reset", "lock-zoom-label"
   ];
   const elements = Object.fromEntries(ids.map((id) => [id, fakeElement()]));
+  elements["lock-confirm-overlay"].classList.add("hidden");
   const document = {
     getElementById: (id) => elements[id] || null,
     addEventListener: () => {},
@@ -124,7 +120,7 @@ function mountLock({
   const root = { document, window: null, showToast: (message, type) => messages.push({ message, type }), showConfirm: async () => true };
   root.window = root;
   const source = fs.readFileSync(path.join(__dirname, "lock.js"), "utf8");
-  const testSource = source.replace("return {\n      syncAvailability", "return { getShowMode: () => state.showMode, getTestState: () => state,\n      syncAvailability");
+  const testSource = source.replace("return {\n      syncAvailability", "return { getShowMode: () => state.showMode, getTestState: () => state, renderSelection,\n      syncAvailability");
   const module = { exports: {} };
   const vmContext = {
     module, exports: module.exports, Intl, Date, Set, document, window: root,
@@ -189,8 +185,8 @@ function inferredRuleFixture(templateTime, tolerance = "60") {
   state.selectedSeatNos.add("1-6-18");
   const date = state.dateBounds.max;
   dom.elements["lock-target-date"].value = date;
-  dom.elements["lock-risk-accepted"].checked = true;
   dom.elements["lock-time-tolerance"].value = tolerance;
+  dom.controller.renderSelection();
   return { ...dom, date, requests };
 }
 
@@ -199,19 +195,22 @@ test("saving an inferred rule confirms its bounded target-date window and seats 
     ["00:20", "00:00-01:20"], ["23:30", "22:30-23:59"]
   ]) {
     const f = inferredRuleFixture(templateTime);
-    const prompts = [];
-    f.root.showConfirm = async (message, options) => {
-      prompts.push({ message, options, requestCount: f.requests.length });
-      return true;
-    };
-    await f.elements["btn-lock-submit"].trigger("click");
-    assert.equal(prompts.length, 1);
-    assert.equal(prompts[0].requestCount, 0);
-    assert.ok(prompts[0].message.includes(`目标日期：${f.date}`));
-    assert.ok(prompts[0].message.includes(`模板场次：2026-09-22 ${templateTime}`));
-    assert.ok(prompts[0].message.includes(expectedWindow), prompts[0].message);
-    assert.ok(prompts[0].message.includes("测试电影") && prompts[0].message.includes("激光 IMAX 厅"));
-    assert.ok(prompts[0].message.includes("测试影院") && prompts[0].message.includes("6排18座"));
+    assert.equal(f.elements["btn-lock-submit"].disabled, false);
+    const pending = f.elements["btn-lock-submit"].trigger("click");
+    assert.equal(f.requests.length, 0);
+    assert.equal(f.elements["lock-confirm-overlay"].classList.contains("hidden"), false);
+    assert.equal(f.elements["lock-confirm-target"].textContent, f.date);
+    assert.ok(f.elements["lock-confirm-template"].textContent.includes(`2026-09-22 ${templateTime}`));
+    assert.ok(f.elements["lock-confirm-window"].textContent.includes(expectedWindow));
+    assert.ok(f.elements["lock-confirm-movie"].textContent.includes("测试电影"));
+    assert.ok(f.elements["lock-confirm-template"].textContent.includes("激光 IMAX 厅"));
+    assert.ok(f.elements["lock-confirm-cinema"].textContent.includes("测试影院"));
+    assert.ok(f.elements["lock-confirm-seats"].textContent.includes("6排18座"));
+    assert.equal(f.elements["btn-lock-confirm-save"].disabled, true);
+    f.elements["lock-risk-accepted"].checked = true;
+    f.elements["lock-risk-accepted"].trigger("change");
+    f.elements["btn-lock-confirm-save"].trigger("click");
+    await pending;
     assert.equal(f.requests.length, 1);
     assert.equal(f.requests[0].timeToleranceMinutes, 60);
   }
@@ -219,9 +218,25 @@ test("saving an inferred rule confirms its bounded target-date window and seats 
 
 test("cancelling an inferred-rule confirmation sends no request", async () => {
   const f = inferredRuleFixture("20:00");
-  f.root.showConfirm = async () => false;
-  await f.elements["btn-lock-submit"].trigger("click");
+  const pending = f.elements["btn-lock-submit"].trigger("click");
+  f.elements["btn-lock-confirm-cancel"].trigger("click");
+  await pending;
   assert.equal(f.requests.length, 0);
+});
+
+test("changing the matching range in confirmation updates the visible window and posted rule", async () => {
+  const f = inferredRuleFixture("20:00", "30");
+  const pending = f.elements["btn-lock-submit"].trigger("click");
+  assert.equal(f.elements["lock-confirm-window"].textContent, `±30 分钟（${f.date} 19:30-20:30）`);
+  f.elements["lock-time-tolerance"].value = "180";
+  f.elements["lock-time-tolerance"].trigger("input");
+  assert.equal(f.elements["lock-confirm-window"].textContent, `±180 分钟（${f.date} 17:00-23:00）`);
+  f.elements["lock-risk-accepted"].checked = true;
+  f.elements["lock-risk-accepted"].trigger("change");
+  f.elements["btn-lock-confirm-save"].trigger("click");
+  await pending;
+  assert.equal(f.requests.length, 1);
+  assert.equal(f.requests[0].timeToleranceMinutes, 180);
 });
 
 test("inferred rule does not submit when the source template or session changes during confirmation", async () => {
@@ -230,49 +245,53 @@ test("inferred rule does not submit when the source template or session changes 
     (f) => { f.controller.getTestState().session = { uploaded: false }; }
   ]) {
     const f = inferredRuleFixture("20:00");
-    f.root.showConfirm = async () => { change(f); return true; };
-    await f.elements["btn-lock-submit"].trigger("click");
+    const pending = f.elements["btn-lock-submit"].trigger("click");
+    change(f);
+    f.elements["lock-risk-accepted"].checked = true;
+    f.elements["lock-risk-accepted"].trigger("change");
+    f.elements["btn-lock-confirm-save"].trigger("click");
+    await pending;
     assert.equal(f.requests.length, 0);
   }
 });
 
-test("invalid inferred tolerance shows an error and blocks confirmation and submission", async () => {
+test("invalid inferred tolerance stays inside the dialog and blocks submission", async () => {
   for (const value of ["", "300", "1.5", "abc"]) {
     const f = inferredRuleFixture("20:00", value);
-    let confirmed = false;
-    f.root.showConfirm = async () => { confirmed = true; return true; };
+    const pending = f.elements["btn-lock-submit"].trigger("click");
     f.elements["lock-time-tolerance"].trigger("input");
-    assert.equal(f.elements["btn-lock-submit"].disabled, true);
-    assert.match(f.elements["lock-inference-warning"].textContent, /匹配范围需为 0 至 180 的整数/);
-    assert.doesNotMatch(f.elements["lock-inference-warning"].textContent, /30 分钟/);
-    await f.elements["btn-lock-submit"].trigger("click");
-    assert.equal(confirmed, false);
+    assert.equal(f.elements["btn-lock-submit"].disabled, false);
+    assert.match(f.elements["lock-confirm-error"].textContent, /匹配范围需为 0 至 180 的整数/);
+    assert.equal(f.elements["lock-confirm-window"].textContent, "—");
+    f.elements["lock-risk-accepted"].checked = true;
+    f.elements["lock-risk-accepted"].trigger("change");
+    assert.equal(f.elements["btn-lock-confirm-save"].disabled, true);
+    f.elements["btn-lock-confirm-save"].trigger("click");
     assert.equal(f.requests.length, 0);
+    f.elements["btn-lock-confirm-cancel"].trigger("click");
+    await pending;
   }
 });
 
 test("malformed inferred template time cannot render a window or submit a rule", async () => {
   for (const templateTime of ["", "25:00", "12:60", "not-a-time"]) {
     const f = inferredRuleFixture(templateTime);
-    let confirmed = false;
-    f.root.showConfirm = async () => { confirmed = true; return true; };
-    f.elements["lock-time-tolerance"].trigger("input");
+    const pending = f.elements["btn-lock-submit"].trigger("click");
     assert.equal(f.elements["btn-lock-submit"].disabled, true);
-    assert.match(f.elements["lock-inference-warning"].textContent, /模板场次时间无效/);
-    assert.doesNotMatch(f.elements["lock-inference-warning"].textContent, /NaN/);
-    await f.elements["btn-lock-submit"].trigger("click");
-    assert.equal(confirmed, false);
+    assert.equal(f.elements["lock-confirm-overlay"].classList.contains("hidden"), true);
+    f.elements["btn-lock-confirm-cancel"].trigger("click");
+    await pending;
     assert.equal(f.requests.length, 0);
   }
 });
 
-test("refreshing an uploaded session does not expose inference risk for a real seat map", async () => {
+test("refreshing an uploaded session keeps confirmation hidden for a real seat map", async () => {
   const f = mountLock({ api: { "/api/lock/session/status": { session: { uploaded: true } } } });
   await f.controller.refreshRemoteState();
-  assert.equal(f.elements["lock-section-risk"].classList.contains("hidden"), true);
+  assert.equal(f.elements["lock-confirm-overlay"].classList.contains("hidden"), true);
   assert.equal(f.elements["lock-section-seats"].classList.contains("hidden"), false);
   await f.controller.refreshRemoteState();
-  assert.equal(f.elements["lock-section-risk"].classList.contains("hidden"), true);
+  assert.equal(f.elements["lock-confirm-overlay"].classList.contains("hidden"), true);
 });
 
 test("lock controller exposes a display-ready summary for the notification monitor card", async () => {

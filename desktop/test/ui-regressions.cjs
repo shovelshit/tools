@@ -55,7 +55,7 @@ async function main() {
     await page.screenshot({ path: path.join(output, "push-fixed.png") });
 
     await page.click("#btn-lock-seats");
-    await page.fill("#lock-target-date", "2026-09-21");
+    await page.fill("#lock-target-date", "2026-09-30");
     await page.selectOption("#lock-template", "903");
     await page.waitForFunction(() => document.querySelectorAll("#lock-seat-grid .lock-seat").length === 319);
     const left = page.locator(".lover-left"), right = page.locator(".lover-right");
@@ -71,8 +71,10 @@ async function main() {
     const l = await left.boundingBox(), r = await right.boundingBox();
     assert.ok(Math.abs(l.x + l.width - r.x) <= 1, JSON.stringify({ l, r }));
     console.log("PASS reverse-numbered 13/14 seats select together and are visually connected");
-    await page.check("#lock-risk-accepted");
     await page.click("#btn-lock-submit");
+    await page.waitForSelector("#lock-confirm-overlay:not(.hidden)");
+    await page.check("#lock-risk-accepted");
+    await page.click("#btn-lock-confirm-save");
     await page.waitForFunction(() => document.querySelector("#lock-rule-details").open && document.querySelector("#lock-rule-details").textContent.includes("14"));
     console.log("PASS saved rule details", await page.locator("#lock-rule-details").innerText());
     await page.screenshot({ path: path.join(output, "couple-rule-fixed.png"), fullPage: true });
@@ -89,10 +91,10 @@ async function main() {
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.fill("#lock-target-date", "2026-09-19");
-    await page.waitForFunction(() => document.querySelector("#lock-section-risk").classList.contains("hidden"));
+    await page.waitForFunction(() => document.querySelector("#lock-confirm-overlay").classList.contains("hidden"));
     await page.waitForResponse((response) => response.url().endsWith("/api/lock/rule") && response.request().method() === "GET", { timeout: 25000 });
     await page.waitForFunction(() => !document.querySelector("#lock-session-status .spinner"));
-    assert.equal(await page.locator("#lock-section-risk").isVisible(), false);
+    assert.equal(await page.locator("#lock-confirm-overlay").isVisible(), false);
     console.log("PASS real-seat risk remains hidden after the scheduled lock-state refresh");
     assert.deepEqual(errors, []);
   } finally {

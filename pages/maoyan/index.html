@@ -326,15 +326,6 @@
           <p id="lock-seat-count" class="lock-status">尚未选择座位</p>
         </section>
 
-        <section class="lock-section lock-risk" id="lock-section-risk">
-          <p id="lock-inference-warning"></p>
-          <div class="lock-time-tolerance">
-            <label for="lock-time-tolerance">匹配范围</label>
-            <span>±</span><input id="lock-time-tolerance" type="number" min="0" max="180" step="1" value="30" inputmode="numeric" /><span>分钟</span>
-          </div>
-          <label class="lock-risk-check"><input id="lock-risk-accepted" type="checkbox" /> 我已理解上述风险</label>
-        </section>
-
         <section class="lock-section" id="lock-section-rules">
           <details id="lock-rule-details" class="lock-details">
             <summary><span>已保存规则</span><span id="lock-rule-summary" class="lock-summary-value">暂无</span></summary>
@@ -351,6 +342,32 @@
     </section>
   </div>
 
+  <div class="dlg-overlay hidden" id="lock-confirm-overlay">
+    <section class="dlg-box lock-confirm" role="dialog" aria-modal="true" aria-labelledby="lock-confirm-title" aria-describedby="lock-inference-warning">
+      <div class="dlg-icon" aria-hidden="true">⚠️</div>
+      <h2 class="dlg-title" id="lock-confirm-title">确认保存自动锁座规则</h2>
+      <dl class="lock-confirm-details">
+        <dt>目标日期</dt><dd id="lock-confirm-target"></dd>
+        <dt>影院</dt><dd id="lock-confirm-cinema"></dd>
+        <dt>影片</dt><dd id="lock-confirm-movie"></dd>
+        <dt>模板场次</dt><dd id="lock-confirm-template"></dd>
+        <dt>匹配时段</dt><dd id="lock-confirm-window"></dd>
+        <dt>座位</dt><dd id="lock-confirm-seats"></dd>
+      </dl>
+      <div class="lock-confirm-danger" id="lock-inference-warning">目标场次尚未确定。仅当影片与具体影厅均与模板一致且场次可售时才会自动锁座；如有多个同等接近的场次，优先选择较早场次。实际影厅、座位布局和售卖状态可能变化。成功后仅创建待支付订单，需自行支付。</div>
+      <div class="lock-time-tolerance">
+        <label for="lock-time-tolerance">匹配范围</label>
+        <span>±</span><input id="lock-time-tolerance" type="number" min="0" max="180" step="1" value="30" inputmode="numeric" /><span>分钟</span>
+      </div>
+      <p class="lock-confirm-error" id="lock-confirm-error" role="alert"></p>
+      <label class="lock-risk-check"><input id="lock-risk-accepted" type="checkbox" /> 我已理解上述风险</label>
+      <div class="dlg-btns">
+        <button id="btn-lock-confirm-cancel" class="btn ghost" type="button">取消</button>
+        <button id="btn-lock-confirm-save" class="btn danger" type="button" disabled>确认保存</button>
+      </div>
+    </section>
+  </div>
+
       <script src="account.js?v=20260916b"></script>
       <script src="connection-profile.js?v=20260916a"></script>
       <script src="platform.js?v=20260916a"></script>
@@ -360,7 +377,7 @@
   <script src="workflow.js?v=20260916a"></script>
   <script src="polling.js?v=20260916a"></script>
   <script src="seat-layout.js?v=20260922a"></script>
-  <script src="lock.js?v=20260923-confirm-r1"></script>
+  <script src="lock.js?v=20260923-confirm-r2"></script>
   <script src="app.js?v=20260923-notify-r4"></script>
 </body>
 </html>

@@ -178,7 +178,7 @@ async function assertLockShell(page, name) {
 
 async function assertLockReachableAfterScroll(page, name) {
   const body = page.locator(".lock-dialog-body");
-  for (const target of [".lock-seat-scroll", "#lock-section-risk", "#lock-risk-accepted", "#btn-lock-submit", "#btn-lock-cancel"]) {
+  for (const target of [".lock-seat-scroll", "#lock-section-rules", "#btn-lock-submit", "#btn-lock-cancel"]) {
     await page.locator(target).scrollIntoViewIfNeeded();
     const layout = await page.evaluate((selector) => {
       const get = (value) => {
@@ -425,11 +425,48 @@ async function main() {
     const lockOverflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
     assert.ok(lockOverflow <= 1, `lock dialog overflow: ${lockOverflow}`);
     await page.screenshot({ path: path.join(outputDirectory, "lock-mobile.png"), fullPage: true });
-    // Exercise the inferred-seat risk/error state with a deterministic failed seat request.
+    // Exercise the inferred-seat confirmation before forcing a failed seat request.
     await page.locator("#lock-target-date").fill("2026-09-30");
-    await page.waitForFunction(() => document.querySelector("#lock-section-risk")?.offsetParent !== null);
-    await page.route("**/api/lock/template-seats?*", (route) => route.abort());
     await page.locator("#lock-template").selectOption("900");
+    await page.waitForFunction(() => document.querySelectorAll("#lock-seat-grid [data-availability]").length === 360);
+    assert.equal(await page.locator("#lock-section-risk").count(), 0);
+    await page.locator('#lock-seat-grid [data-availability="available"]').first().click();
+    await page.locator("#btn-lock-submit").click();
+    await page.waitForFunction(() => !document.querySelector("#lock-confirm-overlay")?.classList.contains("hidden"));
+    assert.equal(await page.locator("#lock-confirm-target").textContent(), "2026-09-30");
+    assert.match(await page.locator("#lock-confirm-window").textContent(), /±30 分钟/);
+    assert.match(await page.locator("#lock-inference-warning").textContent(), /目标场次尚未确定.*需自行支付/);
+    assert.equal(await page.locator("#btn-lock-confirm-save").isDisabled(), true);
+    await page.locator("#lock-risk-accepted").check();
+    await page.locator("#lock-time-tolerance").fill("181");
+    assert.equal(await page.locator("#btn-lock-confirm-save").isDisabled(), true);
+    await page.locator("#lock-time-tolerance").fill("45");
+    assert.match(await page.locator("#lock-confirm-window").textContent(), /±45 分钟/);
+    assert.equal(await page.locator("#btn-lock-confirm-save").isEnabled(), true);
+    const warningColor = await page.locator("#lock-inference-warning").evaluate((el) => getComputedStyle(el).color);
+    assert.match(warningColor, /rgb\((?:2[0-5]\d|1\d\d),\s*(?:\d\d?|1[0-5]\d),\s*(?:\d\d?|1[0-5]\d)\)/);
+    await page.setViewportSize({ width: 1200, height: 900 });
+    assert.equal(await page.locator("#btn-lock-confirm-save").isEnabled(), true);
+    await page.screenshot({ path: path.join(outputDirectory, "lock-confirm-desktop.png") });
+    await page.setViewportSize({ width: 320, height: 600 });
+    assert.equal(await page.locator("#btn-lock-confirm-save").isEnabled(), true);
+    await page.locator("#btn-lock-confirm-save").scrollIntoViewIfNeeded();
+    const confirmBounds = await page.locator(".lock-confirm").evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      const button = el.querySelector("#btn-lock-confirm-save").getBoundingClientRect();
+      return { left: box.left, right: box.right, top: box.top, bottom: box.bottom,
+        buttonTop: button.top, buttonBottom: button.bottom, width: innerWidth, height: innerHeight };
+    });
+    assert.ok(confirmBounds.left >= 0 && confirmBounds.right <= confirmBounds.width + 1,
+      `confirmation dialog overflows narrow viewport: ${JSON.stringify(confirmBounds)}`);
+    assert.ok(confirmBounds.top >= 0 && confirmBounds.bottom <= confirmBounds.height + 1
+      && confirmBounds.buttonTop >= 0 && confirmBounds.buttonBottom <= confirmBounds.height + 1,
+    `confirmation action is clipped: ${JSON.stringify(confirmBounds)}`);
+    await page.screenshot({ path: path.join(outputDirectory, "lock-confirm-mobile.png") });
+    await page.locator("#btn-lock-confirm-cancel").click();
+    assert.equal(await page.locator("#lock-confirm-overlay").isVisible(), false);
+    await page.route("**/api/lock/template-seats?*", (route) => route.abort());
+    await page.locator("#lock-template").selectOption("901");
     await page.waitForFunction(() => /座位表加载失败/.test(document.querySelector("#lock-seat-grid")?.textContent || ""));
     await page.unroute("**/api/lock/template-seats?*");
     for (const viewport of [{ width: 1024, height: 600 }, { width: 390, height: 844 }, { width: 320, height: 844 }]) {
@@ -440,7 +477,6 @@ async function main() {
         await page.waitForFunction(() => !document.querySelector("#lock-overlay")?.classList.contains("hidden"));
       }
       await page.locator("#lock-target-date").fill("2026-09-30");
-      await page.waitForFunction(() => document.querySelector("#lock-section-risk")?.offsetParent !== null);
       const label = `lock reachability ${viewport.width}x${viewport.height}`;
       await assertLockShell(page, label);
       await assertLockReachableAfterScroll(page, label);

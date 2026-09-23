@@ -177,7 +177,12 @@
     const els = {
       button: $("btn-lock-seats"), overlay: $("lock-overlay"), close: $("btn-lock-close"),
       cinema: $("lock-cinema"), movie: $("lock-movie"), template: $("lock-template"), date: $("lock-target-date"),
-      timeTolerance: $("lock-time-tolerance"), inferenceWarning: $("lock-inference-warning"),
+      confirmOverlay: $("lock-confirm-overlay"), confirmTarget: $("lock-confirm-target"),
+      confirmCinema: $("lock-confirm-cinema"), confirmMovie: $("lock-confirm-movie"),
+      confirmTemplate: $("lock-confirm-template"), confirmWindow: $("lock-confirm-window"),
+      confirmSeats: $("lock-confirm-seats"), confirmError: $("lock-confirm-error"),
+      confirmCancel: $("btn-lock-confirm-cancel"), confirmSave: $("btn-lock-confirm-save"),
+      timeTolerance: $("lock-time-tolerance"),
       file: $("lock-session-file"), login: $("btn-lock-login"), upload: $("btn-lock-upload"), removeSession: $("btn-lock-remove-session"),
       sessionStatus: $("lock-session-status"), seatGrid: $("lock-seat-grid"), seatCount: $("lock-seat-count"),
       risk: $("lock-risk-accepted"), ruleStatus: $("lock-rule-status"), cancelRule: $("btn-lock-cancel-rule"),
@@ -194,7 +199,6 @@
       ruleDetails: $("lock-rule-details"), ruleSummary: $("lock-rule-summary"),
       sectionSchedule: $("lock-section-schedule"),
       sectionSeats: $("lock-section-seats"),
-      sectionRisk: $("lock-section-risk"),
       sectionRules: $("lock-section-rules"),
       cancel: $("btn-lock-cancel"), submit: $("btn-lock-submit"),
       zoomIn: $("btn-lock-zoom-in"), zoomOut: $("btn-lock-zoom-out"), zoomReset: $("btn-lock-zoom-reset"), zoomLabel: $("lock-zoom-label")
@@ -332,19 +336,60 @@
       return `匹配范围异常（${String(value)}）`;
     }
 
-    // 推断控件与风险提示只在未来日期无真实场次时显示，更新范围不会影响已选座位。
+    let confirmResolve = null;
+
     function renderInferenceControls() {
-      const inferred = state.seatMapIsTemplate === true && state.showMode === "template" && (els.date?.value || "") > chinaDate(new Date());
-      setHidden(els.sectionRisk, !state.session?.uploaded || !inferred);
-      if (!inferred || !els.inferenceWarning) return;
       const templateTime = templateForCurrent()?.tm || "";
       const tolerance = selectedTimeTolerance();
       els.timeTolerance?.setAttribute("aria-invalid", String(tolerance === null));
-      let range;
-      if (tolerance === null) range = "匹配范围需为 0 至 180 的整数。";
-      else if (!validTemplateTime(templateTime)) range = "模板场次时间无效，请重新选择场次。";
-      else range = `将以模板场次 ${templateTime} 为基准，在目标日期前后 ${tolerance} 分钟内推断匹配（目标日期 ${matchingTimeWindow(templateTime, tolerance)}）。`;
-      els.inferenceWarning.textContent = `目标场次尚未确定。${range}仅当影片与具体影厅均与模板一致且场次可售时，才会自动锁座；如有多个同等接近的场次，将优先选择较早场次。实际影厅、座位布局和售卖状态仍可能变化，锁座成功后仅生成待支付订单，请在有效时间内自行支付。`;
+      const error = tolerance === null ? "匹配范围需为 0 至 180 的整数。"
+        : !validTemplateTime(templateTime) ? "模板场次时间无效，请重新选择场次。" : "";
+      els.confirmError.textContent = error;
+      els.confirmWindow.textContent = error ? "—" : `±${tolerance} 分钟（${els.date.value} ${matchingTimeWindow(templateTime, tolerance)}）`;
+      els.confirmSave.disabled = Boolean(error) || !els.risk.checked;
+    }
+
+    function settleInferenceConfirmation(value) {
+      if (!confirmResolve) return;
+      const resolve = confirmResolve;
+      confirmResolve = null;
+      els.confirmOverlay.classList.add("hidden");
+      els.overlay.inert = false;
+      document.removeEventListener("keydown", onConfirmKeydown);
+      els.submit.focus?.();
+      resolve(value);
+    }
+
+    function onConfirmKeydown(event) {
+      if (event.key === "Escape") {
+        event.stopPropagation?.();
+        settleInferenceConfirmation(null);
+      } else if (event.key === "Tab") {
+        const controls = [els.timeTolerance, els.risk, els.confirmCancel, els.confirmSave].filter((el) => !el.disabled);
+        if (event.shiftKey && document.activeElement === controls[0]) {
+          event.preventDefault();
+          controls.at(-1).focus();
+        } else if (!event.shiftKey && document.activeElement === controls.at(-1)) {
+          event.preventDefault();
+          controls[0].focus();
+        }
+      }
+    }
+
+    function confirmInferredRule({ targetDate, cinema, movie, template, seats }) {
+      if (confirmResolve) return Promise.resolve(null);
+      els.confirmTarget.textContent = targetDate;
+      els.confirmCinema.textContent = cinema;
+      els.confirmMovie.textContent = movie;
+      els.confirmTemplate.textContent = template;
+      els.confirmSeats.textContent = seats;
+      els.risk.checked = false;
+      renderInferenceControls();
+      els.confirmOverlay.classList.remove("hidden");
+      els.overlay.inert = true;
+      els.timeTolerance.focus?.();
+      document.addEventListener("keydown", onConfirmKeydown);
+      return new Promise((resolve) => { confirmResolve = resolve; });
     }
 
     function seatLabelMap() {
@@ -383,9 +428,6 @@
       if (state.seatMapIsTemplate && !validTemplateTime(templateForCurrent()?.tm)) return "模板场次时间无效，请重新选择场次";
       if (!state.selectedSeatNos.size) return "请先选择座位";
       if (!/^\d{4}-\d{2}-\d{2}$/.test(els.date?.value || "")) return "请选择目标日期";
-      if (state.seatMapIsTemplate && selectedTimeTolerance() === null) return "匹配范围需为 0 至 180 的整数";
-      // 风险确认仅针对推断座位(真实座位图无推断风险, 无需勾选)
-      if (state.seatMapIsTemplate && !els.risk?.checked) return "请先勾选风险提示";
       if (state.dateBounds && ((els.date.value || "") < state.dateBounds.min || (els.date.value || "") > state.dateBounds.max)) {
         return "目标日期超出 30 天范围";
       }
@@ -1232,24 +1274,17 @@
     }
 
     async function createRule() {
+      if (confirmResolve || (state.showMode === "template" && submitBlockReason())) return;
       const generation = capturedProfileGeneration();
       const action = lockAction(state.showMode);
       const inferred = state.showMode === "template";
-      const timeToleranceMinutes = inferred ? selectedTimeTolerance() : null;
-      if (inferred && timeToleranceMinutes === null) {
-        renderInferenceControls();
-        renderSelection();
-        return;
-      }
       if (inferred && !validTemplateTime(templateForCurrent()?.tm)) {
-        renderInferenceControls();
         renderSelection();
         return;
       }
       const payload = {
         cinemaId: state.context.cinemaId, movieId: state.movieId, templateSeqNo: state.templateSeqNo,
-        targetDate: els.date.value, seatNos: [...state.selectedSeatNos], riskAccepted: els.risk.checked,
-        ...(inferred ? { timeToleranceMinutes } : {})
+        targetDate: els.date.value, seatNos: [...state.selectedSeatNos], riskAccepted: inferred
       };
       if (inferred) {
         const template = templateForCurrent();
@@ -1257,28 +1292,24 @@
         const labels = seatLabelMap();
         const seats = payload.seatNos.map((seatNo) => labels.get(seatNo) || seatNo).join("、");
         const targetDate = payload.targetDate;
-        const details = [
-          `目标日期：${targetDate}`,
-          `影院：${state.context.cinemaName || `影院 ${state.context.cinemaId}`}`,
-          `影片：${template?.movieName || "影片"}`,
-          `模板场次：${[template?.showDate, template?.tm].filter(Boolean).join(" ")} · ${template?.th || "影厅未提供"}`,
-          `匹配范围：±${timeToleranceMinutes} 分钟（${targetDate} ${matchingTimeWindow(template?.tm, timeToleranceMinutes)}）`,
-          `座位：${seats}`
-        ];
-        const confirmed = await root.showConfirm(
-          `${details.join("\n")}\n\n目标场次尚未确定，实际影厅、座位布局和售卖状态可能变化。匹配成功后仅创建待支付订单，需自行支付。`,
-          { title: "确认保存自动锁座规则", okText: "确认保存", danger: true }
-        );
-        if (!confirmed || !isCurrentProfileGeneration(generation)) return;
+        const timeToleranceMinutes = await confirmInferredRule({
+          targetDate,
+          cinema: state.context.cinemaName || `影院 ${state.context.cinemaId}`,
+          movie: template?.movieName || "影片",
+          template: `${[template?.showDate, template?.tm].filter(Boolean).join(" ")} · ${template?.th || "影厅未提供"}`,
+          seats
+        });
+        if (timeToleranceMinutes === null || !isCurrentProfileGeneration(generation)) return;
         const currentTemplate = templateForCurrent();
         if (selectedTimeTolerance() !== timeToleranceMinutes || els.date.value !== targetDate || state.showMode !== "template"
           || state.movieId !== payload.movieId || state.templateSeqNo !== payload.templateSeqNo
           || state.context?.cinemaId !== payload.cinemaId || !state.session?.uploaded
           || [currentTemplate?.showDate, currentTemplate?.tm, currentTemplate?.th || "影厅未提供"].filter(Boolean).join(" · ") !== templateDetails
-          || [...state.selectedSeatNos].join("\0") !== payload.seatNos.join("\0") || !els.risk.checked) {
+          || [...state.selectedSeatNos].join("\0") !== payload.seatNos.join("\0") || submitBlockReason()) {
           renderSelection();
           return;
         }
+        payload.timeToleranceMinutes = timeToleranceMinutes;
       }
       if (state.showMode === "target") {
         const template = templateForCurrent();
@@ -1344,6 +1375,7 @@
     }
 
     function close() {
+      settleInferenceConfirmation(null);
       clearOfficialCompare();
       els.overlay.classList.add("hidden");
       document.removeEventListener("keydown", onKeydown);
@@ -1381,7 +1413,7 @@
       clearOfficialCompare({ resetToggle: true });
     }
 
-    function onKeydown(event) { if (event.key === "Escape") close(); }
+    function onKeydown(event) { if (event.key === "Escape" && !confirmResolve) close(); }
 
     function syncAvailability() {
       const context = getContext();
@@ -1439,8 +1471,16 @@
       state.templateSeqNo = els.template.value;
       await loadSeats();
     });
-    els.risk.addEventListener("change", renderSelection);
-    els.timeTolerance?.addEventListener("input", () => { renderInferenceControls(); renderSelection(); });
+    els.risk.addEventListener("change", renderInferenceControls);
+    els.timeTolerance?.addEventListener("input", renderInferenceControls);
+    els.confirmCancel.addEventListener("click", () => settleInferenceConfirmation(null));
+    els.confirmOverlay.addEventListener("click", (event) => {
+      if (event.target === els.confirmOverlay) settleInferenceConfirmation(null);
+    });
+    els.confirmSave.addEventListener("click", () => {
+      renderInferenceControls();
+      if (!els.confirmSave.disabled) settleInferenceConfirmation(selectedTimeTolerance());
+    });
     els.login?.addEventListener("click", loginMaoyan);
     els.upload.addEventListener("click", uploadSession);
     els.removeSession.addEventListener("click", removeSession);
