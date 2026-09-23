@@ -174,6 +174,50 @@ test("dashboard returns null success rate with no completed notifications and to
   assert.equal(payload.users[0].lockState, null);
 });
 
+test("dashboard distinguishes verified maintenance scans from incomplete and unrun jobs", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  env.NOW_MS = String(NOW);
+  const localDate = "2026-09-20";
+  const observedAt = Date.parse("2026-09-19T17:00:00Z");
+  await env.DB.prepare(
+    "INSERT INTO audit_events(event_type,request_id,data,created_at) VALUES (?,?,?,?)"
+  ).bind("maoyan_maintenance_observation_started", "maintenance-observation", JSON.stringify({ localDate }), observedAt).run();
+  await env.DB.prepare(
+    "INSERT INTO maoyan_maintenance_runs(job_id,local_date,completed_at,updated_at,lease_until) VALUES (?,?,?,?,0),(?,?,?,?,0)"
+  ).bind("reminder", localDate, NOW - 600_000, NOW - 600_000, "archive", localDate, null, NOW - 500_000).run();
+  await env.DB.prepare(
+    "INSERT INTO audit_events(event_type,request_id,data,created_at) VALUES (?,?,?,?),(?,?,?,?)"
+  ).bind(
+    "maoyan_maintenance_close_verified", `reminder:${localDate}`,
+    JSON.stringify({ jobId: "reminder", localDate, complete: true, runUpdatedAt: NOW - 600_000 }), NOW - 400_000,
+    "maoyan_maintenance_close_verified", `archive:${localDate}`,
+    JSON.stringify({ jobId: "archive", localDate, complete: false, runUpdatedAt: NOW - 500_000 }), NOW - 300_000
+  ).run();
+  const response = await worker.fetch(request("/api/admin/dashboard?businessLine=maoyan&window=24h"), env);
+  const payload = await response.json();
+  assert.equal(payload.health.maintenance.localDate, localDate);
+  assert.equal(payload.health.maintenance.observedAt, observedAt);
+  assert.deepEqual(payload.health.maintenance.jobs.map(({ jobId, status }) => [jobId, status]), [
+    ["reminder", "completed"], ["archive", "incomplete"], ["revocation", "unrun"]
+  ]);
+  assert.equal(payload.health.maintenance.jobs[0].completedAt, NOW - 600_000);
+  await env.DB.prepare(
+    "UPDATE maoyan_maintenance_runs SET updated_at=? WHERE job_id='reminder' AND local_date=?"
+  ).bind(NOW - 100_000, localDate).run();
+  const reopened = await (await worker.fetch(request("/api/admin/dashboard?businessLine=maoyan&window=24h"), env)).json();
+  assert.equal(reopened.health.maintenance.jobs[0].status, "incomplete");
+});
+
+test("dashboard does not mark the first day unrun when observation starts after the maintenance window", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  env.NOW_MS = String(NOW);
+  await env.DB.prepare(
+    "INSERT INTO audit_events(event_type,request_id,data,created_at) VALUES (?,?,?,?)"
+  ).bind("maoyan_maintenance_observation_started", "maintenance-observation", "{\"localDate\":\"2026-09-20\"}", NOW - 1000).run();
+  const payload = await (await worker.fetch(request("/api/admin/dashboard?businessLine=maoyan&window=24h"), env)).json();
+  assert.deepEqual(payload.health.maintenance.jobs.map((job) => job.status), ["unobserved", "unobserved", "unobserved"]);
+});
+
 test("dashboard rejects non-admin access and unsupported query values", async () => {
   const env = await createAccountEnv({ nowMs: NOW });
   env.NOW_MS = String(NOW);

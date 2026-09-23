@@ -97,3 +97,16 @@ npx wrangler d1 execute my-maoyan-db --remote --command "SELECT state,COUNT(*) A
 再构建和部署 Worker。首次部署后确认后台策略默认为监控 07:00-23:00、维护 01:00-02:00，检查通知成功率、积压和最近维护日期。此处只提供操作步骤，不会自动变更远程 D1 或发布 Worker。
 
 Wrangler 配置中的 `[[migrations]]` 与上述 D1 策略无关。它们只用于注册 Durable Object 类，部署新环境和后续发布时都应保留。
+
+## 2026-09-23 账号维护扫描修订
+
+改动范围仅为猫眼到期提醒生成、三十天归档、撤销清理的扫描与后台每日状态。沿用上面的 `maoyan_maintenance_runs` 加法迁移；旧库已经执行过该迁移时无需再次执行，也无需删除、重建或回填账号数据。保留的 `cursor` 列不再参与扫描进度：维护窗口内每个 cron 重新寻找未处理候选，每项每次最多处理 50 条，次日继续寻找剩余候选。窗口结束后只核验，不再生成提醒。
+
+已有库部署本修订前执行一次审计索引迁移（可安全重放），再部署 Worker。新建库的当前 `schema.sql` 已包含该索引，无需执行此脚本：
+
+```bash
+npx wrangler d1 execute my-maoyan-db --remote --file sql/maoyan-maintenance-audit-index.sql --config wrangler.local.toml
+npx wrangler d1 execute my-maoyan-db --remote --command "PRAGMA index_list(audit_events)" --config wrangler.local.toml
+```
+
+首次 cron 写入一条观测起点审计事件。后台分别显示三项扫描的“未开始观测”“未执行”“未完成”“已完成”及最近完成时刻；“已完成”仅表示当天扫描和提醒入队经关窗核验，不表示推送渠道送达。推送结果仍查看通知状态。上线前验证现有表列和出箱数量，部署后在维护窗口及关窗后的 cron 分别检查三项状态；生产 D1 迁移和 Worker 发布均需要单独执行。

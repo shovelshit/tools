@@ -148,6 +148,7 @@ CREATE TABLE IF NOT EXISTS audit_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_events_subject ON audit_events(subject_user_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_events_type_request ON audit_events(event_type, request_id, id DESC);
 
 CREATE TABLE IF NOT EXISTS revocation_cleanup (
   user_id TEXT PRIMARY KEY REFERENCES users(id),

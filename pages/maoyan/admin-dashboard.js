@@ -53,7 +53,15 @@
         kinds.append(line);
       }
       if (!(n.recent || []).length) { const p = document.createElement("p"); p.className = "muted empty-tip"; p.textContent = "暂无通知记录"; list.append(p); } else for (const item of n.recent) { const p = document.createElement("p"); p.textContent = `${kindNames[item.kind] || item.kind || "通知"} · ${item.state || "-"} · ${fmt(item.createdAt)}` + (item.discoveryToFirstAttemptMs == null ? "" : ` · 首次尝试 ${Math.round(item.discoveryToFirstAttemptMs / 1000)} 秒`) + (item.lastError ? ` · ${item.lastError}` : ""); list.append(p); }
-      set("dashboard-latest-batch", fmt(data.health?.latestBatchAt)); set("dashboard-oldest-pending", fmt(data.health?.oldestPendingNotificationAt)); set("dashboard-last-maintenance", data.health?.lastMaintenanceDate || "暂无数据");
+      set("dashboard-latest-batch", fmt(data.health?.latestBatchAt)); set("dashboard-oldest-pending", fmt(data.health?.oldestPendingNotificationAt));
+      const maintenance = data.health?.maintenance;
+      set("dashboard-maintenance-date", maintenance?.localDate || "暂无数据");
+      const maintenanceStatus = { unobserved: "未开始观测", unrun: "未执行", incomplete: "未完成", completed: "已完成" };
+      for (const jobId of ["reminder", "archive", "revocation"]) {
+        const job = maintenance?.jobs?.find((item) => item.jobId === jobId);
+        const status = maintenanceStatus[job?.status] || "暂无数据";
+        set(`dashboard-maintenance-${jobId}`, job?.completedAt ? `${status} · ${fmt(job.completedAt)}` : status);
+      }
       const feedback = data.seatFeedback || {};
       set("dashboard-seat-feedback-summary", `全部反馈：${feedback.count || 0} 条`);
       renderFeedback(feedback.items || feedback.recent || []);

@@ -1,3 +1,6 @@
+import { businessTime } from "./business-time.js";
+import { readBusinessPolicy } from "./business-policy-store.js";
+
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 const RECENT_LIMIT = 20;
 const ACTIVE_USER_WHERE = "u.role='user' AND u.business_line=? AND u.state='active' AND u.archived_at IS NULL AND u.expires_at>?";
@@ -278,7 +281,51 @@ async function readNotifications(DB, businessLine, windowStart) {
   };
 }
 
-async function readHealth(DB, businessLine) {
+async function readMaintenanceHealth(DB, nowMs) {
+  const policy = await readBusinessPolicy(DB);
+  const localDate = businessTime(nowMs, policy).localDate;
+  const [baseline, runs, verifications] = await Promise.all([
+    first(DB,
+      "SELECT data,created_at FROM audit_events WHERE event_type='maoyan_maintenance_observation_started' " +
+      "ORDER BY id LIMIT 1"
+    ),
+    all(DB,
+      "SELECT job_id,completed_at,updated_at FROM maoyan_maintenance_runs WHERE local_date=?",
+      localDate
+    ),
+    all(DB,
+      "SELECT request_id,data FROM audit_events WHERE event_type='maoyan_maintenance_close_verified' " +
+      "AND request_id IN (?,?,?) ORDER BY id DESC",
+      `reminder:${localDate}`, `archive:${localDate}`, `revocation:${localDate}`
+    )
+  ]);
+  const runByJob = new Map(runs.map((row) => [row.job_id, row]));
+  const verificationByJob = new Map();
+  for (const row of verifications) {
+    const jobId = row.request_id.split(":")[0];
+    if (!verificationByJob.has(jobId)) verificationByJob.set(jobId, safeJson(row.data));
+  }
+  const observedAt = numberOrNull(baseline?.created_at);
+  const endAt = Date.parse(`${localDate}T00:00:00Z`) - 8 * 60 * 60_000 + policy.maintenanceEndMinute * 60_000;
+  const unobserved = observedAt == null || observedAt > endAt;
+  return {
+    localDate,
+    observedAt,
+    jobs: ["reminder", "archive", "revocation"].map((jobId) => {
+      const run = runByJob.get(jobId);
+      const verification = verificationByJob.get(jobId);
+      const completedAt = numberOrNull(run?.completed_at);
+      const verified = verification?.complete === true && Number(verification.runUpdatedAt) === Number(run?.updated_at);
+      return {
+        jobId,
+        status: !run ? (unobserved ? "unobserved" : "unrun") : verified && completedAt != null ? "completed" : "incomplete",
+        completedAt
+      };
+    })
+  };
+}
+
+async function readHealth(DB, businessLine, nowMs) {
   const latestBatch = await first(DB, "SELECT MAX(captured_at) AS at FROM cinema_batches");
   const oldestPending = await first(DB,
     "SELECT MIN(CASE WHEN o.state='sending' THEN o.lease_until ELSE o.next_attempt_at END) AS at " +
@@ -286,14 +333,15 @@ async function readHealth(DB, businessLine) {
     "WHERE u.business_line=? AND o.state IN ('pending','sending')",
     businessLine
   );
-  const maintenance = await first(DB,
+  const [maintenance, maintenanceHealth] = await Promise.all([first(DB,
     "SELECT MAX(local_date) AS local_date FROM maoyan_maintenance_runs " +
     "WHERE job_id='reminder' AND completed_at IS NOT NULL"
-  );
+  ), readMaintenanceHealth(DB, nowMs)]);
   return {
     latestBatchAt: numberOrNull(latestBatch?.at),
     oldestPendingNotificationAt: numberOrNull(oldestPending?.at),
-    lastMaintenanceDate: maintenance?.local_date || null
+    lastMaintenanceDate: maintenance?.local_date || null,
+    maintenance: maintenanceHealth
   };
 }
 
@@ -322,7 +370,7 @@ export async function readAdminDashboard(DB, { businessLine = "maoyan", window =
     readUsers(DB, businessLine, generatedAt),
     readCinemas(DB, businessLine, generatedAt, windowStart),
     readNotifications(DB, businessLine, windowStart),
-    readHealth(DB, businessLine),
+    readHealth(DB, businessLine, generatedAt),
     readSeatFeedback(DB)
   ]);
   return { generatedAt, window, summary, users, cinemas, notifications, health, seatFeedback };

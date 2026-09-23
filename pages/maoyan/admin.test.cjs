@@ -17,6 +17,9 @@ test("admin page exposes an operations dashboard without polling", () => {
   assert.match(html, /id="dashboard-cinemas"/);
   assert.match(html, /id="dashboard-notifications"/);
   assert.match(html, /id="dashboard-health"/);
+  for (const job of ["reminder", "archive", "revocation"]) {
+    assert.match(html, new RegExp(`id="dashboard-maintenance-${job}"`));
+  }
   assert.match(html, /id="dashboard-seat-feedback"/);
   assert.match(html, /id="dashboard-seat-feedback-body"/);
   assert.match(html, /id="btn-dashboard"/);
@@ -30,6 +33,7 @@ test("dashboard module uses the authenticated request callback and safe text ren
   assert.match(dashboardSource, /textContent/);
   assert.doesNotMatch(dashboardSource, /X-Admin-Token/);
   assert.doesNotMatch(dashboardSource, /innerHTML\s*=/);
+  assert.match(dashboardSource, /maintenanceStatus/);
 });
 
 test("seat feedback status control names the action instead of only showing state", () => {

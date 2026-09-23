@@ -4,35 +4,42 @@ export async function claimMaintenanceDay(DB, { job, localDate, nowMs }) {
   await DB.prepare(
     "INSERT OR IGNORE INTO maoyan_maintenance_runs(job_id,local_date,lease_until,updated_at) VALUES (?,?,0,?)"
   ).bind(job, localDate, nowMs).run();
+  const leaseUntil = nowMs + LEASE_MS;
   const result = await DB.prepare(
-    "UPDATE maoyan_maintenance_runs SET lease_until=?,updated_at=? " +
-    "WHERE job_id=? AND local_date=? AND completed_at IS NULL AND lease_until<=?"
-  ).bind(nowMs + LEASE_MS, nowMs, job, localDate, nowMs).run();
-  if (Number(result?.meta?.changes || 0) !== 1) return null;
-  const row = await DB.prepare("SELECT cursor FROM maoyan_maintenance_runs WHERE job_id=? AND local_date=?")
-    .bind(job, localDate).first();
-  return { cursor: row?.cursor || null, leaseUntil: nowMs + LEASE_MS };
+    "UPDATE maoyan_maintenance_runs SET lease_until=? " +
+    "WHERE job_id=? AND local_date=? AND lease_until<=?"
+  ).bind(leaseUntil, job, localDate, nowMs).run();
+  return Number(result?.meta?.changes || 0) === 1 ? { leaseUntil } : null;
 }
 
-export async function saveMaintenanceCursor(DB, { job, localDate, cursor, nowMs, leaseUntil }) {
+export async function finishMaintenanceDay(DB, { job, localDate, nowMs, leaseUntil, complete }) {
+  const current = await DB.prepare(
+    "SELECT updated_at FROM maoyan_maintenance_runs WHERE job_id=? AND local_date=? AND lease_until=?"
+  ).bind(job, localDate, leaseUntil).first();
+  if (!current) throw new Error("维护任务租约已失效");
+  const updatedAt = Math.max(nowMs, Number(current.updated_at) + 1);
   const result = await DB.prepare(
-    "UPDATE maoyan_maintenance_runs SET cursor=?,updated_at=? " +
-    "WHERE job_id=? AND local_date=? AND completed_at IS NULL AND lease_until=? AND lease_until>?"
-  ).bind(cursor, nowMs, job, localDate, leaseUntil, nowMs).run();
+    "UPDATE maoyan_maintenance_runs SET completed_at=CASE WHEN ? THEN ? ELSE completed_at END," +
+    "lease_until=0,updated_at=? " +
+    "WHERE job_id=? AND local_date=? AND lease_until=? AND lease_until>?"
+  ).bind(complete ? 1 : 0, nowMs, updatedAt, job, localDate, leaseUntil, nowMs).run();
   if (Number(result?.meta?.changes || 0) !== 1) throw new Error("维护任务租约已失效");
+  return updatedAt;
 }
 
-export async function completeMaintenanceDay(DB, { job, localDate, nowMs, leaseUntil }) {
-  const result = await DB.prepare(
-    "UPDATE maoyan_maintenance_runs SET completed_at=?,lease_until=0,updated_at=? " +
-    "WHERE job_id=? AND local_date=? AND completed_at IS NULL AND lease_until=? AND lease_until>?"
-  ).bind(nowMs, nowMs, job, localDate, leaseUntil, nowMs).run();
-  if (Number(result?.meta?.changes || 0) !== 1) throw new Error("维护任务租约已失效");
+export async function completeMaintenanceDay(DB, input) {
+  return finishMaintenanceDay(DB, { ...input, complete: true });
 }
 
 export async function releaseMaintenanceDay(DB, { job, localDate, nowMs, leaseUntil }) {
-  await DB.prepare(
+  const current = await DB.prepare(
+    "SELECT updated_at FROM maoyan_maintenance_runs WHERE job_id=? AND local_date=? AND lease_until=?"
+  ).bind(job, localDate, leaseUntil).first();
+  if (!current) return null;
+  const updatedAt = Math.max(nowMs, Number(current.updated_at) + 1);
+  const result = await DB.prepare(
     "UPDATE maoyan_maintenance_runs SET lease_until=0,updated_at=? " +
-    "WHERE job_id=? AND local_date=? AND completed_at IS NULL AND lease_until=?"
-  ).bind(nowMs, job, localDate, leaseUntil).run();
+    "WHERE job_id=? AND local_date=? AND lease_until=?"
+  ).bind(updatedAt, job, localDate, leaseUntil).run();
+  return Number(result?.meta?.changes || 0) === 1 ? updatedAt : null;
 }

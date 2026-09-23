@@ -370,8 +370,8 @@ export default {
     const nowMs = serviceNow(env);
     await recoverPendingNotifications(env, { nowMs, limit: 10 });
     const policy = await readBusinessPolicy(env.DB);
-    const { monitorOpen, maintenanceOpen } = businessTime(nowMs, policy);
-    if (maintenanceOpen) await runScheduledMaintenance(env, nowMs, policy);
+    const { monitorOpen } = businessTime(nowMs, policy);
+    await runScheduledMaintenance(env, nowMs, policy);
     if (!monitorOpen) return;
     if (!env.MONITOR_DISPATCHER || !env.MONITOR_COORDINATOR) {
       await runScheduledChecks(env, (tokenId, cinemaData) =>

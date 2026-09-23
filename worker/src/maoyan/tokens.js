@@ -9,7 +9,7 @@ import { listSeatFeedback, deleteSeatFeedback, updateSeatFeedback } from "./seat
 import { cleanupExpiredAccount } from "./account-lifecycle.js";
 import { accountErrorResponse, handleAdminAccountApi } from "./account-api.js";
 import { enqueueNotification, wakeNotificationDispatcher } from "./notification-outbox.js";
-import { claimMaintenanceDay, completeMaintenanceDay, releaseMaintenanceDay, saveMaintenanceCursor } from "./maintenance-store.js";
+import { claimMaintenanceDay, finishMaintenanceDay, releaseMaintenanceDay } from "./maintenance-store.js";
 import { retryRevocationCleanup } from "./user.js";
 
 const PAGE_SIZE = 50;
@@ -74,43 +74,136 @@ async function processReminder(env, row, nowMs) {
   return result.created;
 }
 
+function candidateQuery(job) {
+  if (job === "revocation") {
+    return "SELECT user_id AS id FROM revocation_cleanup ORDER BY user_id LIMIT ?";
+  }
+  const active = "u.role='user' AND u.business_line='maoyan' AND u.state='active' AND u.archived_at IS NULL";
+  if (job === "archive") {
+    return "SELECT u.id,u.expires_at,u.version FROM users u WHERE " + active +
+      " AND u.expires_at+?<=? ORDER BY u.id LIMIT ?";
+  }
+  const stage = "CASE WHEN u.expires_at<=? THEN 'expired' " +
+    "WHEN u.expires_at>=? AND u.expires_at<? THEN 'one-day' " +
+    "WHEN u.expires_at>=? AND u.expires_at<? THEN 'three-day' END";
+  return "SELECT u.id,u.expires_at,c.version AS config_version FROM users u " +
+    "LEFT JOIN user_config c ON c.token_id=u.id WHERE " + active +
+    " AND ((u.expires_at<=? AND u.expires_at+?>?) " +
+    "OR (u.expires_at>=? AND u.expires_at<?) OR (u.expires_at>=? AND u.expires_at<?)) " +
+    "AND NOT EXISTS (SELECT 1 FROM notification_outbox o WHERE o.event_key=" +
+    "'account-expiry:' || u.id || ':' || u.expires_at || ':' || " + stage +
+    ") ORDER BY u.id LIMIT ?";
+}
+
+async function maintenanceCandidates(DB, job, nowMs, limit = PAGE_SIZE) {
+  const query = DB.prepare(candidateQuery(job));
+  if (job === "revocation") return (await query.bind(limit).all()).results;
+  if (job === "archive") return (await query.bind(30 * DAY_MS, nowMs, limit).all()).results;
+  const today = Math.floor((nowMs + 8 * 3600_000) / DAY_MS) * DAY_MS - 8 * 3600_000;
+  const tomorrow = today + DAY_MS;
+  const dayAfterTomorrow = tomorrow + DAY_MS;
+  const inThreeDays = today + 3 * DAY_MS;
+  const params = [nowMs, 30 * DAY_MS, nowMs, tomorrow, dayAfterTomorrow, inThreeDays, inThreeDays + DAY_MS];
+  return (await query.bind(...params, nowMs, tomorrow, dayAfterTomorrow, inThreeDays, inThreeDays + DAY_MS, limit).all()).results;
+}
+
 async function runMaintenancePage(env, job, localDate, nowMs) {
   const claim = await claimMaintenanceDay(env.DB, { job, localDate, nowMs });
   if (!claim) return 0;
   let queued = 0;
   try {
-    const cursor = claim.cursor || "";
-    const { results } = job === "revocation"
-      ? await env.DB.prepare(
-        "SELECT user_id AS id FROM revocation_cleanup WHERE user_id>? ORDER BY user_id LIMIT ?"
-      ).bind(cursor, PAGE_SIZE).all()
-      : await env.DB.prepare(
-        "SELECT u.id,u.expires_at,u.version,c.version AS config_version FROM users u " +
-        "LEFT JOIN user_config c ON c.token_id=u.id " +
-        "WHERE u.role='user' AND u.business_line='maoyan' AND u.state='active' " +
-        "AND u.archived_at IS NULL AND u.id>? ORDER BY u.id LIMIT ?"
-      ).bind(cursor, PAGE_SIZE).all();
+    const results = await maintenanceCandidates(env.DB, job, nowMs);
+    let failed = false;
     for (const row of results) {
-      if (job === "reminder") {
-        if (await processReminder(env, row, nowMs)) queued += 1;
-      } else if (job === "archive" && Number(row.expires_at) + 30 * DAY_MS <= nowMs) {
-        await cleanupExpiredAccount(env, {
-          userId: row.id, expectedExpiresAt: Number(row.expires_at),
-          expectedVersion: Number(row.version), nowMs
-        });
-      } else if (job === "revocation") {
-        const result = await retryRevocationCleanup(env, row.id, { nowMs });
-        if (!result.complete) throw new Error("撤销会话清理未完成");
+      try {
+        if (job === "reminder") {
+          if (await processReminder(env, row, nowMs)) queued += 1;
+        } else if (job === "archive") {
+          await cleanupExpiredAccount(env, {
+            userId: row.id, expectedExpiresAt: Number(row.expires_at),
+            expectedVersion: Number(row.version), nowMs
+          });
+        } else if (job === "revocation") {
+          const result = await retryRevocationCleanup(env, row.id, { nowMs });
+          if (!result.complete) throw new Error("撤销会话清理未完成");
+        }
+      } catch {
+        failed = true;
+        monitorError(`account_${job}`, { state: "failed", reason: "candidate_failed" });
       }
     }
-    if (results.length < PAGE_SIZE) await completeMaintenanceDay(env.DB, { job, localDate, nowMs, leaseUntil: claim.leaseUntil });
-    else await saveMaintenanceCursor(env.DB, { job, localDate, cursor: results.at(-1).id, nowMs, leaseUntil: claim.leaseUntil });
+    const remaining = await maintenanceCandidates(env.DB, job, nowMs, results.length === PAGE_SIZE ? PAGE_SIZE : 1);
+    const pending = remaining.length > 0;
+    if (results.length === PAGE_SIZE && remaining.length === PAGE_SIZE &&
+      results.every((row, index) => row.id === remaining[index].id)) {
+      monitorError(`account_${job}`, { state: "failed", reason: "backlog_no_progress" });
+    }
+    const complete = !failed && !pending;
+    const runUpdatedAt = await finishMaintenanceDay(env.DB, {
+      job, localDate, nowMs, leaseUntil: claim.leaseUntil,
+      complete
+    });
+    if (!complete) await recordIncompleteScan(env.DB, job, localDate, runUpdatedAt, nowMs);
   } catch (error) {
-    await releaseMaintenanceDay(env.DB, { job, localDate, nowMs, leaseUntil: claim.leaseUntil });
+    const runUpdatedAt = await releaseMaintenanceDay(env.DB, { job, localDate, nowMs, leaseUntil: claim.leaseUntil });
+    if (runUpdatedAt !== null) await recordIncompleteScan(env.DB, job, localDate, runUpdatedAt, nowMs);
     monitorError(`account_${job}`, { state: "failed", reason: "internal_error" });
     throw error;
   }
   return queued;
+}
+
+async function recordIncompleteScan(DB, job, localDate, runUpdatedAt, nowMs) {
+  await DB.prepare(
+    "INSERT INTO audit_events(event_type,request_id,data,created_at) " +
+    "VALUES ('maoyan_maintenance_scan_incomplete',?,?,?)"
+  ).bind(`${job}:${localDate}`, JSON.stringify({ jobId: job, localDate, runUpdatedAt }), nowMs).run();
+}
+
+async function observeMaintenance(DB, localDate, nowMs) {
+  await DB.prepare(
+    "INSERT INTO audit_events(event_type,request_id,data,created_at) " +
+    "SELECT 'maoyan_maintenance_observation_started','maintenance-observation',?,? " +
+    "WHERE NOT EXISTS (SELECT 1 FROM audit_events WHERE event_type='maoyan_maintenance_observation_started')"
+  ).bind(JSON.stringify({ localDate }), nowMs).run();
+}
+
+async function verifyClosedMaintenance(env, localDate, nowMs) {
+  for (const job of ["reminder", "archive", "revocation"]) {
+    const row = await env.DB.prepare(
+      "SELECT updated_at,completed_at FROM maoyan_maintenance_runs WHERE job_id=? AND local_date=?"
+    ).bind(job, localDate).first();
+    if (!row) continue;
+    const requestId = `${job}:${localDate}`;
+    const prior = await env.DB.prepare(
+      "SELECT data FROM audit_events WHERE event_type='maoyan_maintenance_close_verified' AND request_id=? ORDER BY id DESC LIMIT 1"
+    ).bind(requestId).first();
+    if (prior && JSON.parse(prior.data).runUpdatedAt === Number(row.updated_at)) continue;
+    const claim = await claimMaintenanceDay(env.DB, { job, localDate, nowMs });
+    if (!claim) continue;
+    try {
+      const claimed = await env.DB.prepare(
+        "SELECT completed_at,updated_at FROM maoyan_maintenance_runs WHERE job_id=? AND local_date=?"
+      ).bind(job, localDate).first();
+      const lastIncomplete = await env.DB.prepare(
+        "SELECT data FROM audit_events WHERE event_type='maoyan_maintenance_scan_incomplete' " +
+        "AND request_id=? ORDER BY id DESC LIMIT 1"
+      ).bind(requestId).first();
+      const incomplete = lastIncomplete && JSON.parse(lastIncomplete.data).runUpdatedAt === Number(claimed.updated_at);
+      const complete = (await maintenanceCandidates(env.DB, job, nowMs, 1)).length === 0 &&
+        claimed.completed_at !== null && !incomplete;
+      const runUpdatedAt = await finishMaintenanceDay(env.DB, {
+        job, localDate, nowMs, leaseUntil: claim.leaseUntil, complete
+      });
+      await env.DB.prepare(
+        "INSERT INTO audit_events(event_type,request_id,data,created_at) " +
+        "VALUES ('maoyan_maintenance_close_verified',?,?,?)"
+      ).bind(requestId, JSON.stringify({ jobId: job, localDate, complete, runUpdatedAt }), nowMs).run();
+    } catch (error) {
+      await releaseMaintenanceDay(env.DB, { job, localDate, nowMs, leaseUntil: claim.leaseUntil });
+      throw error;
+    }
+  }
 }
 
 async function reportMissedReminderDay(DB, localDate, nowMs) {
@@ -120,7 +213,10 @@ async function reportMissedReminderDay(DB, localDate, nowMs) {
     "INSERT INTO audit_events(event_type,request_id,data,created_at) " +
     "SELECT 'maoyan_maintenance_reminder_missed',?,?,? " +
     "WHERE EXISTS (SELECT 1 FROM maoyan_maintenance_runs WHERE job_id='reminder' AND local_date<=?) " +
-    "AND NOT EXISTS (SELECT 1 FROM maoyan_maintenance_runs WHERE job_id='reminder' AND local_date=? AND completed_at IS NOT NULL) " +
+    "AND NOT EXISTS (SELECT 1 FROM maoyan_maintenance_runs r JOIN audit_events a " +
+    "ON a.event_type='maoyan_maintenance_close_verified' AND a.request_id='reminder:' || r.local_date " +
+    "WHERE r.job_id='reminder' AND r.local_date=? AND json_extract(a.data,'$.complete')=1 " +
+    "AND json_extract(a.data,'$.runUpdatedAt')=r.updated_at) " +
     "AND NOT EXISTS (SELECT 1 FROM audit_events WHERE event_type='maoyan_maintenance_reminder_missed' AND request_id=?)"
   ).bind(requestId, JSON.stringify({ localDate: previousDate }), nowMs, previousDate, previousDate, requestId).run();
   if (Number(result?.meta?.changes || 0) === 1) {
@@ -131,14 +227,18 @@ async function reportMissedReminderDay(DB, localDate, nowMs) {
 export async function runScheduledMaintenance(env, nowMs = Date.now(), policy) {
   const currentPolicy = policy || await readBusinessPolicy(env.DB);
   const time = businessTime(nowMs, currentPolicy);
-  if (!time.maintenanceOpen) return { queued: 0 };
+  await observeMaintenance(env.DB, time.localDate, nowMs);
+  if (!time.maintenanceOpen) {
+    const localMinute = Math.floor(((nowMs + 8 * 3600_000) % DAY_MS) / 60_000);
+    if (localMinute >= currentPolicy.maintenanceEndMinute) {
+      await verifyClosedMaintenance(env, time.localDate, nowMs);
+    }
+    return { queued: 0 };
+  }
   await reportMissedReminderDay(env.DB, time.localDate, nowMs);
   const queued = await runMaintenancePage(env, "reminder", time.localDate, nowMs);
   for (const job of ["archive", "revocation"]) {
-    const old = await env.DB.prepare(
-      "SELECT local_date FROM maoyan_maintenance_runs WHERE job_id=? AND local_date<? AND completed_at IS NULL ORDER BY local_date LIMIT 1"
-    ).bind(job, time.localDate).first();
-    await runMaintenancePage(env, job, old?.local_date || time.localDate, nowMs);
+    await runMaintenancePage(env, job, time.localDate, nowMs);
   }
   if (queued) await wakeNotificationDispatcher(env, { kind: "account-expiry" });
   return { queued };
