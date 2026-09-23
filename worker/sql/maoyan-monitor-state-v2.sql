@@ -1,5 +1,8 @@
 -- Maoyan monitor state v2. Apply after pausing the monitor dispatcher.
--- Existing user, config, lock and notification rows are intentionally untouched.
+-- Preflight required before this file: PRAGMA table_info(monitor_subscriptions);
+-- The Node entry point conditionally adds last_run_id for pre-v2 databases,
+-- then executes this idempotent SQL. Existing user, config, lock and
+-- notification rows are intentionally untouched.
 CREATE TABLE IF NOT EXISTS cinema_state (
   cinema_id TEXT PRIMARY KEY,
   current_version INTEGER NOT NULL DEFAULT 0 CHECK (current_version >= 0),
@@ -22,8 +25,6 @@ CREATE TABLE IF NOT EXISTS cinema_state (
 
 CREATE INDEX IF NOT EXISTS idx_cinema_state_active
   ON cinema_state(run_state, lease_until, cinema_id);
-
-ALTER TABLE monitor_subscriptions ADD COLUMN last_run_id TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_monitor_subscriptions_run
   ON monitor_subscriptions(cinema_id, last_run_id, next_due_at, user_id);
