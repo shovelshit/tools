@@ -203,6 +203,37 @@ test("unchanged run still checks a waiting lock and advances its due time", asyn
   const after = await env.DB.prepare("SELECT next_due_at FROM monitor_subscriptions WHERE user_id=?").bind(account.id).first();
   assert.equal(calls.length, 2);
   assert.ok(Number(after.next_due_at) > Number(before.next_due_at));
+  assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM change_log").first()).n, 0);
+  const state = await env.DB.prepare("SELECT current_version,active_data FROM cinema_state WHERE cinema_id=?").bind("1").first();
+  assert.equal(Number(state.current_version), 1);
+  assert.equal(state.active_data, null);
+});
+
+test("post-cutover runtime does not require legacy cinema history tables", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  const { account } = await seedAccount(env, {
+    expiresAt: NOW + 600_000,
+    config: { enabled: true, cinemaId: "cutover-no-history", selectedMovieIds: ["7"] }
+  });
+  await syncSubscription(env.DB, account.id, { enabled: true, cinemaId: "cutover-no-history" }, 1, NOW);
+  for (const table of ["cinema_events", "cinema_snapshots", "cinema_batches"]) {
+    const present = env.DB.sqlite.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?"
+    ).get(table);
+    if (present) env.DB.sqlite.exec(`DROP TABLE ${table}`);
+  }
+
+  const result = await processCinemaRun(env, {
+    cinemaId: "cutover-no-history", runId: "v2-only", nowMs: NOW,
+    fetchCinema: async () => cinemaFixture({ cinemaId: "cutover-no-history", seqNos: ["s1"] })
+  });
+  assert.equal(result.completed, true);
+  const state = await env.DB.prepare(
+    "SELECT current_version,current_data,active_data FROM cinema_state WHERE cinema_id=?"
+  ).bind("cutover-no-history").first();
+  assert.equal(Number(state.current_version), 1);
+  assert.ok(state.current_data);
+  assert.equal(state.active_data, null);
 });
 
 test("failed lock resumes the same run without duplicating its notification", async () => {

@@ -313,42 +313,6 @@ CREATE TABLE IF NOT EXISTS cinema_state (
 CREATE INDEX IF NOT EXISTS idx_cinema_state_active
   ON cinema_state(run_state, lease_until, cinema_id);
 
-CREATE TABLE IF NOT EXISTS cinema_snapshots (
-  cinema_id TEXT NOT NULL,
-  movie_id TEXT NOT NULL,
-  movie_name TEXT NOT NULL DEFAULT '',
-  seq_nos TEXT NOT NULL,
-  version INTEGER NOT NULL CHECK (version > 0),
-  updated_at INTEGER NOT NULL,
-  PRIMARY KEY (cinema_id, movie_id)
-);
-
-CREATE TABLE IF NOT EXISTS cinema_batches (
-  cinema_id TEXT NOT NULL,
-  batch_id TEXT NOT NULL,
-  status TEXT NOT NULL CHECK (status IN ('committed')),
-  version INTEGER NOT NULL CHECK (version > 0),
-  public_data TEXT NOT NULL,
-  captured_at INTEGER NOT NULL,
-  PRIMARY KEY (cinema_id, batch_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_cinema_batches_latest
-  ON cinema_batches(cinema_id, captured_at DESC);
-
-CREATE TABLE IF NOT EXISTS cinema_events (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  cinema_id TEXT NOT NULL,
-  batch_id TEXT NOT NULL,
-  movie_id TEXT NOT NULL,
-  payload TEXT NOT NULL,
-  created_at INTEGER NOT NULL,
-  UNIQUE (cinema_id, batch_id, movie_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_cinema_events_batch
-  ON cinema_events(cinema_id, batch_id, id);
-
 CREATE TABLE IF NOT EXISTS notification_outbox (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   event_key TEXT NOT NULL UNIQUE,

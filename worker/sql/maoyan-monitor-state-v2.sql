@@ -4,6 +4,10 @@
 -- and conditionally adds last_run_id for pre-v2 databases before executing
 -- this idempotent SQL. This file is not a standalone old-schema entry point.
 -- Existing user, config, lock and notification rows are intentionally untouched.
+-- Legacy history tables are read by the one-time migration before this SQL is
+-- applied; runtime code must not query them. Their final DROP is a separately
+-- validated cutover operation so a failed migration can still be retried from
+-- the old source tables.
 CREATE TABLE IF NOT EXISTS cinema_state (
   cinema_id TEXT PRIMARY KEY,
   current_version INTEGER NOT NULL DEFAULT 0 CHECK (current_version >= 0),

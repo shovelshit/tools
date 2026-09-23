@@ -169,7 +169,7 @@ test("dashboard returns null success rate with no completed notifications and to
   assert.equal(payload.users[0].lockState, null);
 });
 
-test("dashboard uses cinema_state even when legacy batches contain a newer name", async () => {
+test("dashboard uses cinema_state as the current cinema source", async () => {
   const env = await createAccountEnv({ nowMs: NOW });
   env.NOW_MS = String(NOW);
   const active = await seedAccount(env, {
@@ -179,9 +179,6 @@ test("dashboard uses cinema_state even when legacy batches contain a newer name"
   await env.DB.prepare(
     "INSERT INTO cinema_state(cinema_id,current_version,current_data,run_state,completed_at,updated_at) VALUES (?,?,?,?,?,?)"
   ).bind("cinema-state", 2, JSON.stringify({ showData: { cinemaName: "当前影院", movies: [] } }), "completed", NOW - 1000, NOW - 1000).run();
-  await env.DB.prepare(
-    "INSERT INTO cinema_batches(cinema_id,batch_id,status,version,public_data,captured_at) VALUES (?,?,?,?,?,?)"
-  ).bind("cinema-state", "legacy", "committed", 99, JSON.stringify({ showData: { cinemaName: "历史影院", movies: [] } }), NOW).run();
   await insertNotification(env, {
     eventKey: "cinema:cinema-state:run-1:state-user:movie-1",
     userId: active.account.id, kind: "new-shows", state: "pending"

@@ -13,7 +13,6 @@ import {
   listDueCinemas,
   listSubscribers,
   normalizeCinemaData,
-  persistCinemaSnapshot,
   saveConfigWithSubscription,
   syncSubscription
 } from "../src/maoyan/monitor-store.js";
@@ -111,6 +110,34 @@ test("completing a cinema run promotes active data and clears active fields", as
   assert.equal(row.active_data, null);
   assert.equal(row.run_state, "completed");
   assert.deepEqual(await completeCinemaRun(env.DB, { cinemaId: "run-3", runId: "r3", nowMs: NOW + 2 }), { status: "skipped", runId: "r3" });
+});
+
+test("an unchanged scan keeps one current JSON body and does not create history", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  const data = cinemaFixture({ cinemaId: "unchanged-store", seqNos: ["s1"] });
+  const first = await beginCinemaRun(env.DB, {
+    cinemaId: "unchanged-store", runId: "first", nowMs: NOW, fetchedData: data
+  });
+  await completeCinemaRun(env.DB, { cinemaId: "unchanged-store", runId: "first", nowMs: NOW + 1 });
+  env.DB.resetWrites();
+
+  const second = await beginCinemaRun(env.DB, {
+    cinemaId: "unchanged-store", runId: "second", nowMs: NOW + 2,
+    fetchedData: structuredClone(data)
+  });
+  assert.equal(second.changed, false);
+  assert.equal(second.version, first.version);
+  await completeCinemaRun(env.DB, { cinemaId: "unchanged-store", runId: "second", nowMs: NOW + 3 });
+
+  const state = await env.DB.prepare(
+    "SELECT current_version,current_data,active_data FROM cinema_state WHERE cinema_id=?"
+  ).bind("unchanged-store").first();
+  assert.equal(Number(state.current_version), first.version);
+  assert.equal(state.current_data, JSON.stringify(first.data));
+  assert.equal(state.active_data, null);
+  assert.equal(env.DB.writeCount("cinema_batches"), 0);
+  assert.equal(env.DB.writeCount("cinema_snapshots"), 0);
+  assert.equal(env.DB.writeCount("cinema_events"), 0);
 });
 
 test("complete run CAS miss preserves active data", async () => {
@@ -213,60 +240,4 @@ test("config CAS and subscription projection commit together", async () => {
     nowMs: NOW + 1
   }), { code: "CONFIG_CONFLICT" });
   assert.equal((await env.DB.prepare("SELECT cinema_id FROM monitor_subscriptions WHERE user_id=?").bind(account.id).first()).cinema_id, "8");
-});
-
-test("shared cinema snapshot writes changed movies once and replays a committed batch", async () => {
-  const env = await createAccountEnv({ nowMs: NOW });
-  const first = await persistCinemaSnapshot(env.DB, {
-    cinemaId: "1", batchId: "b1", data: cinemaFixture({ seqNos: ["s1"] }), capturedAt: NOW
-  });
-  assert.equal(first.replayed, false);
-  assert.equal(first.snapshot.version, 1);
-  assert.equal(first.events.length, 0);
-  env.DB.resetWrites();
-  const changed = await persistCinemaSnapshot(env.DB, {
-    cinemaId: "1", batchId: "b2", data: cinemaFixture({ seqNos: ["s1", "s2"] }), capturedAt: NOW + 1
-  });
-  assert.equal(changed.snapshot.version, 2);
-  assert.equal(changed.events.length, 1);
-  assert.deepEqual(Object.keys(changed.events[0].shows[0]).sort(), ["lang", "seqNo", "showDate", "th", "ticketStatus", "tm", "tp"]);
-  assert.equal(env.DB.writeCount("cinema_snapshots"), 1);
-  assert.equal(env.DB.writeCount("cinema_events"), 1);
-  env.DB.resetWrites();
-  const replay = await persistCinemaSnapshot(env.DB, {
-    cinemaId: "1", batchId: "b2", data: cinemaFixture({ seqNos: ["ignored"] }), capturedAt: NOW + 2
-  });
-  assert.equal(replay.replayed, true);
-  assert.equal(replay.snapshot.version, 2);
-  assert.equal(env.DB.writeCount("cinema_snapshots"), 0);
-  assert.equal(env.DB.writeCount("cinema_events"), 0);
-});
-
-test("unchanged snapshot commits a batch without rewriting movie rows or events", async () => {
-  const env = await createAccountEnv({ nowMs: NOW });
-  await persistCinemaSnapshot(env.DB, {
-    cinemaId: "1", batchId: "b1", data: cinemaFixture({ seqNos: ["s1", "s2"] }), capturedAt: NOW
-  });
-  env.DB.resetWrites();
-  const result = await persistCinemaSnapshot(env.DB, {
-    cinemaId: "1", batchId: "b2", data: cinemaFixture({ seqNos: ["s2", "s1"] }), capturedAt: NOW + 1
-  });
-  assert.equal(result.snapshot.version, 1);
-  assert.equal(env.DB.writeCount("cinema_snapshots"), 0);
-  assert.equal(env.DB.writeCount("cinema_events"), 0);
-});
-
-test("committed shared data excludes prices and unknown provider fields", async () => {
-  const env = await createAccountEnv({ nowMs: NOW });
-  const data = cinemaFixture({ seqNos: ["s1"] });
-  Object.assign(data.showData.movies[0].shows[0].plist[0], {
-    vipPrice: "99.9", vipPriceSuffix: "起", providerSecret: "do-not-share"
-  });
-  const result = await persistCinemaSnapshot(env.DB, {
-    cinemaId: "1", batchId: "private-fields", data, capturedAt: NOW
-  });
-  const serialized = JSON.stringify(result.data);
-  assert.equal(serialized.includes("99.9"), false);
-  assert.equal(serialized.includes("providerSecret"), false);
-  assert.equal(serialized.includes("s1"), true);
 });

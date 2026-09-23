@@ -16,7 +16,31 @@ function legacyDatabase() {
     .replace(/CREATE INDEX IF NOT EXISTS idx_monitor_subscriptions_run[\s\S]*?;\n\n/, "")
     .replace(/CREATE TABLE IF NOT EXISTS cinema_state \([\s\S]*?CREATE INDEX IF NOT EXISTS idx_cinema_state_active\n  ON cinema_state\(run_state, lease_until, cinema_id\);\n\n/, "");
   DB.exec(legacySchema);
+  // These source tables belong to the pre-cutover database only. The fresh
+  // production schema intentionally omits them; migration tests create the
+  // legacy source explicitly so the one-time copier remains covered.
+  createLegacySourceTables(DB);
   return DB;
+}
+
+function createLegacySourceTables(DB) {
+  DB.exec(`
+    CREATE TABLE cinema_snapshots (
+      cinema_id TEXT NOT NULL, movie_id TEXT NOT NULL, movie_name TEXT NOT NULL DEFAULT '',
+      seq_nos TEXT NOT NULL, version INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+      PRIMARY KEY (cinema_id, movie_id)
+    );
+    CREATE TABLE cinema_batches (
+      cinema_id TEXT NOT NULL, batch_id TEXT NOT NULL, status TEXT NOT NULL,
+      version INTEGER NOT NULL, public_data TEXT NOT NULL, captured_at INTEGER NOT NULL,
+      PRIMARY KEY (cinema_id, batch_id)
+    );
+    CREATE TABLE cinema_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, cinema_id TEXT NOT NULL, batch_id TEXT NOT NULL,
+      movie_id TEXT NOT NULL, payload TEXT NOT NULL, created_at INTEGER NOT NULL,
+      UNIQUE (cinema_id, batch_id, movie_id)
+    );
+  `);
 }
 
 test("v2 migration upgrades a truly old schema and creates the v2 table", () => {
@@ -43,6 +67,9 @@ test("v2 migration upgrades a truly old schema and creates the v2 table", () => 
 
 test("v2 migration is safe on the current schema and initializes baseline from current state", async () => {
   const { DB, userId, cinemaId, currentVersion } = await createMonitorStateFixture({ nowMs: 1_726_000_000_000 });
+  for (const table of ["cinema_batches", "cinema_snapshots", "cinema_events"]) {
+    assert.equal(DB.sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table), undefined);
+  }
   applyMaoyanMonitorStateV2(DB.sqlite);
   applyMaoyanMonitorStateV2(DB.sqlite);
   const subscription = await DB.prepare("SELECT baseline_version,last_run_id FROM monitor_subscriptions WHERE user_id=?").bind(userId).first();
@@ -53,6 +80,7 @@ test("v2 migration is safe on the current schema and initializes baseline from c
 
 test("active state migration copies the latest batch and preserves lock and pending outbox", async () => {
   const { DB, userId, cinemaId } = await createMonitorStateFixture({ nowMs: 1_726_000_000_000 });
+  createLegacySourceTables(DB.sqlite);
   await DB.prepare("DELETE FROM cinema_state").run();
   await DB.prepare("INSERT INTO cinema_batches(cinema_id,batch_id,status,version,public_data,captured_at) VALUES (?,?,?,?,?,?),(?,?,?,?,?,?)")
     .bind(cinemaId, "old", "committed", 4, JSON.stringify({ showData: { cinemaName: "旧影院", movies: [] } }), 1_725_999_000_000,
@@ -73,6 +101,7 @@ test("active state migration copies the latest batch and preserves lock and pend
 
 test("re-running state migration preserves an active run and subscriber progress", async () => {
   const { DB, userId, cinemaId } = await createMonitorStateFixture({ nowMs: 1_726_000_000_000 });
+  createLegacySourceTables(DB.sqlite);
   await DB.prepare("DELETE FROM cinema_state").run();
   await DB.prepare("INSERT INTO cinema_batches(cinema_id,batch_id,status,version,public_data,captured_at) VALUES (?,?,?,?,?,?)")
     .bind(cinemaId, "latest", "committed", 4, JSON.stringify({ showData: { cinemaName: "影院 A", movies: [] } }), 1_725_999_000_000).run();
@@ -93,6 +122,7 @@ test("re-running state migration preserves an active run and subscriber progress
 
 test("active state migration leaves a missing batch at version zero for a first-scan baseline", async () => {
   const { DB, userId, cinemaId } = await createMonitorStateFixture({ nowMs: 1_726_000_000_000 });
+  createLegacySourceTables(DB.sqlite);
   await DB.prepare("DELETE FROM cinema_state").run();
   const result = await migrateActiveMonitorState(DB, { nowMs: 1_726_000_000_000, userId });
   assert.deepEqual(result, { migratedUsers: 1, migratedCinemas: 1, preservedOutbox: 1, resetBaselines: 0 });

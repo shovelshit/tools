@@ -2,7 +2,7 @@
 
 设计日期：2026-09-24（北京时间）
 
-状态：待实施。当前只保留一个活跃监控用户；旧监控历史可以舍弃，但该用户当前的影院、监控基线、等待中的锁座规则和未发送通知必须保留。
+状态：已实施，待生产切换。当前只保留一个活跃监控用户；旧监控历史可以舍弃，但该用户当前的影院、监控基线、等待中的锁座规则和未发送通知必须保留。
 
 ## 目标
 
@@ -70,11 +70,13 @@ CREATE INDEX idx_monitor_subscriptions_run
 - `notification_outbox`
 - `change_log`
 
-停用并删除旧监控历史表：
+切换后停用并删除旧监控历史表（切换前一次性迁移仍读取它们）：
 
 - `cinema_batches`
 - `cinema_snapshots`
 - `cinema_events`
+
+`cinema_batches`、`cinema_snapshots` 和 `cinema_events` 只属于切换前的迁移输入，不属于 Worker runtime。`migrate-maoyan-monitor-state.mjs` 必须在删除这些表之前运行并完成校验；切换后的 Worker 只读写 `cinema_state`、`monitor_subscriptions` 及用户通知相关表。
 
 ## 运行流程
 
@@ -88,7 +90,7 @@ CREATE INDEX idx_monitor_subscriptions_run
 
 ## 迁移方案
 
-切换前暂停监控 cron 和 dispatcher，等待正在执行的影院运行结束。无法确认已完成的旧批次不直接丢弃，使用其最新 `public_data` 作为 `active_data`，标记为 `retryable`。
+切换前暂停监控 cron 和 dispatcher，等待正在执行的影院运行结束。无法确认已完成的旧批次不直接丢弃，使用其最新 `public_data` 作为 `active_data`，标记为 `retryable`。迁移脚本读取旧表，迁移校验完成后才删除旧表；运行时不依赖这些表。
 
 对当前仍启用的用户：
 
@@ -101,6 +103,15 @@ CREATE INDEX idx_monitor_subscriptions_run
 7. 校验启用订阅数、锁座规则数、未发送通知数和迁移后的影院数量，再删除旧监控历史表。
 
 若当前没有可迁移的最新批次，则新架构第一次扫描建立基线，不发送历史场次通知。
+
+## 切换清单
+
+1. 暂停监控 cron 和 dispatcher，确认没有正在提交的旧批次。
+2. 执行状态迁移，保留当前订阅、锁座规则和未发送通知。
+3. 校验启用订阅数、迁移影院数、锁座规则数和未发送出箱数。
+4. 部署使用 `cinema_state` 的 Worker，并执行一次手工影院检查。
+5. 确认手工检查和通知/锁座结果后，恢复 cron 和 dispatcher。
+6. 最后删除旧监控历史表；若校验失败，保留旧表以便重试迁移。
 
 ## 清理和保留
 
