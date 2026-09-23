@@ -662,6 +662,8 @@ async function restoreConfig() {
       cinemaSelected = restoredOk;
     }
     lockController.syncAvailability();
+    // 主页面摘要需要已保存的规则，不能依赖首次打开锁座弹窗才加载。
+    if (lockServiceEnabled) await lockController.refreshRemoteState();
   } finally {
     if (!profileGeneration.isCurrent(generation)) return;
     // 恢复完成: 记录当前状态签名, 与云端一致的内容不再重复写入。

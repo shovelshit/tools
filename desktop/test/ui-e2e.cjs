@@ -218,6 +218,15 @@ async function main() {
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     page.on("dialog", (dialog) => dialog.accept());
+    const savedRuleRoute = "**/api/lock/rule";
+    await page.route(savedRuleRoute, (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true, rule: {
+        state: "waiting_schedule", targetDate: "2026-09-28", templateTime: "13:15",
+        hall: "1号激光IMAX厅", timeToleranceMinutes: 30,
+        seats: [{ seatNo: "1-12-18", label: "12排18座" }]
+      } })
+    }));
     await page.goto(`${web.url}/maoyan/index.html`);
     await page.waitForFunction(() => window.maoyanRuntime?.kind === "web");
     assert.equal(await page.locator("#login-update-status").isVisible(), false);
@@ -301,6 +310,10 @@ async function main() {
     await page.locator("#cinema-dropdown .suggest-item").filter({ hasText: "寰映影城" }).click();
     await page.locator("#movie-list input[type=checkbox]").first().check();
     await page.locator("#btn-step-movie-next").click();
+    assert.equal(await page.locator("#lock-overlay").isVisible(), false);
+    await page.waitForFunction(() => document.querySelector("#notify-monitor-rule")?.textContent.includes("12排18座"), null, { timeout: 5000 });
+    assert.match(await page.locator("#notify-monitor-rule").textContent(), /2026-09-28 13:15.*±30分钟.*12排18座.*等待目标场次/);
+    await page.unroute(savedRuleRoute);
     await page.locator("#push-channel-row label").filter({ hasText: "Server酱" }).click();
     const channel = await page.locator(".channel-opts").boundingBox();
     const key = await page.locator("#serverchan-input").boundingBox();
