@@ -190,6 +190,104 @@ test("dashboard uses cinema_state as the current cinema source", async () => {
   assert.equal(payload.health.latestBatchAt, NOW - 1000);
 });
 
+test("dashboard exposes selected movie details and cinema runtime state", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  env.NOW_MS = String(NOW);
+  const active = await seedAccount(env, {
+    id: "detail-user",
+    expiresAt: NOW + DAY,
+    businessLine: "maoyan",
+    config: { enabled: true, cinemaId: "cinema-detail", selectedMovieIds: ["101", "202"] }
+  });
+  await insertSubscription(env, active.account.id, "cinema-detail");
+  const movie101Shows = Array.from({ length: 6 }, (_, index) => ({
+    seqNo: String(1010 + index), tm: `1${String(index).padStart(2, "0")}`, th: `${index + 1} 号厅`, ticketStatus: 0
+  }));
+  await env.DB.prepare(
+    "INSERT INTO cinema_state(cinema_id,current_version,current_data,active_run_id,run_state,attempt_count,completed_at,updated_at) VALUES (?,?,?,?,?,?,?,?)"
+  ).bind(
+    "cinema-detail", 4, JSON.stringify({ showData: { cinemaName: "详情影院", movies: [
+      { id: "101", nm: "监控电影 A", shows: [{ showDate: "2026-09-25", plist: movie101Shows }] },
+      { id: "202", nm: "监控电影 B", shows: [{ showDate: "2026-09-25", plist: [{ seqNo: "2020", tm: "20:20", th: "8 号厅", ticketStatus: 1 }] }] },
+      { id: "303", nm: "未选电影", shows: [{ showDate: "2026-09-25", plist: [{ seqNo: "3030", tm: "21:30", th: "9 号厅", ticketStatus: 1 }] }] }
+    ] } }),
+    "run-detail", "retryable", 2, NOW - 10 * 60 * 1000, NOW - 1_000
+  ).run();
+
+  const payload = await (await worker.fetch(request("/api/admin/dashboard?businessLine=maoyan&window=24h"), env)).json();
+  const user = payload.users[0];
+  const cinema = payload.cinemas[0];
+  assert.equal(payload.summary.monitoredMovies, 2);
+  assert.equal(payload.summary.currentShows, 7);
+  assert.equal(payload.summary.attentionCinemas, 1);
+  assert.equal(payload.summary.pendingNotifications, 0);
+  assert.equal(user.cinemaRunState, "retryable");
+  assert.equal(user.activeRunId, "run-detail");
+  assert.equal(user.attemptCount, 2);
+  assert.equal(user.monitorContent.selectedCount, 2);
+  assert.equal(user.monitorContent.availableShows, 7);
+  assert.deepEqual(user.monitorContent.movies.map((movie) => [movie.movieId, movie.movieName, movie.showCount, movie.hasMoreShows]), [
+    ["101", "监控电影 A", 6, true],
+    ["202", "监控电影 B", 1, false]
+  ]);
+  assert.equal(user.monitorContent.movies[0].nextShows.length, 5);
+  assert.equal(user.monitorContent.movies[0].nextShows[0].hall, "1 号厅");
+  assert.equal(cinema.movieCount, 3);
+  assert.equal(cinema.showCount, 8);
+  assert.equal(cinema.runState, "retryable");
+  assert.equal(cinema.activeRunId, "run-detail");
+  assert.equal(cinema.attemptCount, 2);
+  assert.equal(cinema.stale, true);
+});
+
+test("admin notification detail returns bounded content and isolates business lines", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  env.NOW_MS = String(NOW);
+  const maoyan = await seedAccount(env, {
+    id: "notification-detail-maoyan", expiresAt: NOW + DAY, businessLine: "maoyan", config: { enabled: true }
+  });
+  const store = await seedAccount(env, {
+    id: "notification-detail-store", expiresAt: NOW + DAY, businessLine: "store", config: { enabled: true }
+  });
+  const payload = JSON.stringify({
+    title: "新场次通知",
+    content: "这是完整通知正文\n包含影片、日期和影厅",
+    meta: { movieId: "101", cinemaId: "cinema-detail", accessToken: "must-not-return" }
+  });
+  const maoyanResult = await env.DB.prepare(
+    "INSERT INTO notification_outbox(event_key,user_id,kind,payload,credential_version,state,attempts,last_error,failure_detail,next_attempt_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
+  ).bind(
+    "notification-detail-maoyan", maoyan.account.id, "new-shows", payload, 1, "failed", 3,
+    "发送失败", "HTTP 403", NOW + 60_000, NOW - 2_000, NOW - 1_000
+  ).run();
+  const storeResult = await env.DB.prepare(
+    "INSERT INTO notification_outbox(event_key,user_id,kind,payload,credential_version,state,attempts,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)"
+  ).bind(
+    "notification-detail-store", store.account.id, "test", payload, 1, "sent", 1, NOW, NOW
+  ).run();
+  const maoyanId = Number((await env.DB.prepare("SELECT id FROM notification_outbox WHERE event_key=?").bind("notification-detail-maoyan").first()).id);
+  const storeId = Number((await env.DB.prepare("SELECT id FROM notification_outbox WHERE event_key=?").bind("notification-detail-store").first()).id);
+
+  const response = await worker.fetch(request(`/api/admin/notifications/${maoyanId}?businessLine=maoyan`), env);
+  assert.equal(response.status, 200);
+  const detail = await response.json();
+  assert.equal(detail.notification.title, "新场次通知");
+  assert.equal(detail.notification.content, "这是完整通知正文\n包含影片、日期和影厅");
+  assert.equal(detail.notification.remark, "");
+  assert.equal(detail.notification.attempts, 3);
+  assert.equal(detail.notification.lastError, "发送失败");
+  assert.equal(detail.notification.failureDetail, "HTTP 403");
+  assert.equal(detail.notification.meta.movieId, "101");
+  assert.equal(Object.hasOwn(detail.notification.meta, "accessToken"), false);
+
+  const crossBusiness = await worker.fetch(request(`/api/admin/notifications/${storeId}?businessLine=maoyan`), env);
+  assert.equal(crossBusiness.status, 404);
+  assert.equal((await crossBusiness.json()).code, "NOT_FOUND");
+
+  const invalid = await worker.fetch(request("/api/admin/notifications/not-a-number?businessLine=maoyan"), env);
+  assert.equal(invalid.status, 400);
+});
+
 test("dashboard distinguishes verified maintenance scans from incomplete and unrun jobs", async () => {
   const env = await createAccountEnv({ nowMs: NOW });
   env.NOW_MS = String(NOW);

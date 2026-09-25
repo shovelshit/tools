@@ -5,7 +5,7 @@ import { createManagedAccount, readCapacity, readServiceSettings, renewAccount, 
 import { resumeAfterRenewal } from "./account-lifecycle.js";
 import { readAdminNotificationFailures, readResourceSummary } from "./resource-budget.js";
 import { getReleaseDownloads } from "./releases.js";
-import { readAdminDashboard } from "./dashboard.js";
+import { readAdminDashboard, readAdminNotification } from "./dashboard.js";
 import { readBusinessPolicy, updateBusinessPolicy } from "./business-policy-store.js";
 import { wakeNotificationDispatcher } from "./notification-outbox.js";
 
@@ -107,6 +107,13 @@ export async function listAdminAccounts(env, url, nowMs) {
 
 export async function handleAdminAccountApi(request, env, url) {
   const nowMs = serviceNow(env);
+  const notificationMatch = url.pathname.match(/^\/api\/admin\/notifications\/([^/]+)$/);
+  if (notificationMatch && request.method === "GET") {
+    const businessLine = String(url.searchParams.get("businessLine") || "maoyan").trim();
+    const notification = await readAdminNotification(env.DB, { id: notificationMatch[1], businessLine });
+    if (!notification) return json({ ok: false, code: "NOT_FOUND", error: "通知不存在" }, 404, { "Cache-Control": "no-store" });
+    return json({ ok: true, notification }, 200, { "Cache-Control": "no-store" });
+  }
   if (url.pathname === "/api/admin/business-policy" && request.method === "GET") {
     return json({ ok: true, policy: await readBusinessPolicy(env.DB) }, 200, { "Cache-Control": "no-store" });
   }
