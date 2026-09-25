@@ -23,3 +23,11 @@ repro-order.cjs
 # Desktop build tools and unsigned artifacts
 desktop/node_modules/
 desktop/dist/
+
+# Local development artifacts
+.DS_Store
+__pycache__/
+*.py[cod]
+local/hthotel-ops-connectivity-cli-v*/
+worker-locktest/
+worker/.public-build-*/
