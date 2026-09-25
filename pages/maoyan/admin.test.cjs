@@ -36,6 +36,69 @@ test("dashboard module uses the authenticated request callback and safe text ren
   assert.match(dashboardSource, /maintenanceStatus/);
 });
 
+test("dashboard uses full-width monitoring sections with movie, runtime, retry, and notification controls", () => {
+  assert.match(html, /id="dashboard-users"[^>]*class="[^"]*dashboard-panel-full/);
+  assert.match(html, /id="dashboard-cinemas"[^>]*class="[^"]*dashboard-panel-full/);
+  for (const metric of ["monitored-movies", "current-shows", "attention-cinemas", "pending-notifications"]) {
+    assert.match(html, new RegExp(`id="dashboard-${metric}"`));
+  }
+  assert.match(html, /<th>下次检查<\/th>/);
+  assert.match(html, /<th>最近完成<\/th>/);
+  assert.match(html, /id="dashboard-notification-state-filter"/);
+  assert.match(html, /id="dashboard-notification-kind-filter"/);
+  assert.match(html, /id="dashboard-notification-drawer"/);
+  assert.match(html, /id="dashboard-notification-drawer-content"/);
+  assert.match(html, /id="dashboard-notification-drawer-close"/);
+  assert.match(dashboardSource, /monitorContent\?\.movies/);
+  assert.match(dashboardSource, /availableShows/);
+  assert.match(dashboardSource, /attemptCount/);
+  assert.match(dashboardSource, /activeRunId/);
+  assert.match(dashboardSource, /nextDueAt/);
+  assert.match(dashboardSource, /latestBatchAt/);
+  assert.match(dashboardSource, /dashboard-notification-state-filter/);
+  assert.match(dashboardSource, /keydown/);
+  assert.doesNotMatch(dashboardSource, /innerHTML\s*=/);
+});
+
+test("notification status opens a safe full-content drawer and closes by button, escape, or backdrop", async () => {
+  const { dashboard, elements, requests, document } = loadDashboardWithDeferredRequests();
+  const load = dashboard.load();
+  resolveDashboard(requests[0], {
+    generatedAt: Date.parse("2026-09-25T10:00:00Z"),
+    summary: {}, users: [{
+      userId: "user-1", remark: "用户 <script>", cinemaName: "影院 A", monitorState: "monitoring",
+      monitorContent: { movies: [{ movieName: "电影 A", showCount: 2 }], availableShows: 2 },
+      lockState: "waiting_schedule", lastNotification: { state: "failed" }
+    }], cinemas: [{ cinemaName: "影院 A", runState: "retryable", movieCount: 3, showCount: 8, attemptCount: 2, activeRunId: "run-1", stale: true }],
+    notifications: { pending: 0, sending: 0, failed: 1, byKind: {}, recent: [{ id: 7, kind: "new-shows", state: "failed", createdAt: Date.parse("2026-09-25T09:00:00Z"), title: "标题 <b>", content: "正文 <script>alert(1)</script>", lastError: "失败原因" }] },
+    health: {}, seatFeedback: {}
+  });
+  await load;
+  assert.match(elements.get("dashboard-users-body").textContent, /电影 A/);
+  assert.match(elements.get("dashboard-users-body").textContent, /场次 2/);
+  assert.match(elements.get("dashboard-cinemas-body").textContent, /重试 2/);
+  assert.match(elements.get("dashboard-cinemas-body").textContent, /run-1/);
+  const notification = elements.get("dashboard-notification-list").children[0];
+  const firstDetailLoad = notification.children[0].dispatch("click");
+  resolveDashboard(requests[1], { notification: { title: "标题 <b>", content: "正文 <script>alert(1)</script>", failureDetail: "HTTP 500", meta: { movieId: "101" } } });
+  await firstDetailLoad;
+  assert.equal(elements.get("dashboard-notification-drawer").classList.contains("hidden"), false);
+  assert.match(elements.get("dashboard-notification-drawer-content").textContent, /正文 <script>alert\(1\)<\/script>/);
+  assert.equal(elements.get("dashboard-notification-drawer-content").innerHTML, "");
+  await elements.get("dashboard-notification-drawer-close").dispatch("click");
+  assert.equal(elements.get("dashboard-notification-drawer").classList.contains("hidden"), true);
+  const secondDetailLoad = notification.children[0].dispatch("click");
+  resolveDashboard(requests[2], { notification: { title: "标题", content: "正文" } });
+  await secondDetailLoad;
+  await document.dispatch("keydown", { key: "Escape" });
+  assert.equal(elements.get("dashboard-notification-drawer").classList.contains("hidden"), true);
+  const thirdDetailLoad = notification.children[0].dispatch("click");
+  resolveDashboard(requests[3], { notification: { title: "标题", content: "正文" } });
+  await thirdDetailLoad;
+  await elements.get("dashboard-notification-drawer").dispatch("click", { target: elements.get("dashboard-notification-drawer") });
+  assert.equal(elements.get("dashboard-notification-drawer").classList.contains("hidden"), true);
+});
+
 test("seat feedback status control names the action instead of only showing state", () => {
   assert.match(dashboardSource, /标记已处理/);
   assert.match(dashboardSource, /重新打开/);
@@ -253,6 +316,36 @@ function fakeElement() {
   };
 }
 
+function loadDashboardWithDeferredRequests() {
+  const elements = new Map();
+  function node(tagName = "DIV") {
+    const listeners = new Map(); let ownText = "";
+    const element = {
+      tagName, value: "", textContent: "", children: [], className: "", disabled: false,
+      classList: {
+        classes: new Set(["hidden"]),
+        add(...names) { names.forEach((name) => this.classes.add(name)); },
+        remove(...names) { names.forEach((name) => this.classes.delete(name)); },
+        contains(name) { return this.classes.has(name); }
+      },
+      addEventListener(type, listener) { const group = listeners.get(type) || []; group.push(listener); listeners.set(type, group); },
+      async dispatch(type, event = {}) { return Promise.all((listeners.get(type) || []).map((listener) => listener({ target: element, ...event }))); },
+      append(...nodes) { this.children.push(...nodes); },
+      appendChild(child) { this.children.push(child); return child; }
+    };
+    Object.defineProperty(element, "textContent", { get() { return ownText || element.children.map((child) => child.textContent || "").join(""); }, set(value) { ownText = String(value); element.children = []; } });
+    Object.defineProperty(element, "innerHTML", { get() { return ""; }, set() { throw new Error("dashboard must not assign innerHTML"); } });
+    return element;
+  }
+  const document = { querySelector(selector) { const id = selector.slice(1); if (!elements.has(id)) elements.set(id, node()); return elements.get(id); }, createElement: (tagName) => node(String(tagName).toUpperCase()), addEventListener(...args) { return this.querySelector("#dashboard-root").addEventListener(...args); }, dispatch(...args) { return this.querySelector("#dashboard-root").dispatch(...args); } };
+  const requests = [];
+  const context = vm.createContext({ document, window: {}, setTimeout, clearTimeout, URL, encodeURIComponent, Date });
+  vm.runInContext(dashboardSource, context);
+  context.request = (url, options = {}) => { const pending = deferred(); requests.push({ url, options, pending }); return pending.promise.then((response) => response); };
+  const dashboard = vm.runInContext("window.createAdminDashboard({ root: document, request })", context);
+  return { dashboard, elements, requests, document };
+}
+
 test("account updates replace only their row and retain filters and pagination", async () => {
   const { context, elements, requests } = loadAdminWithDeferredRequests();
   vm.runInContext(`accounts = [
@@ -350,6 +443,10 @@ function loadAdminWithDeferredRequests() {
 
 function resolveJson(request, data) {
   request.pending.resolve({ ok: true, status: 200, json: async () => data });
+}
+
+function resolveDashboard(request, data) {
+  request.pending.resolve(data);
 }
 
 test("rapid business switching rejects stale account and settings responses", async () => {

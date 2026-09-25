@@ -169,6 +169,36 @@ test("dashboard returns null success rate with no completed notifications and to
   assert.equal(payload.users[0].lockState, null);
 });
 
+test("dashboard isolates seat feedback and counts only pending notifications", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  env.NOW_MS = String(NOW);
+  const maoyan = await seedAccount(env, {
+    id: "feedback-maoyan", expiresAt: NOW + DAY, businessLine: "maoyan", config: { enabled: true }
+  });
+  const store = await seedAccount(env, {
+    id: "feedback-store", expiresAt: NOW + DAY, businessLine: "store", config: { enabled: true }
+  });
+  await env.DB.prepare(
+    "INSERT INTO seat_feedback(fb_key,reported_at,day,token_id,cinema_id,movie_id,seq_no,source) VALUES (?,?,?,?,?,?,?,?)"
+  ).bind(
+    "seatfb:feedback-maoyan:1", new Date(NOW - 2_000).toISOString(), "2026-09-20", maoyan.account.id,
+    "cinema-maoyan", "movie-maoyan", "1", "auto"
+  ).run();
+  await env.DB.prepare(
+    "INSERT INTO seat_feedback(fb_key,reported_at,day,token_id,cinema_id,movie_id,seq_no,source) VALUES (?,?,?,?,?,?,?,?)"
+  ).bind(
+    "seatfb:feedback-store:1", new Date(NOW - 1_000).toISOString(), "2026-09-20", store.account.id,
+    "cinema-store", "movie-store", "1", "auto"
+  ).run();
+  await insertNotification(env, { eventKey: "feedback-pending", userId: maoyan.account.id, state: "pending" });
+  await insertNotification(env, { eventKey: "feedback-sending", userId: maoyan.account.id, state: "sending" });
+
+  const payload = await (await worker.fetch(request("/api/admin/dashboard?businessLine=maoyan&window=24h"), env)).json();
+  assert.equal(payload.summary.pendingNotifications, 1);
+  assert.equal(payload.seatFeedback.count, 1);
+  assert.deepEqual(payload.seatFeedback.items.map((item) => item.tokenId), [maoyan.account.id]);
+});
+
 test("dashboard uses cinema_state as the current cinema source", async () => {
   const env = await createAccountEnv({ nowMs: NOW });
   env.NOW_MS = String(NOW);
@@ -240,7 +270,7 @@ test("dashboard exposes selected movie details and cinema runtime state", async 
   assert.equal(cinema.stale, true);
 });
 
-test("admin notification detail returns bounded content and isolates business lines", async () => {
+test("admin notification detail returns full content and isolates business lines", async () => {
   const env = await createAccountEnv({ nowMs: NOW });
   env.NOW_MS = String(NOW);
   const maoyan = await seedAccount(env, {
@@ -279,6 +309,17 @@ test("admin notification detail returns bounded content and isolates business li
   assert.equal(detail.notification.failureDetail, "HTTP 403");
   assert.equal(detail.notification.meta.movieId, "101");
   assert.equal(Object.hasOwn(detail.notification.meta, "accessToken"), false);
+
+  const longContent = "完整通知正文".repeat(1_000);
+  await env.DB.prepare(
+    "INSERT INTO notification_outbox(event_key,user_id,kind,payload,credential_version,state,attempts,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)"
+  ).bind(
+    "notification-detail-long", maoyan.account.id, "new-shows", JSON.stringify({ title: "长通知", content: longContent }),
+    1, "sent", 1, NOW, NOW
+  ).run();
+  const longId = Number((await env.DB.prepare("SELECT id FROM notification_outbox WHERE event_key=?").bind("notification-detail-long").first()).id);
+  const longResponse = await worker.fetch(request(`/api/admin/notifications/${longId}?businessLine=maoyan`), env);
+  assert.equal((await longResponse.json()).notification.content, longContent);
 
   const crossBusiness = await worker.fetch(request(`/api/admin/notifications/${storeId}?businessLine=maoyan`), env);
   assert.equal(crossBusiness.status, 404);

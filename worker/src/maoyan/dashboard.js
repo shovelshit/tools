@@ -36,6 +36,7 @@ function textOrNull(value) {
 function clampText(value, max = 2048) {
   const text = textOrNull(value);
   if (!text) return null;
+  if (max == null) return text;
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
@@ -132,7 +133,7 @@ function enrichSummary(summary, users, cinemas, notifications) {
     monitoredMovies: movieKeys.size,
     currentShows,
     attentionCinemas: cinemas.filter((cinema) => cinema.stale || ["processing", "retryable"].includes(cinema.runState)).length,
-    pendingNotifications: Number(notifications.pending || 0) + Number(notifications.sending || 0)
+    pendingNotifications: Number(notifications.pending || 0)
   };
 }
 
@@ -409,7 +410,7 @@ export async function readAdminNotification(DB, { id, businessLine = "maoyan" } 
     "FROM notification_outbox o JOIN users u ON u.id=o.user_id WHERE o.id=? AND u.business_line=?",
     notificationId, String(businessLine || "")
   );
-  return row ? notificationDto(row, 8192) : null;
+  return row ? notificationDto(row, null) : null;
 }
 
 async function readMaintenanceHealth(DB, nowMs) {
@@ -481,11 +482,15 @@ async function readHealth(DB, businessLine, nowMs) {
   };
 }
 
-async function readSeatFeedback(DB) {
-  const count = await first(DB, "SELECT COUNT(*) AS n FROM seat_feedback");
+async function readSeatFeedback(DB, businessLine) {
+  const count = await first(DB,
+    "SELECT COUNT(*) AS n FROM seat_feedback fb JOIN users u ON u.id=fb.token_id WHERE u.business_line=?",
+    businessLine
+  );
   const rows = await all(DB,
-    "SELECT fb_key,reported_at,day,token_id,cinema_id,movie_id,seq_no,source,status FROM seat_feedback " +
-    "ORDER BY reported_at DESC"
+    "SELECT fb.fb_key,fb.reported_at,fb.day,fb.token_id,fb.cinema_id,fb.movie_id,fb.seq_no,fb.source,fb.status " +
+    "FROM seat_feedback fb JOIN users u ON u.id=fb.token_id WHERE u.business_line=? ORDER BY fb.reported_at DESC",
+    businessLine
   );
   return {
     count: Number(count?.n || 0),
@@ -507,7 +512,7 @@ export async function readAdminDashboard(DB, { businessLine = "maoyan", window =
     readCinemas(DB, businessLine, generatedAt, windowStart),
     readNotifications(DB, businessLine, windowStart),
     readHealth(DB, businessLine, generatedAt),
-    readSeatFeedback(DB)
+    readSeatFeedback(DB, businessLine)
   ]);
   return { generatedAt, window, summary: enrichSummary(summary, users, cinemas, notifications), users, cinemas, notifications, health, seatFeedback };
 }
