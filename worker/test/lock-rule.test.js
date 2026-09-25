@@ -25,7 +25,7 @@ test("immediate order failure queues sanitized diagnostics without retaining a r
     idFromName: (id) => id,
     get: () => ({ fetch: async () => { wakes++; throw new Error("notification unavailable"); } })
   };
-  const failureDetail = JSON.stringify({ stage: "order", status: 403 });
+  const failureDetail = JSON.stringify({ stage: "order", status: 403, "session-token": "LEAK-ME" });
   await assert.rejects(createLockRule(env, "token-a", validInput({ targetDate: "2026-09-11" }), dependencies({
     placeOrder: async () => {
       orders++;
@@ -35,11 +35,47 @@ test("immediate order failure queues sanitized diagnostics without retaining a r
   assert.equal(await getLockRule(env, "token-a"), null);
   const rows = (await env.DB.prepare("SELECT * FROM notification_outbox").all()).results;
   assert.equal(rows.length, 1);
-  assert.equal(rows[0].failure_detail, failureDetail);
+  assert.equal(rows[0].failure_detail, JSON.stringify({ stage: "order", status: 403, "session-token": "[redacted]" }));
   assert.equal(rows[0].last_error, null);
   assert.doesNotMatch(rows[0].payload, /private-cookie/);
+  const payload = JSON.parse(rows[0].payload);
+  assert.equal(payload.meta.triggerSource, "manual");
+  assert.equal(payload.meta.failureStage, "order");
+  assert.equal(payload.meta.failureReason, "order_failed");
+  assert.equal(payload.meta.providerResponse, failureDetail);
+  assert.doesNotMatch(rows[0].failure_detail, /LEAK-ME/);
   assert.equal(wakes, 1);
   assert.equal(orders, 1);
+});
+
+test("immediate terminal notices persist a safe lock rule snapshot", async () => {
+  const env = await envWithConfig();
+  await createLockRule(env, "token-a", validInput({ targetDate: "2026-09-11" }), dependencies({
+    placeOrder: async () => ({ orderId: "order-secret", payLeftSecond: 300 })
+  }));
+
+  const row = await env.DB.prepare("SELECT payload FROM notification_outbox").first();
+  const payload = JSON.parse(row.payload);
+  assert.equal(payload.meta.triggerSource, "manual");
+  assert.deepEqual(payload.meta.lockRule, {
+    cinemaId: "25428",
+    cinemaName: "测试影院",
+    movieId: "7",
+    movieName: "测试电影",
+    hall: "2号杜比巨幕厅-1.3米以下儿童需要购票",
+    targetDate: "2026-09-11",
+    templateDate: "2026-09-11",
+    templateTime: "20:00",
+    targetTime: "20:00",
+    templateSeqNo: "100",
+    targetSeqNo: "100",
+    matchMode: "exact",
+    timeDeltaMinutes: 0,
+    timeToleranceMinutes: 30,
+    seats: [{ label: "6排18座", seatNo: "1-6-18", rowId: "6", columnId: "18", type: "N" }]
+  });
+  assert.equal(JSON.stringify(payload.meta.lockRule).includes("order-secret"), false);
+  assert.equal(JSON.stringify(payload.meta.lockRule).includes("test-token"), false);
 });
 
 test("immediate explicit rejection queues failure and ignores legacy raw detail", async () => {

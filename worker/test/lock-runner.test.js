@@ -433,6 +433,105 @@ test("production order failure deletes the rule, queues failure once, and never 
   assert.equal(attempts, 1);
 });
 
+test("scheduled terminal failure keeps its safe lock rule snapshot after deleting the rule", async () => {
+  const stored = rule({
+    cinemaName: "测试影院",
+    movieName: "测试电影",
+    hall: "2号厅",
+    templateDate: "2026-09-12",
+    templateTime: "20:00",
+    targetTime: "20:10",
+    templateSeqNo: "template-1",
+    targetSeqNo: "target-1",
+    matchMode: "fuzzy",
+    timeDeltaMinutes: 10,
+    timeToleranceMinutes: 30,
+    seats: [{ seatNo: "1-6-18", rowId: "6", columnId: "18", type: "N", label: "6排18座" }],
+    session: "must-not-persist",
+    credential: "must-not-persist",
+    accessToken: "must-not-persist"
+  });
+  const DB = await createDB({
+    tokens: [{ id: tokenId, token: "access-token" }],
+    configs: { [tokenId]: { enabled: true, cinemaId: "25428" } },
+    lockRules: { [tokenId]: stored }
+  });
+  const env = await runtime({ DB });
+  const options = deps(stored, {
+    getConfig: async () => ({ version: 1 }),
+    findShows: () => [],
+    findCompatibleShows: () => [{ seqNo: "target-1", tm: "20:10", th: "2号厅", timeDeltaMinutes: 10 }],
+    fetchSeats: async () => ({ seqNo: "target-1", seats: [{ seatNo: "1-6-18", rowId: "6", columnId: "18", available: true }] }),
+    createOrder: async () => { throw new OrderAttemptError("timeout", true); }
+  });
+  for (const key of ["getRule", "putRule", "removeRule", "notify"]) delete options[key];
+
+  await runOneLockRule(env, tokenId, options);
+
+  assert.equal(await db.getLockRuleRow(DB, tokenId), null);
+  const payload = JSON.parse((await DB.prepare("SELECT payload FROM notification_outbox").first()).payload);
+  assert.equal(payload.meta.triggerSource, "job");
+  assert.equal(payload.meta.failureStage, "order");
+  assert.equal(payload.meta.failureReason, "order_failed");
+  assert.equal(payload.meta.providerResponse, null);
+  assert.deepEqual(payload.meta.lockRule, {
+    cinemaId: "25428",
+    cinemaName: "测试影院",
+    movieId: "7",
+    movieName: "测试电影",
+    hall: "2号厅",
+    targetDate: "2026-09-12",
+    templateDate: "2026-09-12",
+    templateTime: "20:00",
+    targetTime: "20:10",
+    templateSeqNo: "template-1",
+    targetSeqNo: "target-1",
+    matchMode: "fuzzy",
+    timeDeltaMinutes: 10,
+    timeToleranceMinutes: 30,
+    seats: [{ label: "6排18座", seatNo: "1-6-18", rowId: "6", columnId: "18", type: "N" }]
+  });
+  assert.equal(JSON.stringify(payload).includes("must-not-persist"), false);
+});
+
+test("seat precheck failure queues a bounded structured provider summary", async () => {
+  const stored = rule();
+  const DB = await createDB({
+    tokens: [{ id: tokenId, token: "access-token" }],
+    configs: { [tokenId]: { enabled: true, cinemaId: "25428" } },
+    lockRules: { [tokenId]: stored }
+  });
+  const env = await runtime({ DB });
+  let orderCalls = 0;
+  const options = deps(stored, {
+    getConfig: async () => ({ version: 1 }),
+    fetchSeats: async () => ({
+      seqNo: "stale-201",
+      seats: [
+        { seatNo: "1-6-18", rowId: "9", columnId: "99", available: false },
+        { seatNo: "unrequested", rowId: "1", columnId: "1", available: true }
+      ]
+    }),
+    createOrder: async () => { orderCalls++; return {}; }
+  });
+  for (const key of ["getRule", "putRule", "removeRule", "notify"]) delete options[key];
+
+  await runOneLockRule(env, tokenId, options);
+
+  assert.equal(orderCalls, 0);
+  const payload = JSON.parse((await DB.prepare("SELECT payload FROM notification_outbox").first()).payload);
+  assert.equal(payload.meta.triggerSource, "job");
+  assert.equal(payload.meta.failureStage, "seat-precheck");
+  assert.equal(payload.meta.failureReason, "seat-unavailable-or-layout-changed");
+  assert.deepEqual(payload.meta.providerResponse, {
+    expectedSeqNo: "200",
+    actualSeqNo: "stale-201",
+    requestedSeats: [{ seatNo: "1-6-18", rowId: "6", columnId: "18" }],
+    observedSeats: [{ seatNo: "1-6-18", rowId: "9", columnId: "99", available: false }]
+  });
+  assert.equal(JSON.stringify(payload.meta.providerResponse).includes("unrequested"), false);
+});
+
 test("successful order persistence failure does not delete the rule as an order failure", async () => {
   const stored = rule();
   const env = await runtime();

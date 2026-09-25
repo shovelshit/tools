@@ -7,6 +7,13 @@ export function sanitizeFailureText(text, secrets = []) {
   return captureFailureDetail({ status: 0, headers: new Headers() }, String(text ?? ""), session).responseBody;
 }
 
+export function sanitizeFailureJson(text, secrets = []) {
+  const session = { cookies: secrets.map(value => ({ value })) };
+  return captureFailureDetail({ status: 0, headers: new Headers() }, String(text ?? ""), session, {
+    bodyLimit: Number.POSITIVE_INFINITY, maxStringLength: BODY_LIMIT, maxArrayLength: 100, maxObjectKeys: 100
+  }).responseBody;
+}
+
 function sessionSecrets(session) {
   const values = (session.cookies || []).map(cookie => String(cookie.value || ""));
   function collect(value) {
@@ -21,7 +28,10 @@ function sessionSecrets(session) {
     .sort((a, b) => b.length - a.length);
 }
 
-export function captureFailureDetail(response, text, session) {
+export function captureFailureDetail(response, text, session, {
+  bodyLimit = BODY_LIMIT, maxStringLength = Number.POSITIVE_INFINITY,
+  maxArrayLength = Number.POSITIVE_INFINITY, maxObjectKeys = Number.POSITIVE_INFINITY
+} = {}) {
   const secrets = sessionSecrets(session);
   function sanitizeText(value) {
     let clean = String(value);
@@ -40,20 +50,20 @@ export function captureFailureDetail(response, text, session) {
   }
   function sanitizeValue(value, depth = 0) {
     if (depth > 64) return "[redacted-depth-limit]";
-    if (Array.isArray(value)) return value.map(item => sanitizeValue(item, depth + 1));
-    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+    if (Array.isArray(value)) return value.slice(0, maxArrayLength).map(item => sanitizeValue(item, depth + 1));
+    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).slice(0, maxObjectKeys).map(([key, item]) => [
       sanitizeText(key), SENSITIVE_KEY.test(key) ? "[redacted]" : sanitizeValue(item, depth + 1)
     ]));
-    return typeof value === "string" ? sanitizeText(value) : value;
+    return typeof value === "string" ? sanitizeText(value).slice(0, maxStringLength) : value;
   }
   let body;
   try { body = JSON.stringify(sanitizeValue(JSON.parse(text))); }
   catch { body = sanitizeText(text); }
   const bytes = new TextEncoder().encode(body);
-  const bodyTruncated = bytes.length > BODY_LIMIT;
+  const bodyTruncated = bytes.length > bodyLimit;
   // Streaming decode drops an incomplete final UTF-8 sequence at the byte boundary.
   const responseBody = bodyTruncated
-    ? new TextDecoder().decode(bytes.subarray(0, BODY_LIMIT), { stream: true }) : body;
+    ? new TextDecoder().decode(bytes.subarray(0, bodyLimit), { stream: true }) : body;
   const headers = Object.fromEntries(HEADERS.flatMap(name => {
     const value = response.headers.get(name);
     return value === null ? [] : [[name, sanitizeText(value).slice(0, 512)]];

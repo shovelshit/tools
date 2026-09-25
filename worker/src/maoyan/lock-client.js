@@ -9,6 +9,7 @@ const HOST = "www.maoyan.com";
 // Remote Worker verification: m returned a valid order; www returned HTTP 403.
 const ORDER_ORIGIN = "https://m.maoyan.com";
 const TIMEOUT_MS = 15000;
+const PROVIDER_RESPONSE_LIMIT = 16 * 1024;
 const DEFAULT_ORDER_QUERY = {
   yodaReady: "h5",
   csecplatform: "4",
@@ -416,8 +417,15 @@ export async function createUnpaidOrder(session, seatMap, seats) {
   }
   const contentType = response.headers.get("content-type") || "";
   const failure = captureFailureDetail(response, text, session);
+  const providerResponse = {
+    httpStatus: response.status,
+    contentType,
+    responseBody: text.slice(0, PROVIDER_RESPONSE_LIMIT),
+    bodyTruncated: text.length > PROVIDER_RESPONSE_LIMIT
+  };
   const withFailureDetail = (error) => {
     error.failureDetail = JSON.stringify(failure);
+    error.providerResponse = providerResponse;
     return error;
   };
   context.responseType = /json/i.test(contentType) ? "json" : /xml/i.test(contentType) ? "xml" : /html/i.test(contentType) ? "html" : "other";

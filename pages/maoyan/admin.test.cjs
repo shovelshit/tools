@@ -55,6 +55,8 @@ test("dashboard uses full-width monitoring sections with movie, runtime, retry, 
   assert.match(dashboardSource, /activeRunId/);
   assert.match(dashboardSource, /nextDueAt/);
   assert.match(dashboardSource, /latestBatchAt/);
+  assert.match(dashboardSource, /prepare: "准备执行"/);
+  assert.match(dashboardSource, /schedule: "调度执行"/);
   assert.match(dashboardSource, /dashboard-notification-state-filter/);
   assert.match(dashboardSource, /keydown/);
   assert.doesNotMatch(dashboardSource, /innerHTML\s*=/);
@@ -80,10 +82,31 @@ test("notification status opens a safe full-content drawer and closes by button,
   assert.match(elements.get("dashboard-cinemas-body").textContent, /run-1/);
   const notification = elements.get("dashboard-notification-list").children[0];
   const firstDetailLoad = notification.children[0].dispatch("click");
-  resolveDashboard(requests[1], { notification: { title: "标题 <b>", content: "正文 <script>alert(1)</script>", failureDetail: "HTTP 500", meta: { movieId: "101" } } });
+  resolveDashboard(requests[1], { notification: { title: "标题 <b>", content: "正文 <script>alert(1)</script>", failureDetail: '{"httpStatus":500,"responseBody":"内部诊断"}', meta: {
+    movieId: "101",
+    triggerSource: "job",
+    failureStage: "order",
+    failureReason: "provider_rejected",
+    providerResponse: { httpStatus: 500, responseBody: "座位不可用" },
+    lockRule: {
+      cinemaName: "详情影院", movieName: "电影 A", hall: "IMAX 厅", targetDate: "2026-09-30", targetTime: "21:20",
+      templateTime: "21:10", targetSeqNo: "show-1", matchMode: "fuzzy", timeDeltaMinutes: 10,
+      seats: [{ label: "11排23座" }, { label: "11排24座" }]
+    }
+  } } });
   await firstDetailLoad;
   assert.equal(elements.get("dashboard-notification-drawer").classList.contains("hidden"), false);
   assert.match(elements.get("dashboard-notification-drawer-content").textContent, /正文 <script>alert\(1\)<\/script>/);
+  assert.match(elements.get("dashboard-notification-drawer-content").textContent, /锁座规则/);
+  assert.match(elements.get("dashboard-notification-drawer-content").textContent, /详情影院/);
+  assert.match(elements.get("dashboard-notification-drawer-content").textContent, /目标场次/);
+  assert.match(elements.get("dashboard-notification-drawer-content").textContent, /模糊匹配/);
+  assert.match(elements.get("dashboard-notification-drawer-content").textContent, /11排23座、11排24座/);
+  assert.match(elements.get("dashboard-notification-drawer-content").textContent, /定时 Job/);
+  assert.match(elements.get("dashboard-notification-drawer-content").textContent, /创建订单/);
+  assert.match(elements.get("dashboard-notification-drawer-content").textContent, /provider_rejected/);
+  assert.match(elements.get("dashboard-notification-drawer-content").textContent, /猫眼接口返回/);
+  assert.match(elements.get("dashboard-notification-drawer-content").textContent, /座位不可用/);
   assert.equal(elements.get("dashboard-notification-drawer-content").innerHTML, "");
   await elements.get("dashboard-notification-drawer-close").dispatch("click");
   assert.equal(elements.get("dashboard-notification-drawer").classList.contains("hidden"), true);

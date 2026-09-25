@@ -282,7 +282,11 @@ test("admin notification detail returns full content and isolates business lines
   const payload = JSON.stringify({
     title: "新场次通知",
     content: "这是完整通知正文\n包含影片、日期和影厅",
-    meta: { movieId: "101", cinemaId: "cinema-detail", accessToken: "must-not-return" }
+    meta: {
+      movieId: "101", cinemaId: "cinema-detail", accessToken: "must-not-return",
+      providerResponse: { httpStatus: 403, responseBody: "猫眼原始响应".repeat(200) },
+      lockRule: { targetDate: "2026-09-30", seats: [{ label: "11排23座", seatNo: "1-11-23" }] }
+    }
   });
   const maoyanResult = await env.DB.prepare(
     "INSERT INTO notification_outbox(event_key,user_id,kind,payload,credential_version,state,attempts,last_error,failure_detail,next_attempt_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
@@ -309,6 +313,9 @@ test("admin notification detail returns full content and isolates business lines
   assert.equal(detail.notification.failureDetail, "HTTP 403");
   assert.equal(detail.notification.meta.movieId, "101");
   assert.equal(Object.hasOwn(detail.notification.meta, "accessToken"), false);
+  assert.equal(detail.notification.meta.providerResponse.responseBody, "猫眼原始响应".repeat(200));
+  assert.equal(detail.notification.meta.lockRule.targetDate, "2026-09-30");
+  assert.deepEqual(detail.notification.meta.lockRule.seats, [{ label: "11排23座", seatNo: "1-11-23" }]);
 
   const longContent = "完整通知正文".repeat(1_000);
   await env.DB.prepare(

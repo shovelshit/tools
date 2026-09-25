@@ -4,6 +4,7 @@ import { readBusinessPolicy } from "./business-policy-store.js";
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 const RECENT_LIMIT = 20;
 const MAX_NEXT_SHOWS = 5;
+const MAX_PROVIDER_RESPONSE_TEXT = 16 * 1024;
 const ACTIVE_USER_WHERE = "u.role='user' AND u.business_line=? AND u.state='active' AND u.archived_at IS NULL AND u.expires_at>?";
 
 function invalid(message) {
@@ -40,16 +41,16 @@ function clampText(value, max = 2048) {
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
-function safeMeta(value, depth = 0) {
-  if (depth > 2 || value == null) return null;
-  if (typeof value === "string") return clampText(value, 512);
+function safeMeta(value, depth = 0, providerResponse = false) {
+  if (depth > 4 || value == null) return null;
+  if (typeof value === "string") return clampText(value, providerResponse ? MAX_PROVIDER_RESPONSE_TEXT : 512);
   if (typeof value === "number" || typeof value === "boolean") return value;
-  if (Array.isArray(value)) return value.slice(0, 20).map((item) => safeMeta(item, depth + 1));
+  if (Array.isArray(value)) return value.slice(0, 20).map((item) => safeMeta(item, depth + 1, providerResponse));
   if (typeof value !== "object") return null;
   return Object.fromEntries(Object.entries(value)
     .filter(([key]) => !/(credential|password|secret|token|cookie|accesskey)/i.test(key))
     .slice(0, 30)
-    .map(([key, item]) => [key, safeMeta(item, depth + 1)]));
+    .map(([key, item]) => [key, safeMeta(item, depth + 1, providerResponse || key === "providerResponse")]));
 }
 
 function cinemaNameFrom(data) {

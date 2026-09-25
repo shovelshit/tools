@@ -678,6 +678,8 @@ test("failure detail captures diagnostic headers and redacts structured and echo
       assert.equal(detail.bodyTruncated, false);
       assert.match(detail.responseBody, /rejected/);
       assert.doesNotMatch(error.failureDetail, /unknown-secret|unknown-signature|unknown-bearer|test-cookie|test-csrf|test-signature|new-secret/);
+      assert.equal(error.providerResponse.httpStatus, 403);
+      assert.match(error.providerResponse.responseBody, /unknown-secret|unknown-signature|unknown-bearer/);
       return true;
     });
   });

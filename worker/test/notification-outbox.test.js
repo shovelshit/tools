@@ -41,13 +41,27 @@ test("terminal diagnostics survive notification retries without leaking delivery
 test("bounded response diagnostics remain valid JSON above sixteen thousand characters", async () => {
   const env = await createAccountEnv({ nowMs: NOW });
   const { account } = await seedAccount(env, { expiresAt: NOW + 60_000 });
-  const diagnostic = { httpStatus: 403, responseBody: "x".repeat(16384), bodyTruncated: true };
+  const diagnostic = { httpStatus: 403, responseBody: "x".repeat(100_000), bodyTruncated: true };
   await persistTerminalNotification(env, {
     userId: account.id, rule: { id: "large-failure", state: "failed" }, title: "failure", content: "failed",
     failureDetail: JSON.stringify(diagnostic), nowMs: NOW
   });
   const row = await env.DB.prepare("SELECT failure_detail FROM notification_outbox").first();
-  assert.deepEqual(JSON.parse(row.failure_detail), diagnostic);
+  assert.deepEqual(JSON.parse(row.failure_detail), {
+    httpStatus: 403, responseBody: "x".repeat(16_384), bodyTruncated: true
+  });
+});
+
+test("provider response summaries preserve the actual provider response", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  const { account } = await seedAccount(env, { expiresAt: NOW + 60_000 });
+  await persistTerminalNotification(env, {
+    userId: account.id, rule: { id: "provider-secret", state: "failed" }, title: "failure", content: "failed",
+    providerResponse: { httpStatus: 403, responseBody: "provider-secret" }, failureSecrets: ["provider-secret"], nowMs: NOW
+  });
+  const row = await env.DB.prepare("SELECT payload FROM notification_outbox").first();
+  assert.match(row.payload, /provider-secret/);
+  assert.equal(JSON.parse(row.payload).meta.providerResponse.responseBody, "provider-secret");
 });
 
 test("failed lock removes waiting rule but retains a deliverable failure notification", async () => {

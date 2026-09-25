@@ -9,6 +9,8 @@
     const notificationStates = { pending: "待发送", sending: "发送中", sent: "已发送", failed: "发送失败" };
     const lockStates = { locked: "已锁座", failed: "锁座失败", expired: "已过期", completed: "已完成", cancelled: "已取消", waiting_schedule: "等待排期", unknown: "未知" };
     const kindNames = { "new-shows": "新场次", "lock-terminal": "锁座结果", "seat-feedback": "座位反馈", "account-expiry": "到期提醒" };
+    const triggerNames = { manual: "手动锁座", job: "定时 Job" };
+    const failureStageNames = { "seat-precheck": "座位预检", "show-match": "场次匹配", order: "创建订单", prepare: "准备执行", schedule: "调度执行", notification: "通知发送" };
 
     function rows(id, values, columns, empty) {
       const body = $(id); body.textContent = "";
@@ -29,13 +31,61 @@
     }
 
     function closeDrawer() { $("dashboard-notification-drawer")?.classList.add("hidden"); }
+    function appendDetail(content, label, value) {
+      if (value == null || value === "") return;
+      const section = document.createElement("section"); const heading = document.createElement("strong"); heading.textContent = label;
+      const body = document.createElement("p"); body.textContent = String(value); section.append(heading, body); content.append(section);
+    }
+    function appendGroup(content, label, entries) {
+      const section = document.createElement("section"); const heading = document.createElement("strong"); heading.textContent = label; section.append(heading);
+      for (const [entryLabel, value] of entries) {
+        if (value == null || value === "") continue;
+        const body = document.createElement("p"); body.textContent = `${entryLabel}：${value}`; section.append(body);
+      }
+      if (section.children.length > 1) content.append(section);
+    }
+    function displaySeats(rule) {
+      if (!Array.isArray(rule?.seats)) return "";
+      return rule.seats.map((seat) => seat?.label || seat?.seatNo).filter(Boolean).join("、");
+    }
+    function showLockRule(content, rule) {
+      if (!rule || typeof rule !== "object") return;
+      const delta = Number(rule.timeDeltaMinutes);
+      const match = rule.matchMode === "fuzzy"
+        ? `模糊匹配${rule.templateTime ? ` · 模板 ${rule.templateTime}` : ""}${Number.isFinite(delta) ? ` · ${delta >= 0 ? "+" : ""}${delta} 分钟` : ""}`
+        : "精确匹配";
+      appendGroup(content, "锁座规则", [
+        ["目标影院", rule.cinemaName || rule.cinemaId],
+        ["影片", rule.movieName || rule.movieId],
+        ["影厅", rule.hall],
+        ["目标场次", [rule.targetDate, rule.targetTime].filter(Boolean).join(" ")],
+        ["场次 ID", rule.targetSeqNo || rule.templateSeqNo],
+        ["匹配方式", match],
+        ["座位", displaySeats(rule)]
+      ]);
+    }
+    function displayDiagnostic(value) {
+      if (value == null || value === "") return "";
+      if (typeof value === "string") {
+        try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; }
+      }
+      try { return JSON.stringify(value, null, 2); } catch { return String(value); }
+    }
     function showDrawer(notification) {
       const drawer = $("dashboard-notification-drawer"); const content = $("dashboard-notification-drawer-content"); content.textContent = "";
       const title = document.createElement("h4"); title.textContent = text(notification.title || "通知详情"); content.append(title);
-      for (const [label, value] of [["通知 ID", notification.id], ["用户", notification.remark || notification.userId], ["状态", notificationStates[notification.state] || notification.state], ["通知类型", kindNames[notification.kind] || notification.kind], ["创建时间", fmt(notification.createdAt)], ["尝试次数", notification.attempts], ["正文", notification.content], ["发送错误", notification.lastError], ["失败详情", notification.failureDetail]]) {
-        if (value == null || value === "") continue; const section = document.createElement("section"); const heading = document.createElement("strong"); heading.textContent = label; const body = document.createElement("p"); body.textContent = String(value); section.append(heading, body); content.append(section);
-      }
-      if (notification.meta && typeof notification.meta === "object") { const meta = document.createElement("section"); const heading = document.createElement("strong"); heading.textContent = "附加信息"; const body = document.createElement("p"); body.textContent = JSON.stringify(notification.meta); meta.append(heading, body); content.append(meta); }
+      for (const [label, value] of [["通知 ID", notification.id], ["用户", notification.remark || notification.userId], ["状态", notificationStates[notification.state] || notification.state], ["通知类型", kindNames[notification.kind] || notification.kind], ["创建时间", fmt(notification.createdAt)], ["尝试次数", notification.attempts], ["正文", notification.content], ["发送错误", notification.lastError]]) appendDetail(content, label, value);
+      const meta = notification.meta && typeof notification.meta === "object" ? notification.meta : {};
+      showLockRule(content, meta.lockRule);
+      appendGroup(content, "执行诊断", [
+        ["触发来源", triggerNames[meta.triggerSource] || meta.triggerSource],
+        ["失败阶段", failureStageNames[meta.failureStage] || meta.failureStage],
+        ["失败原因", meta.failureReason],
+        ["猫眼接口返回", displayDiagnostic(meta.providerResponse)]
+      ]);
+      appendDetail(content, "失败诊断", displayDiagnostic(notification.failureDetail));
+      const otherMeta = Object.fromEntries(Object.entries(meta).filter(([key]) => !["lockRule", "triggerSource", "failureStage", "failureReason", "providerResponse"].includes(key)));
+      if (Object.keys(otherMeta).length) appendDetail(content, "附加信息", displayDiagnostic(otherMeta));
       drawer.classList.remove("hidden");
     }
     async function openNotification(item) { try { showDrawer((await request(`/api/admin/notifications/${encodeURIComponent(item.id)}?businessLine=maoyan`)).notification || item); } catch (error) { const alert = $("dashboard-error"); alert.textContent = `通知详情加载失败：${error.message}`; alert.classList.remove("hidden"); } }

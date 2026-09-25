@@ -1,7 +1,7 @@
 import { getUserConfig } from "./user.js";
 import { currentCredential, isNotificationVerified, pushNotify } from "./notify.js";
 import { accountStatus } from "./accounts.js";
-import { sanitizeFailureText } from "./failure-detail.js";
+import { sanitizeFailureJson, sanitizeFailureText } from "./failure-detail.js";
 import { readBusinessPolicy } from "./business-policy-store.js";
 import { businessTime, nextMaintenanceStart } from "./business-time.js";
 
@@ -9,6 +9,40 @@ const RETRY_DELAYS = [30_000, 120_000, 600_000];
 const LEASE_MS = 30_000;
 const URGENT_KINDS = new Set(["new-shows", "lock-terminal", "seat-feedback"]);
 const ROUTINE_KIND = "account-expiry";
+const LOCK_RULE_SNAPSHOT_FIELDS = [
+  "cinemaId", "cinemaName", "movieId", "movieName", "hall", "targetDate", "templateDate", "templateTime",
+  "targetTime", "templateSeqNo", "targetSeqNo", "matchMode", "timeDeltaMinutes", "timeToleranceMinutes"
+];
+const LOCK_RULE_SEAT_FIELDS = ["label", "seatNo", "rowId", "columnId", "type"];
+
+function lockRuleSnapshot(rule) {
+  if (!rule || typeof rule !== "object") return null;
+  const snapshot = {};
+  for (const field of LOCK_RULE_SNAPSHOT_FIELDS) {
+    if (Object.hasOwn(rule, field) && rule[field] !== undefined) snapshot[field] = rule[field];
+  }
+  if (Array.isArray(rule.seats)) {
+    snapshot.seats = rule.seats.map((seat) => Object.fromEntries(
+      LOCK_RULE_SEAT_FIELDS
+        .filter((field) => seat && Object.hasOwn(seat, field) && seat[field] !== undefined)
+        .map((field) => [field, seat[field]])
+    ));
+  }
+  return snapshot;
+}
+
+function providerResponseSummary(value) {
+  if (value == null) return null;
+  if (typeof value === "object") {
+    const text = JSON.stringify(value);
+    if (text.length <= 24 * 1024) return value;
+    if (typeof value.responseBody === "string") {
+      return { ...value, responseBody: value.responseBody.slice(0, 16 * 1024), bodyTruncated: true };
+    }
+    return { summary: text.slice(0, 24 * 1024) };
+  }
+  return String(value).slice(0, 24 * 1024);
+}
 
 function errorDetail(error, config) {
   return sanitizeFailureText(String(error?.message || "通知发送失败"), [currentCredential(config)]);
@@ -33,8 +67,12 @@ export async function enqueueNotification(DB, {
 }
 
 export async function persistTerminalNotification(env, {
-  userId, rule, title, content, failureDetail, credentialVersion, nowMs = Date.now()
+  userId, rule, title, content, meta, triggerSource, failureStage, failureReason, providerResponse,
+  failureDetail, failureSecrets = [], credentialVersion, nowMs = Date.now()
 }) {
+  const diagnosticMeta = meta && typeof meta === "object" ? meta : {};
+  const safeFailureDetail = typeof failureDetail === "string"
+    ? sanitizeFailureJson(failureDetail, Array.isArray(failureSecrets) ? failureSecrets : []) : null;
   const result = await env.DB.batch([
     rule.state === "failed" || rule.state === "expired" ? env.DB.prepare(
       "DELETE FROM lock_rule WHERE token_id=? AND json_extract(data,'$.id')=?"
@@ -47,9 +85,17 @@ export async function persistTerminalNotification(env, {
       "event_key,user_id,kind,payload,credential_version,state,attempts,next_attempt_at,lease_until,created_at,updated_at,detected_at,failure_detail" +
       ") VALUES (?,?,?,?,?,'pending',0,?,NULL,?,?,?,?)"
     ).bind(
-      `lock:${rule.id}:${rule.state}`, userId, "lock-terminal", JSON.stringify({ title, content }),
+      `lock:${rule.id}:${rule.state}`, userId, "lock-terminal", JSON.stringify({
+        title, content, meta: {
+          triggerSource: diagnosticMeta.triggerSource ?? triggerSource ?? null,
+          failureStage: diagnosticMeta.failureStage ?? failureStage ?? null,
+          failureReason: diagnosticMeta.failureReason ?? failureReason ?? null,
+          providerResponse: providerResponseSummary(diagnosticMeta.providerResponse ?? providerResponse),
+          lockRule: lockRuleSnapshot(rule)
+        }
+      }),
       Number(credentialVersion || 0), Number(nowMs), Number(nowMs), Number(nowMs), Number(nowMs),
-      typeof failureDetail === "string" ? failureDetail : null
+      safeFailureDetail
     )
   ]);
   return { created: Number(result[1]?.meta?.changes || 0) === 1 };

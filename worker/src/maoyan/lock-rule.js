@@ -7,7 +7,7 @@ import { loadLockSession } from "./lock-session.js";
 import { withSeatFeedback } from "./seat-feedback.js";
 import * as db from "./db.js";
 import { getUserConfig } from "./user.js";
-import { pushNotify } from "./notify.js";
+import { currentCredential, pushNotify } from "./notify.js";
 import { lockError, lockLog } from "./log.js";
 import { lockNotification } from "./notification-copy.js";
 import { requireActiveAccount } from "./auth.js";
@@ -255,6 +255,7 @@ export async function createLockRule(env, tokenId, input, options = {}) {
     lastError: null,
     orderId: null,
     payLeftSecond: null,
+    ...(targetShow ? { targetTime: template.time, matchMode: "exact", timeDeltaMinutes: 0 } : {}),
     ...extra
   });
   if (targetShow) {
@@ -264,15 +265,22 @@ export async function createLockRule(env, tokenId, input, options = {}) {
     try {
       order = await placeOrder(session, seatMap, seats.map((seat) => seat.seatNo));
     } catch (error) {
+      const rejected = error instanceof OrderAttemptError && !error.uncertain;
       const failedRule = buildRule("failed", { lastError: "锁座失败，未获得有效订单" });
       const notification = lockNotification(failedRule);
       await persistTerminalNotification(env, {
         userId: tokenId, rule: failedRule, ...notification,
+        meta: {
+          triggerSource: "manual", failureStage: "order",
+          failureReason: rejected ? "provider_rejected" : "order_failed",
+        providerResponse: error?.providerResponse || error?.failureDetail
+        },
+        failureSecrets: [currentCredential(config)],
         failureDetail: error?.failureDetail, credentialVersion: config.version,
         nowMs: new Date(now).getTime()
       });
       try { await wakeNotificationDispatcher(env, { kind: "lock-terminal", userId: tokenId }); } catch {}
-      if (error instanceof OrderAttemptError && !error.uncertain) {
+      if (rejected) {
         lockError("rule_create", { phase: "complete", state: "failed", reason: "provider_rejected" });
         // 标记为上游拒绝: 协调器与 API 边界据此返回 502 并保留原文案, 而不是降级成笼统的 500
         const rejected = new Error(
@@ -296,6 +304,7 @@ export async function createLockRule(env, tokenId, input, options = {}) {
       const notification = lockNotification(rule);
       await persistTerminalNotification(env, {
         userId: tokenId, rule, ...notification,
+        meta: { triggerSource: "manual" },
         credentialVersion: config.version, nowMs: new Date(now).getTime()
       });
       try { await wakeNotificationDispatcher(env, { kind: "lock-terminal", userId: tokenId }); } catch {}

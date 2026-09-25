@@ -6,7 +6,7 @@ import {
   RULE_KNOWN_ERRORS
 } from "./lock-rule.js";
 import { getUserConfig } from "./user.js";
-import { pushNotify } from "./notify.js";
+import { currentCredential, pushNotify } from "./notify.js";
 import { lockError, lockLog } from "./log.js";
 import { withSeatFeedback } from "./seat-feedback.js";
 import { lockNotification } from "./notification-copy.js";
@@ -35,6 +35,24 @@ function seatsMatch(rule, seatMap) {
     const hit = future.get(String(seat.seatNo));
     return hit && hit.available === true && String(hit.rowId) === String(seat.rowId) && String(hit.columnId) === String(seat.columnId);
   });
+}
+
+function seatPrecheckSummary(rule, show, seatMap) {
+  const requestedSeats = (rule.seats || []).map((seat) => ({
+    seatNo: String(seat.seatNo), rowId: String(seat.rowId), columnId: String(seat.columnId)
+  }));
+  const requested = new Set(requestedSeats.map((seat) => seat.seatNo));
+  const observedSeats = (seatMap?.seats || [])
+    .filter((seat) => requested.has(String(seat.seatNo)))
+    .map((seat) => ({
+      seatNo: String(seat.seatNo), rowId: String(seat.rowId), columnId: String(seat.columnId), available: seat.available === true
+    }));
+  return {
+    expectedSeqNo: String(show.seqNo),
+    actualSeqNo: seatMap?.seqNo == null ? null : String(seatMap.seqNo),
+    requestedSeats,
+    observedSeats
+  };
 }
 
 function ruleTimeTolerance(value) {
@@ -102,7 +120,14 @@ async function terminal(env, tokenId, rule, state, changes, deps) {
       rule: next,
       title: notification.title,
       content: notification.content,
+      meta: {
+        triggerSource: "job",
+        failureStage: changes.failureStage,
+        failureReason: changes.failureReason,
+        providerResponse: changes.providerResponse || changes.failureDetail
+      },
       failureDetail: changes.failureDetail,
+      failureSecrets: [currentCredential(config)],
       credentialVersion: config.version,
       nowMs: new Date(now).getTime()
     });
@@ -128,7 +153,9 @@ export async function runOneLockRule(env, tokenId, deps = {}) {
   }
 
   const now = (deps.now || (() => new Date()))();
-  if (rule.targetDate < chinaDate(now)) return await terminal(env, tokenId, rule, "expired", { lastError: "目标场次已过期" }, deps);
+  if (rule.targetDate < chinaDate(now)) return await terminal(env, tokenId, rule, "expired", {
+    lastError: "目标场次已过期", failureStage: "schedule", failureReason: "target_expired"
+  }, deps);
 
   const fetchCinema = deps.fetchCinema;
   if (typeof fetchCinema !== "function") {
@@ -152,7 +179,9 @@ export async function runOneLockRule(env, tokenId, deps = {}) {
       const lastError = target.reason === "fuzzy"
         ? "目标日期存在多个同厅型且时间相近场次"
         : "目标日期存在多个相同时间场次";
-      return await terminal(env, tokenId, rule, "failed", { lastError }, deps);
+      return await terminal(env, tokenId, rule, "failed", {
+        lastError, failureStage: "show-match", failureReason: "ambiguous_show"
+      }, deps);
     }
     show = target.show;
     const matchMode = target.matchMode;
@@ -184,10 +213,12 @@ export async function runOneLockRule(env, tokenId, deps = {}) {
     if (shouldCancel()) return { ok: true, skipped: true };
     if (String(seatMap?.seqNo) !== String(show.seqNo) || !seatsMatch(rule, seatMap)) {
       const error = new Error("所选未来座位不可用或影厅布局已变化");
-      if (matchMode === "exact") {
-        return await terminal(env, tokenId, rule, "failed", { lastError: error.message }, deps);
-      }
-      throw error;
+      return await terminal(env, tokenId, matching || rule, "failed", {
+        lastError: error.message,
+        failureStage: "seat-precheck",
+        failureReason: "seat-unavailable-or-layout-changed",
+        providerResponse: seatPrecheckSummary(rule, show, seatMap)
+      }, deps);
     }
     if (!matching) {
       matching = await saveRule(env, tokenId, rule, matchingChanges, deps);
@@ -200,7 +231,9 @@ export async function runOneLockRule(env, tokenId, deps = {}) {
   } catch (error) {
     if (matching) {
       lockError("scheduled_rule", { phase: "prepare", state: "failed", reason: "provider_data_unavailable" });
-      return await terminal(env, tokenId, matching, "failed", { lastError: messageFor(error) }, deps);
+      return await terminal(env, tokenId, matching, "failed", {
+        lastError: messageFor(error), failureStage: "prepare", failureReason: "provider_data_unavailable"
+      }, deps);
     }
     lockError("scheduled_rule", { phase: "prepare", state: "waiting_schedule", reason: "provider_data_unavailable" });
     await saveRule(env, tokenId, rule, { lastError: messageFor(error) }, deps);
@@ -212,8 +245,12 @@ export async function runOneLockRule(env, tokenId, deps = {}) {
   try {
     order = await createOrder(session, seatMap, matching.seats.map((seat) => seat.seatNo));
   } catch (error) {
+    const rejected = error instanceof OrderAttemptError && !error.uncertain;
     return await terminal(env, tokenId, matching, "failed", {
       lastError: "锁座失败，未获得有效订单",
+      failureStage: "order",
+      failureReason: rejected ? "provider_rejected" : "order_failed",
+      providerResponse: error?.providerResponse || error?.failureDetail || null,
       failureDetail: error?.failureDetail || null
     }, deps);
   }
