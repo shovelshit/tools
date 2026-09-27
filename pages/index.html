@@ -1,81 +1,77 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>工具箱 · Tools</title>
+  <meta name="theme-color" content="#f7f9f8" />
+  <title>工具箱 · LTools</title>
   <style>
-    :root {
-      --bg: #f5f6f8;
-      --card: #fff;
-      --border: #e4e7ec;
-      --text: #2c3e50;
-      --muted: #8a94a6;
-      --primary: #2563eb;
-      --shadow: 0 1px 3px rgba(0,0,0,.06);
+    :root { color-scheme: light; --ink: #202c2c; --muted: #667473; --line: #dce4e0; --accent: #236c57; --surface: #f7f9f8; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: var(--surface); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; line-height: 1.6; }
+    a { color: inherit; }
+    a:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+    .shell { width: min(100% - 40px, 780px); margin: 0 auto; }
+    .topbar { border-bottom: 1px solid var(--line); background: #fff; }
+    .topbar .shell { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 64px; }
+    .brand { font-size: 15px; font-weight: 750; text-decoration: none; white-space: nowrap; }
+    .brand-mark { color: var(--accent); margin-right: 6px; }
+    .nav-link { font-size: 14px; color: var(--accent); font-weight: 600; text-decoration: none; white-space: nowrap; }
+    .nav-link:hover, .footer a:hover { text-decoration: underline; }
+    main { padding: 64px 0 80px; }
+    .eyebrow { color: var(--accent); font-size: 12px; font-weight: 700; margin: 0 0 12px; }
+    h1 { font-size: 34px; line-height: 1.2; margin: 0 0 12px; font-weight: 760; }
+    .intro { margin: 0; font-size: 15px; color: var(--muted); }
+    .guide-callout { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 36px 0 48px; padding: 18px 20px; background: #eaf4ee; border: 1px solid #d0e3d7; border-radius: 8px; text-decoration: none; }
+    .guide-callout:hover { border-color: var(--accent); }
+    .guide-callout strong { display: block; font-size: 15px; }
+    .guide-callout span { display: block; color: #557266; font-size: 13px; margin-top: 2px; }
+    .guide-arrow { color: var(--accent) !important; font-size: 20px !important; flex: none; }
+    h2 { margin: 0 0 16px; font-size: 17px; }
+    .tools { list-style: none; padding: 0; margin: 0; border-top: 1px solid var(--line); }
+    .tools li { border-bottom: 1px solid var(--line); }
+    .tool { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 21px 4px; text-decoration: none; }
+    .tool:hover .tool-title { color: var(--accent); }
+    .icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 8px; font-size: 22px; background: #e8eef4; }
+    .tools li:nth-child(2) .icon { background: #f7eee1; }
+    .tools li:nth-child(3) .icon { background: #e6f2ec; }
+    .tools li:nth-child(4) .icon { background: #eeeafb; }
+    .tool-title { display: block; font-size: 16px; font-weight: 680; }
+    .tool-detail { display: block; margin-top: 3px; color: var(--muted); font-size: 13px; }
+    .tool-arrow { color: #8a9994; font-size: 18px; }
+    .footer { border-top: 1px solid var(--line); padding: 20px 0 28px; font-size: 12px; color: var(--muted); }
+    .footer .shell { display: flex; justify-content: space-between; gap: 16px; }
+    @media (max-width: 600px) {
+      .shell { width: min(100% - 32px, 780px); }
+      main { padding-top: 44px; padding-bottom: 60px; }
+      h1 { font-size: 30px; }
+      .guide-callout { margin: 28px 0 40px; padding: 16px; }
+      .tool { gap: 12px; padding: 18px 0; }
+      .tool-detail { font-size: 12px; }
+      .footer .shell { flex-wrap: wrap; }
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-      background: var(--bg); color: var(--text); min-height: 100vh;
-    }
-    header {
-      background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 55%, #3b82f6 100%);
-      color: #fff; padding: 40px 24px 48px; text-align: center;
-    }
-    header h1 { font-size: 26px; margin-bottom: 8px; }
-    header p { color: rgba(255,255,255,.8); font-size: 14px; }
-    main { max-width: 860px; margin: -24px auto 0; padding: 0 20px 60px; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
-    a.tool {
-      display: block; background: var(--card); border: 1px solid var(--border);
-      border-radius: 14px; padding: 22px; text-decoration: none; color: var(--text);
-      box-shadow: var(--shadow); transition: transform .15s, box-shadow .15s;
-    }
-    a.tool:hover { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(0,0,0,.10); }
-    .tool .icon { font-size: 34px; margin-bottom: 12px; }
-    .tool h2 { font-size: 16px; margin-bottom: 6px; }
-    .tool p { font-size: 13px; color: var(--muted); line-height: 1.6; }
-    .tool .tag {
-      display: inline-block; margin-top: 12px; font-size: 11px; color: var(--primary);
-      background: #eff6ff; border-radius: 20px; padding: 3px 10px;
-    }
-    footer { text-align: center; color: var(--muted); font-size: 12px; padding-bottom: 30px; }
   </style>
 </head>
 <body>
-  <header>
-    <h1>🧰 工具箱</h1>
-    <p>实用工具集合 · 云端托管，自动运行</p>
-  </header>
-  <main>
-    <div class="grid">
-      <a class="tool" href="maoyan/">
-        <div class="icon">🎬</div>
-        <h2>电影场次监控</h2>
-        <p>监控影院新增场次，云端定时检查，Bark / Server酱 推送到手机</p>
-        <span class="tag">云端自动监控</span>
-      </a>
-      <a class="tool" href="store/">
-        <div class="icon">📦</div>
-        <h2>应用商店</h2>
-        <p>浏览和下载 AList 网盘中的应用，云端加速直连，支持在线预览</p>
-        <span class="tag">云端直连加速</span>
-      </a>
-      <a class="tool" href="https://github.com/shovelshit/LynkCoHelper" target="_blank" rel="noopener">
-        <div class="icon">🚗</div>
-        <h2>领克签到助手</h2>
-        <p>领克 App 自动签到，支持每日签到、分享任务、积分查询与 Bark 推送，可定时自动运行</p>
-        <span class="tag">Python 脚本</span>
-      </a>
-      <a class="tool" href="https://github.com/shovelshit/BLE-debug" target="_blank" rel="noopener">
-        <div class="icon">📶</div>
-        <h2>蓝牙调试助手</h2>
-        <p>微信小程序版低功耗蓝牙调试工具，扫描设备、读写特征值、订阅通知，可替代 nRF Connect</p>
-        <span class="tag">微信小程序 + iOS</span>
-      </a>
-    </div>
+  <header class="topbar"><div class="shell">
+    <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">◆</span>LTools</a>
+    <a class="nav-link" href="https://guide.ltools.asia/">使用教程 ↗</a>
+  </div></header>
+  <main class="shell">
+    <p class="eyebrow">TOOLS / 工具目录</p>
+    <h1>工具箱</h1>
+    <p class="intro">选择一个工具开始使用。</p>
+    <a class="guide-callout" href="https://guide.ltools.asia/"><div><strong>使用教程</strong><span>安装、配置和常见问题，按项目查阅</span></div><span class="guide-arrow" aria-hidden="true">↗</span></a>
+    <section aria-labelledby="tools-title">
+      <h2 id="tools-title">所有工具</h2>
+      <ul class="tools">
+        <li><a class="tool" href="maoyan/"><span class="icon" aria-hidden="true">🎬</span><span><span class="tool-title">电影场次监控</span><span class="tool-detail">关注影院排片变化，接收开售提醒</span></span><span class="tool-arrow" aria-hidden="true">↗</span></a></li>
+        <li><a class="tool" href="store/"><span class="icon" aria-hidden="true">📦</span><span><span class="tool-title">应用商店</span><span class="tool-detail">浏览、预览和下载网盘应用</span></span><span class="tool-arrow" aria-hidden="true">↗</span></a></li>
+        <li><a class="tool" href="https://github.com/shovelshit/LynkCoHelper" target="_blank" rel="noopener noreferrer"><span class="icon" aria-hidden="true">🚗</span><span><span class="tool-title">领克签到助手</span><span class="tool-detail">自动签到与积分任务 · GitHub 项目</span></span><span class="tool-arrow" aria-hidden="true">↗</span></a></li>
+        <li><a class="tool" href="https://github.com/shovelshit/BLE-debug" target="_blank" rel="noopener noreferrer"><span class="icon" aria-hidden="true">📶</span><span><span class="tool-title">蓝牙调试助手</span><span class="tool-detail">扫描和调试 BLE 设备 · GitHub 项目</span></span><span class="tool-arrow" aria-hidden="true">↗</span></a></li>
+      </ul>
+    </section>
   </main>
-  <footer>更多工具陆续添加 · <a href="https://github.com/shovelshit/tools" style="color:inherit">GitHub</a></footer>
+  <footer class="footer"><div class="shell"><span>© LTools</span><a href="https://github.com/shovelshit/tools" target="_blank" rel="noopener noreferrer">GitHub</a></div></footer>
 </body>
 </html>

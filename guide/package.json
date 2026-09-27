@@ -1,0 +1,14 @@
+{
+  "name": "ltools-guide",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "vitepress dev --host 127.0.0.1",
+    "build": "vitepress build",
+    "preview": "vitepress preview --host 127.0.0.1",
+    "test": "node --test test/*.test.cjs"
+  },
+  "devDependencies": {
+    "vitepress": "1.6.4"
+  }
+}
