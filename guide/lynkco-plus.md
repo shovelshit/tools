@@ -40,9 +40,9 @@
 
    <GuideFigure src="/images/lynkco-plus/09-capture-running.webp" alt="ProxyPin 正在抓包的页面" caption="图 9 · 查看抓包状态" />
 
-## 2、验证 refresh
+## 2、验证 mobileCodeLogin/refresh
 
-1. 打开领克 App 产生请求，再回到 ProxyPin 搜索 `refresh`，检查是否出现对应请求。不同操作和登录状态下不一定会产生该请求；没有结果时先确认抓包仍在运行，并在应用中执行相关操作后重新搜索。
+1. 开启proxypin抓包，打开领克 App 产生请求，使用手机号验证码方式重新登录触发 mobileCodeLogin 接口或者如果超过半小时不打开领克 App 打开时会自动触发 refresh 接口。 以上两步任一完成后回到 ProxyPin 搜索 `refresh` 或 `mobileCodeLogin`，检查是否出现对应请求。没有结果时先确认抓包仍在运行，并在应用中执行相关操作后重新搜索。
 
    <GuideFigure src="/images/lynkco-plus/10-refresh-request.webp" alt="ProxyPin 搜索 refresh 的请求列表" caption="图 10 · 查找 refresh 请求" />
 
@@ -60,7 +60,11 @@
 
    <GuideFigure src="/images/lynkco-plus/13-share-code-request.webp" alt="ProxyPin 搜索 getShareCode 的请求列表" caption="图 13 · 查找 getShareCode 请求" />
 
-## 4、导出 HAR
+## 4、获取车辆详情
+
+1. 在领克 App 爱车页面点击一次更多，触发 `vehicle-detail` 接口。
+
+## 5、导出 HAR
 
 1. 在 ProxyPin 请求列表点击右上角菜单，选择“视图导出”。
 
@@ -70,6 +74,6 @@
 
    <GuideFigure src="/images/lynkco-plus/15-export-har.webp" alt="ProxyPin 视图导出的 HAR 选项" caption="图 15 · 选择 HAR" />
 
-## 5、设置云端任务
+## 6、设置云端任务
 
 1. 获取免费邀请码，浏览器打开 [工具登录页](https://lynkco.ltools.asia/login) 按照步骤操作即可。
