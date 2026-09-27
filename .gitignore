@@ -31,3 +31,8 @@ __pycache__/
 local/hthotel-ops-connectivity-cli-v*/
 worker-locktest/
 worker/.public-build-*/
+
+# Independent VitePress guide build artifacts
+guide/node_modules/
+guide/.vitepress/cache/
+guide/.vitepress/dist/
