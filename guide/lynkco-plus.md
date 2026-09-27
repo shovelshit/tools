@@ -1,4 +1,4 @@
-# Lynkco-push 配置教程
+# Lynkco-plus 配置教程
 
 ## 1、抓包
 
@@ -69,3 +69,7 @@
 2. 选择 HAR 并保存文件，在本地核对其中是否包含目标请求。HAR 可能含有令牌、Cookie、设备标识及其他无关流量，不要公开上传未经检查的 HAR 文件。
 
    <GuideFigure src="/images/lynkco-plus/15-export-har.webp" alt="ProxyPin 视图导出的 HAR 选项" caption="图 15 · 选择 HAR" />
+
+## 5、设置云端任务
+
+1. 获取免费邀请码，浏览器打开 [工具登录页](https://lynkco.ltools.asia/login) 按照步骤操作即可。

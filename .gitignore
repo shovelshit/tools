@@ -36,3 +36,4 @@ worker/.public-build-*/
 guide/node_modules/
 guide/.vitepress/cache/
 guide/.vitepress/dist/
+guide-captures/
