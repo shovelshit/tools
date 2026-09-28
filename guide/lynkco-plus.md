@@ -2,13 +2,13 @@
 
 ## 1、抓包
 
-在自己的 iPhone 上使用 ProxyPin 准备抓包。安装根证书及授权 VPN 抓包仅限自己的设备和已获授权的流量；完成后按需关闭抓包并撤销不再使用的证书信任。
+在自己的 `iPhone` 或者安卓设备上使用 `ProxyPin` 准备抓包。安装根证书及授权 `VPN` 抓包仅限自己的设备和已获授权的流量；完成后按需关闭抓包并撤销不再使用的证书信任。
 
-1. 在 App Store 搜索 ProxyPin，确认应用名称后下载安装。
+1. 苹果在 `App Store` 搜索 `ProxyPin` 或者 `Stream`，确认应用名称后下载安装。安卓 `ProxyPin` [下载页](https://github.com/wanghongenpin/proxypin/releases/tag/v1.3.1)
 
    <GuideFigure src="/images/lynkco-plus/01-appstore-install.webp" alt="App Store 中的 ProxyPin 安装页面" caption="图 1 · 安装 ProxyPin" />
 
-2. 打开 ProxyPin 的 HTTPS 代理设置，进入“安装根证书”。
+2. 打开 `ProxyPin` 的 `HTTPS` 代理设置，进入“安装根证书”。
 
    <GuideFigure src="/images/lynkco-plus/02-certificate-entry.webp" alt="ProxyPin 设置中的 HTTPS 证书入口" caption="图 2 · 打开证书设置" />
 
@@ -16,7 +16,7 @@
 
    <GuideFigure src="/images/lynkco-plus/03-download-profile.webp" alt="ProxyPin 的下载证书描述文件页面" caption="图 3 · 下载证书描述文件" />
 
-4. 在 iPhone 设置中找到已下载的 ProxyPin CA 描述文件，点击“安装”。
+4. 在 `iPhone` 设置中找到已下载的 `ProxyPin CA` 描述文件，点击“安装”。
 
    <GuideFigure src="/images/lynkco-plus/04-install-profile.webp" alt="iPhone 设置中的安装描述文件页面" caption="图 4 · 安装描述文件" />
 
@@ -24,31 +24,31 @@
 
    <GuideFigure src="/images/lynkco-plus/05-certificate-warning.webp" alt="iPhone 安装根证书时的警告页面" caption="图 5 · 确认证书警告" />
 
-6. 进入“设置 → 通用 → 关于本机 → 证书信任设置”，开启 ProxyPin CA 的完全信任。
+6. 进入“设置 → 通用 → 关于本机 → 证书信任设置”，开启 `ProxyPin CA` 的完全信任。
 
    <GuideFigure src="/images/lynkco-plus/06-trust-certificate.webp" alt="iPhone 设置中的根证书信任开关" caption="图 6 · 信任根证书" />
 
-7. 回到 ProxyPin 首页，点击右下角的开始按钮。
+7. 回到 `ProxyPin` 首页，点击右下角的开始按钮。
 
    <GuideFigure src="/images/lynkco-plus/07-start-capture.webp" alt="ProxyPin 首页的开始抓包按钮" caption="图 7 · 开始抓包" />
 
-8. 首次启动时，系统会询问是否允许添加 VPN 配置；确认只抓取已获授权的流量后点击“允许”。
+8. 首次启动时，系统会询问是否允许添加 `VPN` 配置；确认只抓取已获授权的流量后点击“允许”。
 
    <GuideFigure src="/images/lynkco-plus/08-allow-vpn.webp" alt="iPhone 的 VPN 配置授权提示" caption="图 8 · 允许 VPN 配置" />
 
-9. 返回 ProxyPin，确认右下角显示停止按钮，表示抓包已开启。此时页面可能仍为空，需在获授权的应用中产生请求后才会看到记录。
+9. 返回 `ProxyPin`，确认右下角显示停止按钮，表示抓包已开启。此时页面可能仍为空，需在获授权的应用中产生请求后才会看到记录。
 
    <GuideFigure src="/images/lynkco-plus/09-capture-running.webp" alt="ProxyPin 正在抓包的页面" caption="图 9 · 查看抓包状态" />
 
-## 2、验证 mobileCodeLogin/refresh
+## 2、验证 `mobileCodeLogin`/`refresh`
 
-1. 开启proxypin抓包，打开领克 App 产生请求，使用手机号验证码方式重新登录触发 mobileCodeLogin 接口或者如果超过半小时不打开领克 App 打开时会自动触发 refresh 接口。 以上两步任一完成后回到 ProxyPin 搜索 `refresh` 或 `mobileCodeLogin`，检查是否出现对应请求。没有结果时先确认抓包仍在运行，并在应用中执行相关操作后重新搜索。
+1. 开启 `ProxyPin` 抓包，打开领克 `App` 产生请求，使用手机号验证码方式重新登录触发 `mobileCodeLogin` 接口或者如果超过半小时不打开领克 `App` 打开时会自动触发 `refresh` 接口。 以上两步任一完成后回到 `ProxyPin` 搜索 `refresh` 或 `mobileCodeLogin`，检查是否出现对应请求。没有结果时先确认抓包仍在运行，并在应用中执行相关操作后重新搜索。
 
    <GuideFigure src="/images/lynkco-plus/10-refresh-request.webp" alt="ProxyPin 搜索 refresh 的请求列表" caption="图 10 · 查找 refresh 请求" />
 
 ## 3、获取分享请求
 
-1. 在领克 App 首页打开任意一条动态。
+1. 在领克 `App` 首页打开任意一条动态。
 
    <GuideFigure src="/images/lynkco-plus/11-lynkco-post.webp" alt="领克 App 中的一条动态" caption="图 11 · 打开领克动态" />
 
@@ -56,21 +56,21 @@
 
    <GuideFigure src="/images/lynkco-plus/12-share-sheet.webp" alt="领克动态的分享菜单" caption="图 12 · 分享动态" />
 
-3. 返回 ProxyPin 搜索 `getShareCode`，检查是否出现分享请求。如果没有结果，确认抓包状态，并重新打开动态的分享菜单。
+3. 返回 `ProxyPin` 搜索 `getShareCode`，检查是否出现分享请求。如果没有结果，确认抓包状态，并重新打开动态的分享菜单。
 
    <GuideFigure src="/images/lynkco-plus/13-share-code-request.webp" alt="ProxyPin 搜索 getShareCode 的请求列表" caption="图 13 · 查找 getShareCode 请求" />
 
 ## 4、获取车辆详情
 
-1. 在领克 App 爱车页面点击一次更多，触发 `vehicle-detail` 接口。
+1. 在领克 `App` 爱车页面点击一次更多，触发 `vehicle-detail` 接口。
 
-## 5、导出 HAR
+## 5、导出 `HAR`
 
-1. 在 ProxyPin 请求列表点击右上角菜单，选择“视图导出”。
+1. 在 `ProxyPin` 请求列表点击右上角菜单，选择“视图导出”。
 
    <GuideFigure src="/images/lynkco-plus/14-export-menu.webp" alt="ProxyPin 请求列表的视图导出菜单" caption="图 14 · 打开视图导出" />
 
-2. 选择 HAR 并保存文件，在本地核对其中是否包含目标请求。HAR 可能含有令牌、Cookie、设备标识及其他无关流量，不要公开上传未经检查的 HAR 文件。
+2. 选择 `HAR` 并保存文件，在本地核对其中是否包含目标请求。`HAR` 可能含有令牌、`Cookie`、设备标识及其他无关流量，不要公开上传未经检查的 `HAR` 文件。
 
    <GuideFigure src="/images/lynkco-plus/15-export-har.webp" alt="ProxyPin 视图导出的 HAR 选项" caption="图 15 · 选择 HAR" />
 
