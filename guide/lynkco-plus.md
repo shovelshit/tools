@@ -74,6 +74,6 @@
 
    <GuideFigure src="/images/lynkco-plus/15-export-har.webp" alt="ProxyPin 视图导出的 HAR 选项" caption="图 15 · 选择 HAR" />
 
-## 6、设置云端任务
+## 6、领取邀请码，设置云端任务
 
-1. 导出 `HAR` 文件后获取[免费邀请码](https://lynkco.ltools.asia/claim/KjybyNSjUwtbw6eFC55w9D89MMxHXpxCJzC_oUUHbVM)，完成页面操作步骤即可。
+1. 上述步骤完成后获取[免费邀请码](https://lynkco.ltools.asia/claim/KjybyNSjUwtbw6eFC55w9D89MMxHXpxCJzC_oUUHbVM)，完成页面操作步骤即可。已在其他渠道领取的不要重复领。
