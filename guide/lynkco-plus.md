@@ -76,4 +76,4 @@
 
 ## 6、设置云端任务
 
-1. 获取免费邀请码，浏览器打开 [工具登录页](https://lynkco.ltools.asia/login) 按照步骤操作即可。
+1. 导出 `HAR` 文件后获取[免费邀请码](https://lynkco.ltools.asia/claim/KjybyNSjUwtbw6eFC55w9D89MMxHXpxCJzC_oUUHbVM)，完成页面操作步骤即可。
