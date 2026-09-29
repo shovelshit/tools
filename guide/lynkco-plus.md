@@ -60,9 +60,9 @@
 
    <GuideFigure src="/images/lynkco-plus/13-share-code-request.webp" alt="ProxyPin 搜索 getShareCode 的请求列表" caption="图 13 · 查找 getShareCode 请求" />
 
-## 4、获取车辆详情
+## ~~4、获取车辆详情~~
 
-1. 在领克 `App` 爱车页面点击一次更多，触发 `vehicle-detail` 接口。
+~~1. 在领克 `App` 爱车页面点击一次更多，触发 `vehicle-detail` 接口。~~
 
 ## 5、导出 `HAR`
 
