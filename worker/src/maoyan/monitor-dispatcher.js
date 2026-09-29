@@ -1,4 +1,5 @@
 import { listDueCinemas } from "./monitor-store.js";
+import { monitorLog } from "./log.js";
 
 const PAGE_SIZE = 20;
 
@@ -32,29 +33,52 @@ export class MonitorDispatcher {
   }
 
   async drain() {
+    const startedAt = Date.now();
     const storage = this.state.storage;
     const current = await storage.get("currentBatch");
-    if (!current) return { processed: 0, pending: false };
+    if (!current) {
+      const result = { processed: 0, pending: false };
+      monitorLog("batch_dispatch", {
+        pageSize: PAGE_SIZE, cinemaCount: 0, pageReadDurationMs: 0,
+        dispatchDurationMs: 0, ...result, durationMs: Date.now() - startedAt
+      });
+      return result;
+    }
+    const runId = String(current.runId || current.batchId || "");
+    const batchId = String(current.batchId || current.runId || "");
+    const pageStartedAt = Date.now();
     const page = await listDueCinemas(this.env.DB, {
       nowMs: Number(current.nowMs),
       afterCinemaId: current.cursor || "",
       limit: PAGE_SIZE
     });
+    const pageReadDurationMs = Date.now() - pageStartedAt;
     const dispatch = this.deps.dispatchCinema || dispatchCinema;
     await storage.setAlarm(Date.now() + 30_000);
     let cursor = current.cursor || "";
     let processed = 0;
+    const finish = (result, extra = {}) => {
+      monitorLog("batch_dispatch", {
+        runId, batchId, nowMs: Number(current.nowMs), pageSize: PAGE_SIZE,
+        cinemaCount: page.items.length, pageReadDurationMs,
+        dispatchDurationMs: Date.now() - pageStartedAt - pageReadDurationMs,
+        processed, cursor, nextCursor: page.nextCursor || "", ...result, ...extra,
+        durationMs: Date.now() - startedAt
+      });
+      return result;
+    };
     for (const cinemaId of page.items) {
       let result;
       try {
         result = await dispatch(this.env, { cinemaId, runId: current.runId || current.batchId, nowMs: current.nowMs });
       } catch (error) {
         await storage.put("currentBatch", { ...current, cursor });
+        finish({ pending: true }, { errorName: error?.name || "Error" });
         throw error;
       }
       if (result && (result.completed === false || result.retryable === true)) {
         await storage.put("currentBatch", { ...current, cursor });
-        return { processed, pending: true };
+        return finish({ processed, pending: true });
       }
       cursor = cinemaId;
       processed += 1;
@@ -62,7 +86,7 @@ export class MonitorDispatcher {
     if (page.nextCursor) {
       await storage.put("currentBatch", { ...current, cursor: page.nextCursor });
       await storage.setAlarm(Date.now() + 1000);
-      return { processed, pending: true };
+      return finish({ processed, pending: true });
     }
     await storage.delete("currentBatch");
     const pending = await storage.get("pendingBatch");
@@ -70,10 +94,10 @@ export class MonitorDispatcher {
       await storage.delete("pendingBatch");
       await storage.put("currentBatch", pending);
       await storage.setAlarm(Date.now() + 1000);
-      return { processed, pending: true };
+      return finish({ processed, pending: true });
     }
     await storage.deleteAlarm();
-    return { processed, pending: false };
+    return finish({ processed, pending: false });
   }
 
   async fetch(request) {

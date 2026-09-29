@@ -6,7 +6,7 @@ import { diffCinemaSnapshot } from "./monitor-store.js";
 import { chinaDate, resolveLockTarget, runScheduledLockAfterMonitor } from "./lock-runner.js";
 import { orderLockCandidates, runBounded } from "./lock-lottery.js";
 import { allowManualOperation } from "./resource-budget.js";
-import { monitorError } from "./log.js";
+import { monitorError, monitorLog } from "./log.js";
 
 function eventText(event) {
   const first = event.shows[0] || {};
@@ -72,14 +72,17 @@ async function advanceRunNotifications(DB, {
   };
 }
 
-export async function processCinemaRun(env, {
+async function processCinemaRunInternal(env, {
   cinemaId, runId, nowMs = Date.now(), fetchCinema = fetchCinemaDetail,
-  runLock = runScheduledLockAfterMonitor, lockConcurrency = 4
+  runLock = runScheduledLockAfterMonitor, lockConcurrency = 4, metrics = {}
 }) {
   const id = String(cinemaId), rid = String(runId), timestamp = Number(nowMs);
+  metrics.stage = "fetch";
+  metrics.stageStartedAt = Date.now();
   let state = await env.DB.prepare("SELECT active_run_id,active_data,current_data,active_version,active_base_version,started_at,run_state FROM cinema_state WHERE cinema_id=?").bind(id).first();
   let fetched;
   if (!(state?.active_run_id === rid && state.active_data != null)) fetched = await fetchWithTimeout(fetchCinema, id);
+  metrics.fetchDurationMs = Date.now() - metrics.stageStartedAt;
   let run;
   try {
     run = await beginCinemaRun(env.DB, { cinemaId: id, runId: rid, nowMs: timestamp, fetchedData: fetched });
@@ -87,6 +90,8 @@ export async function processCinemaRun(env, {
     if (error?.code === "RUN_IN_PROGRESS") return { completed: false, retryable: true, runId: rid, subscribers: 0, notifications: 0, lockAttempts: 0, lockFailures: 0 };
     throw error;
   }
+  metrics.stage = "subscriber";
+  metrics.stageStartedAt = Date.now();
   state = state || await env.DB.prepare("SELECT current_data FROM cinema_state WHERE cinema_id=?").bind(id).first();
   const baseData = providerCinemaData(decodeData(state?.current_data));
   const providerData = providerCinemaData(run.data);
@@ -111,10 +116,12 @@ export async function processCinemaRun(env, {
       });
       const advanced = await advanceRunNotifications(env.DB, { userId: subscription.userId, cinemaId: id, configVersion: subscription.configVersion, baselineVersion: subscription.baselineVersion, version: run.version, events: changeEvents, notifications: queuedNotifications, nowMs: timestamp });
       notifications += Number(advanced.notificationsCreated || 0);
+      metrics.notifications = notifications;
       if (advanced.notificationsCreated) {
         try { await wakeNotificationDispatcher(env, { kind: "new-shows", userId: subscription.userId }); } catch { monitorError("notification_wake", { state: "failed", reason: "dispatch_unavailable" }); }
       }
       subscribers += 1;
+      metrics.subscribers = subscribers;
       let lockCandidate = null;
       if (subscription.lockRule?.state === "waiting_schedule" && typeof runLock === "function") {
         const target = resolveLockTarget(subscription.lockRule, providerData);
@@ -130,36 +137,87 @@ export async function processCinemaRun(env, {
     }
     afterUserId = page.nextCursor || "";
   } while (afterUserId);
+  metrics.subscriberDurationMs = Date.now() - metrics.stageStartedAt;
+  metrics.stage = "lock";
+  metrics.stageStartedAt = Date.now();
   const queue = orderLockCandidates(candidates.map((item) => item.candidate), providerData);
+  metrics.lockAttempts = queue.length;
   const byUser = new Map(candidates.map((item) => [item.candidate.userId, item.subscription]));
   const lockResults = await runBounded(queue, lockConcurrency, (candidate) => runLock(env, candidate.userId, providerData));
   let lockFailures = 0;
   for (let index = 0; index < queue.length; index += 1) {
     const result = lockResults[index];
     const candidate = queue[index];
-    if (result.status === "rejected") { lockFailures += 1; continue; }
+    if (result.status === "rejected") { lockFailures += 1; metrics.lockFailures = lockFailures; continue; }
     let outcome;
     try {
       outcome = result.value instanceof Response ? await result.value.json() : result.value;
     } catch {
       lockFailures += 1;
+      metrics.lockFailures = lockFailures;
       continue;
     }
     if (outcome && (outcome.ok !== true || outcome.waiting === true)) {
       lockFailures += 1;
+      metrics.lockFailures = lockFailures;
       continue;
     }
     const subscription = byUser.get(candidate.userId);
     const completed = await completeRunSubscriber(env.DB, { userId: candidate.userId, cinemaId: id, runId: rid, configVersion: subscription.configVersion, nextDueAt: timestamp + 180_000, baselineVersion: run.version });
     if (completed.applied) completedUsers.add(candidate.userId);
   }
+  metrics.lockFailures = lockFailures;
+  metrics.lockDurationMs = Date.now() - metrics.stageStartedAt;
+  metrics.stage = "commit";
+  metrics.stageStartedAt = Date.now();
   if (lockFailures) {
     await markRunRetryable(env.DB, id, rid, timestamp);
+    metrics.commitDurationMs = Date.now() - metrics.stageStartedAt;
     return { completed: false, retryable: true, runId: rid, subscribers, notifications, lockAttempts: queue.length, lockFailures };
   }
   const committed = await completeCinemaRun(env.DB, { cinemaId: id, runId: rid, nowMs: timestamp });
+  metrics.commitDurationMs = Date.now() - metrics.stageStartedAt;
   const completed = committed.status !== "skipped" && committed.status !== "conflict";
   return { completed, retryable: !completed, runId: rid, subscribers, notifications, lockAttempts: queue.length, lockFailures };
+}
+
+export async function processCinemaRun(env, input) {
+  const startedAt = Date.now();
+  const cinemaId = String(input?.cinemaId || "");
+  const runId = String(input?.runId || input?.batchId || "");
+  const metrics = {};
+  try {
+    const result = await processCinemaRunInternal(env, { ...input, metrics });
+    monitorLog("cinema_run", {
+      runId, cinemaId, subscribers: Number(result?.subscribers || 0),
+      notifications: Number(result?.notifications || 0),
+      lockAttempts: Number(result?.lockAttempts || 0),
+      lockFailures: Number(result?.lockFailures || 0),
+      completed: result?.completed === true,
+      retryable: result?.retryable === true,
+      fetchDurationMs: Number(metrics.fetchDurationMs || 0),
+      subscriberDurationMs: Number(metrics.subscriberDurationMs || 0),
+      lockDurationMs: Number(metrics.lockDurationMs || 0),
+      commitDurationMs: Number(metrics.commitDurationMs || 0),
+      durationMs: Date.now() - startedAt
+    });
+    return result;
+  } catch (error) {
+    if (metrics.stage && metrics.stageStartedAt != null) {
+      const durationKey = `${metrics.stage}DurationMs`;
+      if (metrics[durationKey] == null) metrics[durationKey] = Date.now() - metrics.stageStartedAt;
+    }
+    monitorLog("cinema_run", {
+      runId, cinemaId, subscribers: Number(metrics.subscribers || 0), notifications: Number(metrics.notifications || 0),
+      lockAttempts: Number(metrics.lockAttempts || 0), lockFailures: Number(metrics.lockFailures || 0), completed: false, retryable: true,
+      fetchDurationMs: Number(metrics.fetchDurationMs || 0),
+      subscriberDurationMs: Number(metrics.subscriberDurationMs || 0),
+      lockDurationMs: Number(metrics.lockDurationMs || 0),
+      commitDurationMs: Number(metrics.commitDurationMs || 0),
+      errorName: error?.name || "Error", durationMs: Date.now() - startedAt
+    });
+    throw error;
+  }
 }
 
 async function fetchWithTimeout(fetchCinema, cinemaId) {

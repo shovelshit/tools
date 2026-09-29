@@ -4,6 +4,7 @@ import { createAccountEnv, seedAccount } from "./account-fixtures.js";
 import { syncSubscription } from "../src/maoyan/monitor-store.js";
 import { MonitorDispatcher, dispatchCinema } from "../src/maoyan/monitor-dispatcher.js";
 import { createStorageFixture } from "./scaling-fixtures.js";
+import { captureConsole } from "./helpers.js";
 
 const NOW = Date.parse("2026-09-16T04:00:00.000Z");
 
@@ -107,4 +108,26 @@ test("dispatchCinema rejects an incomplete 200 response", async () => {
   const result = await dispatchCinema(env, { cinemaId: "1", runId: "r1", nowMs: NOW });
   assert.equal(result.completed, false);
   assert.equal(result.retryable, true);
+});
+
+test("dispatcher writes a structured batch summary without changing the response", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  const storage = createStorageFixture();
+  const dispatcher = new MonitorDispatcher({ storage }, env, { dispatchCinema: async () => {} });
+  const { result: response, entries } = await captureConsole(() => dispatcher.fetch(new Request("https://internal/internal/batch", {
+    method: "POST", body: JSON.stringify({ runId: "run-log", nowMs: NOW })
+  })));
+  assert.equal(response.status, 202);
+  const log = entries.map((args) => args[0]).find((entry) => entry?.event === "batch_dispatch");
+  assert.ok(log);
+  assert.equal(log.scope, "maoyan-monitor");
+  assert.equal(log.runId, "run-log");
+  assert.equal(log.batchId, "run-log");
+  assert.equal(log.pageSize, 20);
+  assert.equal(log.cinemaCount, 0);
+  assert.equal(log.processed, 0);
+  assert.equal(log.pending, false);
+  assert.equal(typeof log.pageReadDurationMs, "number");
+  assert.equal(typeof log.dispatchDurationMs, "number");
+  assert.equal(typeof log.durationMs, "number");
 });

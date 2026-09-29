@@ -5,6 +5,7 @@ import { syncSubscription } from "../src/maoyan/monitor-store.js";
 import { putLockRuleRow } from "../src/maoyan/db.js";
 import { MonitorCoordinator, processCinemaRun } from "../src/maoyan/monitor-coordinator.js";
 import { cinemaFixture, createStorageFixture } from "./scaling-fixtures.js";
+import { captureConsole } from "./helpers.js";
 
 const NOW = Date.parse("2026-09-16T04:00:00.000Z");
 
@@ -310,4 +311,85 @@ test("concurrent manual checks share one cinema fetch and retain per-user cooldo
   const limited = await request("user-a", NOW + 1000);
   assert.equal(limited.status, 429);
   assert.equal(limited.headers.get("Retry-After"), "29");
+});
+
+test("coordinator writes a structured cinema summary", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  const { account } = await seedAccount(env, { expiresAt: NOW + 600_000, config: { enabled: true, cinemaId: "1", selectedMovieIds: ["7"] } });
+  await syncSubscription(env.DB, account.id, { enabled: true, cinemaId: "1" }, 1, NOW);
+  const { result, entries } = await captureConsole(() => processCinemaRun(env, {
+    cinemaId: "1", runId: "run-log", nowMs: NOW,
+    fetchCinema: async () => cinemaFixture({ seqNos: ["s1"] })
+  }));
+  assert.equal(result.completed, true);
+  const log = entries.map((args) => args[0]).find((entry) => entry?.event === "cinema_run");
+  assert.ok(log);
+  assert.equal(log.scope, "maoyan-monitor");
+  assert.equal(log.runId, "run-log");
+  assert.equal(log.cinemaId, "1");
+  assert.equal(log.subscribers, 1);
+  assert.equal(log.notifications, 0);
+  assert.equal(log.lockAttempts, 0);
+  assert.equal(log.lockFailures, 0);
+  assert.equal(log.completed, true);
+  assert.equal(log.retryable, false);
+  assert.equal(typeof log.fetchDurationMs, "number");
+  assert.equal(typeof log.subscriberDurationMs, "number");
+  assert.equal(typeof log.lockDurationMs, "number");
+  assert.equal(typeof log.commitDurationMs, "number");
+  assert.equal(typeof log.durationMs, "number");
+});
+
+test("failed commit summary retains subscribers and elapsed commit time", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  const { account } = await seedAccount(env, { expiresAt: NOW + 600_000, config: { enabled: true, cinemaId: "1", selectedMovieIds: ["7"] } });
+  await syncSubscription(env.DB, account.id, { enabled: true, cinemaId: "1" }, 1, NOW);
+  const DB = env.DB;
+  let batches = 0;
+  env.DB = {
+    prepare: (...args) => DB.prepare(...args),
+    batch: async (statements) => {
+      batches += 1;
+      if (batches === 4) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        throw new Error("commit unavailable");
+      }
+      return DB.batch(statements);
+    }
+  };
+  const { entries } = await captureConsole(async () => {
+    await assert.rejects(processCinemaRun(env, {
+      cinemaId: "1", runId: "commit-failure", nowMs: NOW,
+      fetchCinema: async () => cinemaFixture({ seqNos: ["s1"] })
+    }), /commit unavailable/);
+  });
+  const log = entries.map((args) => args[0]).find((entry) => entry?.event === "cinema_run");
+  assert.ok(log);
+  assert.equal(log.subscribers, 1);
+  assert.ok(log.commitDurationMs >= 10);
+});
+
+test("notification wake logging failure does not change a successful run", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  const { account } = await seedAccount(env, { expiresAt: NOW + 600_000, config: { enabled: true, cinemaId: "1", selectedMovieIds: ["7"] } });
+  await syncSubscription(env.DB, account.id, { enabled: true, cinemaId: "1" }, 1, NOW);
+  await processCinemaRun(env, {
+    cinemaId: "1", runId: "wake-base", nowMs: NOW,
+    fetchCinema: async () => cinemaFixture({ seqNos: ["s1"] })
+  });
+  env.NOTIFICATION_DISPATCHER = {
+    idFromName: (name) => name,
+    get: () => ({ fetch: async () => { throw new Error("dispatcher unavailable"); } })
+  };
+  const originalError = console.error;
+  console.error = () => { throw new Error("logger unavailable"); };
+  try {
+    const result = await processCinemaRun(env, {
+      cinemaId: "1", runId: "wake-failure", nowMs: NOW + 180_000,
+      fetchCinema: async () => cinemaFixture({ seqNos: ["s1", "s2"] })
+    });
+    assert.equal(result.completed, true);
+  } finally {
+    console.error = originalError;
+  }
 });
