@@ -1,6 +1,10 @@
 # Lynkco-plus 配置教程
 
-本教程指导你通过抓包获取领克 `App` 的登录态，并配置云端自动签到任务。全程约 10 分钟，需要一部 `iPhone` 或安卓手机。
+> ⚠️ **声明**：本项目免费，为了防止滥用，采用一人一码邀请机制（自助领取）。如果花钱了，那么恭喜你被骗了。
+>
+> ⚠️ **提醒**：云端版本需要上传私人登录态，如果介意请使用[本地项目版本](https://github.com/shovelshit/LynkCoHelper)。
+
+本教程指导你通过抓包获取领克 `App` 的登录态，并配置云端自动签到任务。全程约 10 分钟，需要一部 `iPhone` 或已ROOT的安卓手机。下面教程已 `iPhone` 为例。安卓原理相同，可以请教豆包。
 
 ## 1、准备抓包环境
 
@@ -76,8 +80,6 @@
 2. 选择 `HAR` 并保存文件，在本地核对其中是否包含 `mobileCodeLogin`（或 `refresh`）和 `getShareCode` 请求。
 
    <GuideFigure src="/images/lynkco-plus/15-export-har.webp" alt="ProxyPin 视图导出的 HAR 选项" caption="图 15 · 选择 HAR" />
-
-> ⚠️ **隐私提醒**：`HAR` 文件可能含有令牌、`Cookie`、设备标识及其他无关流量，不要公开上传未经检查的 `HAR` 文件。
 
 ## 6、领取邀请码，配置云端任务
 
