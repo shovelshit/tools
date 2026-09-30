@@ -84,3 +84,5 @@
 ## 6、领取邀请码，配置云端任务
 
 完成上述步骤后，获取[免费邀请码](https://lynkco.ltools.asia/claim/KjybyNSjUwtbw6eFC55w9D89MMxHXpxCJzC_oUUHbVM)，按页面指引上传 `HAR` 并开启云端自动签到即可。已在其他渠道领取过邀请码的请勿重复领取。
+
+👉🏻👉🏻👉🏻[登录页](https://lynkco.ltools.asia/login)
