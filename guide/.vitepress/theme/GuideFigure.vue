@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref } from 'vue'
 
-defineProps<{ src: string; alt: string; caption: string }>()
+defineProps<{
+  src: string
+  alt: string
+  caption: string
+  crop?: 'top' | 'center' | 'bottom'
+  highlight?: { left: number; top: number; width: number; height: number; number: number }
+}>()
 
 const open = ref(false)
 const trigger = ref<HTMLButtonElement | null>(null)
@@ -43,8 +49,19 @@ onBeforeUnmount(() => {
 
 <template>
   <figure class="guide-figure">
-    <button ref="trigger" type="button" class="guide-figure-trigger" :aria-label="`查看大图：${alt}`" @click="show">
-      <img :src="src" :alt="alt" loading="lazy" />
+    <button ref="trigger" type="button" class="guide-figure-trigger" :class="crop && ['is-cropped', `crop-${crop}`]" :aria-label="`查看大图：${alt}`" @click="show">
+      <span class="guide-figure-image">
+        <img :src="src" :alt="alt" loading="lazy" />
+        <span
+          v-if="highlight"
+          class="guide-figure-highlight"
+          :style="{
+            left: `${highlight.left}%`, top: `${highlight.top}%`,
+            width: `${highlight.width}%`, height: `${highlight.height}%`
+          }"
+          aria-hidden="true"
+        ><span class="guide-figure-highlight-number">{{ highlight.number }}</span></span>
+      </span>
     </button>
     <figcaption>{{ caption }}</figcaption>
   </figure>

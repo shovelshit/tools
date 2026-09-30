@@ -38,10 +38,6 @@
 
    <GuideFigure src="/images/lynkco-plus/08-allow-vpn.webp" alt="iPhone 的 VPN 配置授权提示" caption="图 8 · 允许 VPN 配置" />
 
-9. 返回 `ProxyPin`，确认右下角显示停止按钮，表示抓包已开启。此时页面可能仍为空，需在获授权的应用中产生请求后才会看到记录。
-
-   <GuideFigure src="/images/lynkco-plus/09-capture-running.webp" alt="ProxyPin 正在抓包的页面" caption="图 9 · 查看抓包状态" />
-
 ## 2、触发登录请求
 
 需要抓到 `mobileCodeLogin` 或 `refresh` 任一请求，二选一即可：

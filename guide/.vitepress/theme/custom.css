@@ -115,12 +115,60 @@
   cursor: zoom-in;
 }
 
+.guide-figure-image {
+  position: relative;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.guide-figure-highlight {
+  position: absolute;
+  box-sizing: border-box;
+  border: 3px solid #d83b42;
+  border-radius: 6px;
+  box-shadow: 0 0 0 2px #fff;
+  pointer-events: none;
+}
+
+.guide-figure-highlight-number {
+  position: absolute;
+  top: -14px;
+  right: 8px;
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 50%;
+  background: #d83b42;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .guide-figure-trigger img {
   display: block;
   max-width: 100%;
   height: auto;
   margin: 0 auto;
 }
+
+.guide-figure-trigger.is-cropped {
+  width: min(100%, 480px);
+  overflow: hidden;
+}
+
+.guide-figure-trigger.is-cropped img {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+}
+
+.guide-figure-trigger.crop-top img { object-position: center 18%; }
+.guide-figure-trigger.crop-center img { object-position: center; }
+.guide-figure-trigger.crop-bottom img { object-position: center bottom; }
 
 .guide-figure-trigger:focus-visible,
 .guide-lightbox-close:focus-visible {
