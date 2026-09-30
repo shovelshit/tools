@@ -1,10 +1,12 @@
 # Lynkco-plus 配置教程
 
-## 1、抓包
+本教程指导你通过抓包获取领克 `App` 的登录态，并配置云端自动签到任务。全程约 10 分钟，需要一部 `iPhone` 或安卓手机。
 
-在自己的 `iPhone` 或者安卓设备上使用 `ProxyPin` 准备抓包。安装根证书及授权 `VPN` 抓包仅限自己的设备和已获授权的流量；完成后按需关闭抓包并撤销不再使用的证书信任。
+## 1、准备抓包环境
 
-1. 苹果在 `App Store` 搜索 `ProxyPin` 或者 `Stream`，确认应用名称后下载安装。安卓 `ProxyPin` [下载页](https://github.com/wanghongenpin/proxypin/releases/tag/v1.3.1)
+抓包仅限自己的设备和已获授权的流量；完成后建议按需关闭抓包，并撤销不再使用的证书信任。
+
+1. 安装 `ProxyPin`：苹果在 `App Store` 搜索 `ProxyPin`（或 `Stream`），确认应用名称后下载；安卓前往[下载页](https://github.com/wanghongenpin/proxypin/releases/tag/v1.3.1)获取安装包。
 
    <GuideFigure src="/images/lynkco-plus/01-appstore-install.webp" alt="App Store 中的 ProxyPin 安装页面" caption="图 1 · 安装 ProxyPin" />
 
@@ -40,25 +42,30 @@
 
    <GuideFigure src="/images/lynkco-plus/09-capture-running.webp" alt="ProxyPin 正在抓包的页面" caption="图 9 · 查看抓包状态" />
 
-## 2、验证 `mobileCodeLogin`/`refresh`
+## 2、触发登录请求
 
-1. 开启 `ProxyPin` 抓包，打开领克 `App` 产生请求，使用手机号验证码方式重新登录触发 `mobileCodeLogin` 接口或者如果超过半小时不打开领克 `App` 打开时会自动触发 `refresh` 接口。 以上两步任一完成后回到 `ProxyPin` 搜索 `refresh` 或 `mobileCodeLogin`，检查是否出现对应请求。没有结果时先确认抓包仍在运行，并在应用中执行相关操作后重新搜索。
+需要抓到 `mobileCodeLogin` 或 `refresh` 任一请求，二选一即可：
 
-   <GuideFigure src="/images/lynkco-plus/10-refresh-request.webp" alt="ProxyPin 搜索 refresh 的请求列表" caption="图 10 · 查找 refresh 请求" />
+- **主动触发**：在领克 `App` 退出登录，使用手机号验证码方式重新登录，会产生 `mobileCodeLogin` 请求；
+- **被动触发**：超过半小时未打开领克 `App`，再次打开时会自动产生 `refresh` 请求。
 
-## 3、获取分享请求
+触发后回到 `ProxyPin`，搜索 `refresh` 或 `mobileCodeLogin` 确认请求已出现。如果搜索不到，先确认抓包仍在运行，再在应用内重新执行上述操作后搜索。
 
-1. 在领克 `App` 首页打开任意一条动态。
+<GuideFigure src="/images/lynkco-plus/10-refresh-request.webp" alt="ProxyPin 搜索 refresh 的请求列表" caption="图 10 · 查找 refresh 请求" />
 
-   <GuideFigure src="/images/lynkco-plus/11-lynkco-post.webp" alt="领克 App 中的一条动态" caption="图 11 · 打开领克动态" />
+## 3、触发分享请求
 
-2. 点击动态底部的分享按钮，打开分享菜单。
+在领克 `App` 首页打开任意一条动态。
 
-   <GuideFigure src="/images/lynkco-plus/12-share-sheet.webp" alt="领克动态的分享菜单" caption="图 12 · 分享动态" />
+<GuideFigure src="/images/lynkco-plus/11-lynkco-post.webp" alt="领克 App 中的一条动态" caption="图 11 · 打开领克动态" />
 
-3. 返回 `ProxyPin` 搜索 `getShareCode`，检查是否出现分享请求。如果没有结果，确认抓包状态，并重新打开动态的分享菜单。
+点击动态底部的分享按钮，打开分享菜单（无需真正分享出去）。
 
-   <GuideFigure src="/images/lynkco-plus/13-share-code-request.webp" alt="ProxyPin 搜索 getShareCode 的请求列表" caption="图 13 · 查找 getShareCode 请求" />
+<GuideFigure src="/images/lynkco-plus/12-share-sheet.webp" alt="领克动态的分享菜单" caption="图 12 · 分享动态" />
+
+然后返回 `ProxyPin` 搜索 `getShareCode`，确认分享请求已出现。如果没有结果，确认抓包仍在运行，并重新打开动态的分享菜单。
+
+<GuideFigure src="/images/lynkco-plus/13-share-code-request.webp" alt="ProxyPin 搜索 getShareCode 的请求列表" caption="图 13 · 查找 getShareCode 请求" />
 
 ## ~~4、获取车辆详情~~
 
@@ -66,14 +73,16 @@
 
 ## 5、导出 `HAR`
 
-1. 在 `ProxyPin` 请求列表点击右上角菜单，选择“视图导出”。
+1. 在 `ProxyPin` 请求列表点击右上角菜单，选择“视图导出”。（导出前要把上方搜索栏清空）
 
    <GuideFigure src="/images/lynkco-plus/14-export-menu.webp" alt="ProxyPin 请求列表的视图导出菜单" caption="图 14 · 打开视图导出" />
 
-2. 选择 `HAR` 并保存文件，在本地核对其中是否包含目标请求。`HAR` 可能含有令牌、`Cookie`、设备标识及其他无关流量，不要公开上传未经检查的 `HAR` 文件。
+2. 选择 `HAR` 并保存文件，在本地核对其中是否包含 `mobileCodeLogin`（或 `refresh`）和 `getShareCode` 请求。
 
    <GuideFigure src="/images/lynkco-plus/15-export-har.webp" alt="ProxyPin 视图导出的 HAR 选项" caption="图 15 · 选择 HAR" />
 
-## 6、领取邀请码，设置云端任务
+> ⚠️ **隐私提醒**：`HAR` 文件可能含有令牌、`Cookie`、设备标识及其他无关流量，不要公开上传未经检查的 `HAR` 文件。
 
-1. 上述步骤完成后获取[免费邀请码](https://lynkco.ltools.asia/claim/KjybyNSjUwtbw6eFC55w9D89MMxHXpxCJzC_oUUHbVM)，完成页面操作步骤即可。已在其他渠道领取的不要重复领。
+## 6、领取邀请码，配置云端任务
+
+完成上述步骤后，获取[免费邀请码](https://lynkco.ltools.asia/claim/KjybyNSjUwtbw6eFC55w9D89MMxHXpxCJzC_oUUHbVM)，按页面指引上传 `HAR` 并开启云端自动签到即可。已在其他渠道领取过邀请码的请勿重复领取。
