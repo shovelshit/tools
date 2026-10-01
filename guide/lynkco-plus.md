@@ -73,11 +73,9 @@
 
 ## 5、导出 `HAR`
 
-1. 在 `ProxyPin` 请求列表点击右上角菜单，选择“视图导出”。（导出前要把上方搜索栏清空）
+1. 在 `ProxyPin` 请求列表点击右上角菜单，选择“视图导出”。
 
-   <GuideFigure src="/images/lynkco-plus/14-export-menu.webp" alt="ProxyPin 请求列表的视图导出菜单" caption="图 14 · 打开视图导出" />
-
-2. 选择 `HAR` 并保存文件，在本地核对其中是否包含 `mobileCodeLogin`（或 `refresh`）和 `getShareCode` 请求。
+2. 选择 `HAR` 并保存文件，在本地核对其中是否包含 `mobileCodeLogin`（或 `refresh`）和 `getShareCode` 请求。（导出前要把上方搜索栏清空，不要点那个垃圾桶图标）
 
    <GuideFigure src="/images/lynkco-plus/15-export-har.webp" alt="ProxyPin 视图导出的 HAR 选项" caption="图 15 · 选择 HAR" />
 
