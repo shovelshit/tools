@@ -44,9 +44,9 @@
 
 ## 2、触发登录请求
 
-需要抓到 `mobileCodeLogin` 或 `refresh` 任一请求，二选一即可：
+需要抓到 `mobileCodeLogin` 或 `/onekey/mobileLogin` 或 `refresh` 任一请求，有一个即可：
 
-- **主动触发**：在领克 `App` 退出登录，使用手机号验证码方式重新登录，会产生 `mobileCodeLogin` 请求；
+- **主动触发**：在领克 `App` 退出登录，使用手机号验证码方式重新登录，会产生 `mobileCodeLogin` 请求，使用一键登录会产生 `/onekey/mobileLogin` 请求。
 - **被动触发**：超过半小时未打开领克 `App`，再次打开时会自动产生 `refresh` 请求。
 
 触发后回到 `ProxyPin`，搜索 `refresh` 或 `mobileCodeLogin` 确认请求已出现。如果搜索不到，先确认抓包仍在运行，再在应用内重新执行上述操作后搜索。
