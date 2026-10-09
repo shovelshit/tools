@@ -1,0 +1,6 @@
+[submodule "modules/movie"]
+	path = modules/movie
+	url = https://github.com/shovelshit/movie.git
+[submodule "modules/store"]
+	path = modules/store
+	url = https://github.com/shovelshit/store.git

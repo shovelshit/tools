@@ -1,17 +1,21 @@
 # 模块注册表
 
-`tools` 是主仓库，电影监控和应用商店是其中的两个业务模块。模块保留独立的源码、测试和部署入口，但共享 Worker、构建脚本和发布流程。
+`tools` 是主仓库，电影监控和应用商店是其中的两个业务模块。模块保留独立的源码、测试和客户端发布入口，但共享 Worker、构建脚本和发布流程。
 
 | 模块 | 源码目录 | 公开地址 | 内部业务标识 |
 |---|---|---|---|
-| movie | `pages/maoyan/`, `worker/src/maoyan/`, `desktop/` | `https://movie.ltools.asia/` | `maoyan` |
-| store | `pages/store/`, `worker/src/store/` | `https://store.ltools.asia/` | `store` |
+| movie | [`modules/movie`](movie/), `worker/src/maoyan/` | `https://movie.ltools.asia/` | `maoyan` |
+| store | [`modules/store`](store/), `worker/src/store/` | `https://store.ltools.asia/` | `store` |
 
 ## GitHub 模块方式
 
-当前 `movie` 和 `store` 没有对应的独立 GitHub 仓库，因此不添加 `.gitmodules` 或无效的 Git submodule 指针。需要拆分时，应先创建独立仓库，再通过 Git submodule 或 subtree 引入，并同步调整构建和发布权限。
+`movie` 和 `store` 通过 Git submodule 固定到已验证的提交。子仓库拥有各自的页面、测试和 Movie Electron 客户端源码；`tools` 仍拥有 Worker、数据库迁移、静态资源构建和生产部署权限。更新模块时先在子仓库合并，再由主仓库更新 gitlink。
 
-当前阶段使用主仓库内的模块注册表，避免拆分时丢失共享 Worker、数据库迁移和桌面端依赖。
+```bash
+git submodule update --init --recursive
+git -C modules/movie log -1 --oneline
+git -C modules/store log -1 --oneline
+```
 
 ## 上线前置条件
 
