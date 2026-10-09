@@ -5,7 +5,7 @@ const test = require("node:test");
 
 const workflowPath = path.resolve(__dirname, "../../.github/workflows/electron.yml");
 const workflow = fs.readFileSync(workflowPath, "utf8");
-const packageJson = JSON.parse(fs.readFileSync(path.resolve(__dirname, "../package.json"), "utf8"));
+const packageJson = JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../modules/movie/desktop/package.json"), "utf8"));
 
 test("master pushes publish installers directly to a GitHub Release", () => {
   assert.match(workflow, /push:\s*\n\s+branches: \[master\][\s\S]*?\n\s+pull_request:/);
@@ -20,11 +20,11 @@ test("master pushes publish installers directly to a GitHub Release", () => {
   assert.match(workflow, /\n  publish_release:/);
   assert.match(workflow, /\n  cleanup_release:/);
   assert.match(workflow, /gh release create[^\n]*--draft/);
-  assert.match(workflow, /npm --prefix desktop pkg set version=/);
+  assert.match(workflow, /npm --prefix modules\/movie\/desktop pkg set version=/);
   assert.match(workflow, /gh release upload/);
   assert.doesNotMatch(workflow, /gitee|GITEE|Gitee|R2/);
   assert.match(workflow, /gh release edit[^\n]*--draft=false[^\n]*"\$latest_flag"/);
-  assert.match(workflow, /Set application version[\s\S]*?shell: bash[\s\S]*?npm --prefix desktop pkg set version=/);
+  assert.match(workflow, /Set application version[\s\S]*?shell: bash[\s\S]*?npm --prefix modules\/movie\/desktop pkg set version=/);
   assert.match(workflow, /publish_release:[\s\S]*?permissions:\s*\n\s+actions: read\s*\n\s+contents: write/);
   assert.match(workflow, /Wait for earlier master releases[\s\S]*?actions\/workflows\/electron\.yml\/runs[\s\S]*?\.run_number < \$GITHUB_RUN_NUMBER[\s\S]*?\.status != \\"completed\\"/);
   assert.match(workflow, /\.run_number > \$GITHUB_RUN_NUMBER[\s\S]*?\.conclusion == \\"success\\"/);
@@ -42,9 +42,7 @@ test("master pushes publish installers directly to a GitHub Release", () => {
 
 test("admin-only pushes do not trigger the Electron release workflow", () => {
   const push = workflow.split("\n  pull_request:")[0];
-  assert.match(push, /paths-ignore:[\s\S]*pages\/maoyan\/admin\.html/);
-  assert.match(push, /paths-ignore:[\s\S]*pages\/maoyan\/admin\.js/);
-  assert.match(push, /paths-ignore:[\s\S]*pages\/maoyan\/admin-dashboard\.js/);
+  assert.doesNotMatch(push, /admin\.(?:html|js)|admin-dashboard\.js/);
 });
 
 test("release workflow never stores installers as Actions artifacts", () => {
@@ -69,10 +67,10 @@ test("release page exposes only installable macOS and Windows packages", () => {
 
 test("release verification runs every shared browser unit test", () => {
   const verifyJob = workflow.split("\n  verify:")[1].split("\n  prepare_release:")[0];
-  assert.match(verifyJob, /node --test pages\/maoyan\/\*\.test\.cjs/);
-  assert.match(verifyJob, /npm --prefix desktop test/);
+  assert.match(verifyJob, /node --test modules\/movie\/pages\/maoyan\/\*\.test\.cjs/);
+  assert.match(verifyJob, /npm --prefix modules\/movie\/desktop test/);
   assert.match(verifyJob, /npm --prefix worker test/);
-  assert.match(verifyJob, /npm --prefix desktop run test:e2e -- --output \"\$RUNNER_TEMP\/maoyan-ui-verification\"/);
+  assert.match(verifyJob, /npm --prefix modules\/movie\/desktop run test:e2e -- --output \"\$RUNNER_TEMP\/maoyan-ui-verification\"/);
 });
 
 test("desktop package uses an explicit monitor-only shared asset whitelist", () => {
@@ -95,7 +93,8 @@ test("desktop packages use the branded icon on macOS and Windows", () => {
   assert.equal(packageJson.build.win.signAndEditExecutable, true);
   assert.equal(packageJson.build.win.signExecutable, false);
   for (const filename of ["icon.svg", "icon.png", "icon.icns", "icon.ico"]) {
-    const iconPath = path.resolve(__dirname, "../assets", filename);
+    const iconPath = path.resolve(__dirname, "../../modules/movie/desktop/assets", filename);
     assert.ok(fs.statSync(iconPath).size > 0, `Missing desktop icon: ${filename}`);
   }
 });
+

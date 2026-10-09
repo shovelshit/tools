@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { chromium } = require('../desktop/node_modules/playwright-core');
+const { chromium } = require('../modules/movie/desktop/node_modules/playwright-core');
 
 test('toolbox directory keeps tool destinations and exposes the guide', async () => {
   const browser = await chromium.launch({

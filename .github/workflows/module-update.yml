@@ -1,0 +1,41 @@
+name: Update module pins
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - name: Update submodule pins
+        shell: bash
+        run: |
+          set -euo pipefail
+          git submodule update --remote -- modules/movie modules/store
+          if git diff --quiet -- .gitmodules modules/movie modules/store; then
+            echo "No module updates available"
+            exit 0
+          fi
+          branch="automation/update-module-pins"
+          git fetch origin "$branch" || true
+          git checkout -B "$branch"
+          git add modules/movie modules/store
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'build: update module pins'
+          git push --force-with-lease origin "$branch"
+          if gh pr view "$branch" --json number >/dev/null 2>&1; then
+            gh pr edit "$branch" --title 'build: update module pins' --body 'Automated submodule pin update. This workflow only opens a PR; deployment remains a separate, manual release workflow.'
+          else
+            gh pr create --head "$branch" --base master --title 'build: update module pins' --body 'Automated submodule pin update. This workflow only opens a PR; deployment remains a separate, manual release workflow.'
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

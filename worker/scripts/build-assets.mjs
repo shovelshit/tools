@@ -1,9 +1,11 @@
-import { cp, mkdir, mkdtemp, rename, rm } from "node:fs/promises";
+import { access, cp, mkdir, mkdtemp, rename, rm } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const WORKER_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO_ROOT = resolve(WORKER_ROOT, "..");
+const MOVIE_ROOT = join(REPO_ROOT, "modules", "movie");
+const STORE_ROOT = join(REPO_ROOT, "modules", "store");
 
 const PAGE_FILES = [
   "index.html", "admin.html", "claim.html", "download.html",
@@ -15,11 +17,11 @@ const PAGE_FILES = [
 
 export const STATIC_ASSET_FILES = [
   ...PAGE_FILES.map((name) => ({
-    source: join(REPO_ROOT, "pages", "maoyan", name),
+    source: join(MOVIE_ROOT, "pages", "maoyan", name),
     target: `maoyan/${name}`
   })),
   {
-    source: join(REPO_ROOT, "pages", "maoyan", "assets", "cinema-background.webp"),
+    source: join(MOVIE_ROOT, "pages", "maoyan", "assets", "cinema-background.webp"),
     target: "maoyan/assets/cinema-background.webp"
   },
   {
@@ -31,7 +33,7 @@ export const STATIC_ASSET_FILES = [
     target: "maoyan/vendor/THUMBMARK-LICENSE"
   },
   ...["index.html", "auth.js", "auth.css"].map((name) => ({
-    source: join(REPO_ROOT, "pages", "store", name),
+    source: join(STORE_ROOT, "pages", "store", name),
     target: `store/${name}`
   }))
 ];
@@ -46,6 +48,13 @@ function assertControlledTarget(target) {
 
 export async function buildAssets({ target = join(WORKER_ROOT, "public") } = {}) {
   const output = assertControlledTarget(target);
+  for (const item of STATIC_ASSET_FILES) {
+    try {
+      await access(item.source);
+    } catch {
+      throw new Error(`missing static asset source: ${item.source}. Initialize submodules with git submodule update --init --recursive`);
+    }
+  }
   await mkdir(dirname(output), { recursive: true });
   const staging = await mkdtemp(join(dirname(output), ".public-build-"));
   try {

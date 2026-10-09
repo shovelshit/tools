@@ -21,6 +21,8 @@ repro-order.cjs
 .dev.vars
 
 # Desktop build tools and unsigned artifacts
+modules/movie/desktop/node_modules/
+modules/movie/desktop/dist/
 desktop/node_modules/
 desktop/dist/
 

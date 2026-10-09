@@ -5,14 +5,13 @@ on:
   push:
     branches: [master]
     paths:
-      - "desktop/**"
-      - "pages/maoyan/**"
-      - "!pages/maoyan/admin.html"
-      - "!pages/maoyan/admin.js"
-      - "!pages/maoyan/admin-dashboard.js"
+      - "modules/movie"
+      - "modules/movie/**"
+      - "modules/store"
       - "worker/**"
+      - ".github/workflows/electron.yml"
   pull_request:
-    paths: ["desktop/**", "pages/maoyan/**", "worker/**", ".github/workflows/electron.yml"]
+    paths: ["modules/movie", "modules/store", "worker/**", ".github/workflows/electron.yml"]
 
 permissions:
   contents: read
@@ -22,20 +21,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - uses: actions/setup-node@v4
         with:
           node-version: "22.23.2"
           cache: npm
           cache-dependency-path: |
-            desktop/package-lock.json
+            modules/movie/desktop/package-lock.json
             worker/package-lock.json
-      - run: npm --prefix desktop ci
+      - run: npm --prefix modules/movie/desktop ci
       - run: npm --prefix worker ci
       - run: npm --prefix worker run build:assets
       - run: npm --prefix worker test
-      - run: npm --prefix desktop test
-      - run: node --test pages/maoyan/*.test.cjs
-      - run: npm --prefix desktop run test:e2e -- --output "$RUNNER_TEMP/maoyan-ui-verification"
+      - run: node --test worker/test/electron-release-workflow.test.cjs
+      - run: npm --prefix modules/movie/desktop test
+      - run: node --test modules/movie/pages/maoyan/*.test.cjs
+      - run: node --test modules/store/pages/store/*.test.cjs
+      - run: npm --prefix modules/movie/desktop run test:e2e -- --output "$RUNNER_TEMP/maoyan-ui-verification"
 
   prepare_release:
     needs: verify
@@ -48,6 +51,8 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - uses: actions/setup-node@v4
         with:
           node-version: "22.23.2"
@@ -55,7 +60,7 @@ jobs:
         id: version
         shell: bash
         run: |
-          base_version="$(node -p "require('./desktop/package.json').version")"
+          base_version="$(node -p "require('./modules/movie/desktop/package.json').version")"
           release_version="${base_version%.*}.${GITHUB_RUN_NUMBER}"
           echo "version=$release_version" >> "$GITHUB_OUTPUT"
           echo "tag=v$release_version" >> "$GITHUB_OUTPUT"
@@ -80,26 +85,28 @@ jobs:
       RELEASE_VERSION: ${{ needs.prepare_release.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - uses: actions/setup-node@v4
         with:
           node-version: "22.23.2"
           cache: npm
-          cache-dependency-path: desktop/package-lock.json
-      - run: npm --prefix desktop ci
+          cache-dependency-path: modules/movie/desktop/package-lock.json
+      - run: npm --prefix modules/movie/desktop ci
       - name: Set application version
         shell: bash
-        run: npm --prefix desktop pkg set version="$RELEASE_VERSION"
+        run: npm --prefix modules/movie/desktop pkg set version="$RELEASE_VERSION"
       - name: Build unsigned macOS arm64 and x64
         if: runner.os == 'macOS'
-        run: npm --prefix desktop run package:mac
+        run: npm --prefix modules/movie/desktop run package:mac
       - name: Build unsigned Windows x64
         if: runner.os == 'Windows'
-        run: npm --prefix desktop run package:win
+        run: npm --prefix modules/movie/desktop run package:win
       - name: Launch packaged local page and verify asar contents
-        run: npm --prefix desktop run test:smoke -- --packaged
+        run: npm --prefix modules/movie/desktop run test:smoke -- --packaged
       - name: SHA-256 macOS release assets
         if: runner.os == 'macOS'
-        working-directory: desktop/dist
+        working-directory: modules/movie/desktop/dist
         run: |
           for asset in maoyan-*.dmg; do
             shasum -a 256 "$asset" > "$asset.sha256"
@@ -108,11 +115,11 @@ jobs:
         if: runner.os == 'macOS'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$RELEASE_TAG" desktop/dist/maoyan-*.dmg desktop/dist/maoyan-*.sha256 --clobber --repo "$GITHUB_REPOSITORY"
+        run: gh release upload "$RELEASE_TAG" modules/movie/desktop/dist/maoyan-*.dmg modules/movie/desktop/dist/maoyan-*.sha256 --clobber --repo "$GITHUB_REPOSITORY"
       - name: SHA-256 Windows release assets
         if: runner.os == 'Windows'
         shell: pwsh
-        working-directory: desktop/dist
+        working-directory: modules/movie/desktop/dist
         run: |
           Get-ChildItem -File | Where-Object { $_.Name -match '^maoyan-.*\.exe$' } | ForEach-Object {
             $hashOutput = & certutil -hashfile $_.FullName SHA256
@@ -127,7 +134,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $assets = Get-ChildItem desktop/dist/maoyan-*.exe, desktop/dist/maoyan-*.sha256 | ForEach-Object { $_.FullName }
+          $assets = Get-ChildItem modules/movie/desktop/dist/maoyan-*.exe, modules/movie/desktop/dist/maoyan-*.sha256 | ForEach-Object { $_.FullName }
           if (@($assets).Count -eq 0) { throw "No Windows release assets found" }
           gh release upload $env:RELEASE_TAG $assets --clobber --repo $env:GITHUB_REPOSITORY
 
