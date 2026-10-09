@@ -94,6 +94,5 @@ test("desktop packages use the branded icon on macOS and Windows", () => {
   for (const filename of ["icon.svg", "icon.png", "icon.icns", "icon.ico"]) {
     const iconPath = path.resolve(__dirname, "../../modules/movie/desktop/assets", filename);
     assert.ok(fs.statSync(iconPath).size > 0, `Missing desktop icon: ${filename}`);
-  }
+}
 });
-
