@@ -84,3 +84,25 @@
 完成上述步骤后，获取[免费邀请码](https://lynkco.ltools.asia/claim/KjybyNSjUwtbw6eFC55w9D89MMxHXpxCJzC_oUUHbVM)，按页面指引上传 `HAR` 并开启云端自动签到即可。已在其他渠道领取过邀请码的请勿重复领取。
 
 👉🏻👉🏻👉🏻[登录页](https://lynkco.ltools.asia/login)
+
+## 7、配置推送通知
+
+完成云端任务配置后，可以配置推送通知，以便签到和分享完成后及时收到提醒。
+
+### Bark（iPhone）
+
+1. 在 [App Store 下载 Bark](https://apps.apple.com/cn/app/id1403753865) 并打开。
+
+   <GuideFigure src="/images/lynkco-plus/16-bark-app.webp" alt="App Store 中的 Bark 应用页面" caption="图 16 · 安装 Bark" />
+
+2. 在 Bark 底部进入“服务器”，点击复制按钮，选择“复制 Key”。
+
+   <GuideFigure src="/images/lynkco-plus/17-bark-copy-key.webp" alt="Bark 服务器页面中的复制 Key 菜单" caption="图 17 · 复制 Bark Key" />
+
+3. 回到 Lynkco-push 的“推送设置”，选择 `Bark`，将复制的 Key 粘贴到 `推送密钥`，点击“保存”。
+
+   <GuideFigure src="/images/lynkco-plus/18-bark-settings.webp" alt="Lynkco-push 中的 Bark 推送设置" caption="图 18 · 配置 Bark 推送" />
+
+### Server 酱（微信）
+
+Server 酱配置方式相同：选择 `Server酱`，在[官方页面](https://sct.ftqq.com/sendkey)获取 `SCT` 开头的 SendKey，粘贴到推送密钥输入框后点击“保存并测试”。
