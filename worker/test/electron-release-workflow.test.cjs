@@ -39,7 +39,6 @@ test("master pushes publish installers directly to a GitHub Release", () => {
   assert.match(cleanup, /for attempt in 1 2 3 4/);
   assert.doesNotMatch(cleanup, /releases\/tags|\|\| true/);
 });
-
 test("admin-only pushes do not trigger the Electron release workflow", () => {
   const push = workflow.split("\n  pull_request:")[0];
   assert.doesNotMatch(push, /admin\.(?:html|js)|admin-dashboard\.js/);
