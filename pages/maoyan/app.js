@@ -113,7 +113,7 @@ const workflowTransition = window.maoyanWorkflow.createWorkflowTransition({
 });
 
 // 同域部署下 Worker 地址可留空(直接请求当前域名); 其他托管环境给出默认后端
-const SAME_ORIGIN_HOSTS = ["ltools.asia", "www.ltools.asia", "tools-a65.pages.dev"];
+const SAME_ORIGIN_HOSTS = ["ltools.asia", "www.ltools.asia", "movie.ltools.asia", "tools-a65.pages.dev"];
 const SAME_ORIGIN = SAME_ORIGIN_HOSTS.includes(location.hostname);
 const DEFAULT_WORKER = SAME_ORIGIN ? "" : "https://ltools.asia";
 
@@ -364,7 +364,11 @@ async function onUpdateClick(event) {
   if (!window.maoyanRuntime.capabilities?.updates) return;
   if (event.currentTarget.dataset.download !== "true") return checkForDesktopUpdate(true);
   try {
-    const result = await window.maoyanRuntime.openExternal("https://ltools.asia/maoyan/download");
+    const currentLocation = window.location;
+    const downloadUrl = currentLocation?.hostname === "movie.ltools.asia"
+      ? `${currentLocation.origin}/download`
+      : "https://ltools.asia/maoyan/download";
+    const result = await window.maoyanRuntime.openExternal(downloadUrl);
     if (result?.opened === false) showToast("无法打开下载页面", "error");
   } catch { showToast("无法打开下载页面", "error"); }
 }

@@ -1,10 +1,11 @@
-const CLAIM_URL = "https://ltools.asia/maoyan/claim.html?client=desktop";
+const CLAIM_URL = "https://movie.ltools.asia/claim.html?client=desktop";
+const ENROLLMENT_ORIGINS = new Set(["https://movie.ltools.asia", "https://ltools.asia"]);
 
 function allowedNavigation(value) {
   try {
     const url = new URL(value);
-    return url.origin === "https://ltools.asia" && !url.username && !url.password &&
-      ["/maoyan/claim", "/maoyan/claim.html"].includes(url.pathname) &&
+    return ENROLLMENT_ORIGINS.has(url.origin) && !url.username && !url.password &&
+      ["/claim", "/claim.html", "/maoyan/claim", "/maoyan/claim.html"].includes(url.pathname) &&
       url.searchParams.get("client") === "desktop";
   } catch { return false; }
 }

@@ -15,6 +15,21 @@ test("enrollment web entry defaults to Maoyan and preserves explicit deployment 
   assert.equal((await (await handleEnrollmentApi(req, env, new URL(req.url))).json()).webUrl, env.PUBLIC_WEB_URL);
 });
 
+test("legacy enrollment origin remains accepted with origin-specific CORS", async () => {
+  const env = await enrollmentEnv();
+  env.ENROLLMENT_ORIGIN = "https://movie.ltools.asia";
+  env.ENROLLMENT_HOSTNAME = "movie.ltools.asia";
+  env.ENROLLMENT_LEGACY_ORIGIN = ORIGIN;
+  env.ENROLLMENT_LEGACY_HOSTNAME = "tools.example";
+  const req = request("/api/enrollment/reserve", { method: "POST", body: {}, origin: ORIGIN });
+  const response = await handleEnrollmentApi(req, env, new URL(req.url));
+  assert.equal(response.status, 400);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), ORIGIN);
+  const configRequest = request("/api/enrollment/config", { origin: ORIGIN });
+  const configResponse = await handleEnrollmentApi(configRequest, env, new URL(configRequest.url));
+  assert.equal(configResponse.headers.get("Access-Control-Allow-Origin"), ORIGIN);
+});
+
 async function enrollmentEnv() {
   const env = await createAccountEnv({ nowMs: NOW, maxUsers: 1 });
   env.NOW_MS = String(NOW);

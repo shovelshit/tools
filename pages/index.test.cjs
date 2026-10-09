@@ -16,16 +16,16 @@ test('toolbox directory keeps tool destinations and exposes the guide', async ()
       elements.map((element) => ({ href: element.getAttribute('href'), text: element.textContent.trim() }))
     );
     for (const href of [
-      'maoyan/',
-      'store/',
+      'https://movie.ltools.asia/',
+      'https://store.ltools.asia/',
       'https://github.com/shovelshit/BLE-debug',
     ]) {
       assert.ok(links.some((link) => link.href === href), `Missing tool destination: ${href}`);
     }
     assert.ok(links.some((link) => link.href === 'https://guide.ltools.asia/' && link.text.includes('使用教程')));
-    const lynkco = links.find((link) => link.text.includes('领克签到助手'));
+    const lynkco = links.find((link) => link.text.includes('Lynkco-plus'));
     assert.equal(lynkco?.href, 'https://guide.ltools.asia/lynkco-plus');
-    assert.match(lynkco.text, /Lynkco-push 配置教程/);
+    assert.match(lynkco.text, /Lynkco-plus 配置教程/);
     assert.equal(await page.locator('h1').textContent().then((text) => text.trim()), '工具箱');
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
   } finally {

@@ -8,8 +8,8 @@
 
 | 工具 | 说明 | 形态 |
 |---|---|---|
-| 🎬 [电影场次监控 + 自动锁座](https://ltools.asia/maoyan/) | 监控影院排片变化，新场次推送到手机；开售后自动锁座 | Worker Static Assets + D1 / KV / Durable Objects / Cron |
-| 📦 [应用商店](https://ltools.asia/store/) | 浏览和下载 AList 网盘中的应用，云端加速直连、在线预览 | Pages 前端 + Worker 文件代理（无需登录） |
+| 🎬 [电影场次监控 + 自动锁座](https://movie.ltools.asia/) | 监控影院排片变化，新场次推送到手机；开售后自动锁座 | Worker Static Assets + D1 / KV / Durable Objects / Cron |
+| 📦 [应用商店](https://store.ltools.asia/) | 浏览和下载 AList 网盘中的应用，云端加速直连、在线预览 | Pages 前端 + Worker 文件代理（无需登录） |
 | 🚗 领克签到助手 | 领克 App 自动签到、分享任务、积分查询与 Bark 推送 | Python 脚本 · [独立仓库](https://github.com/shovelshit/LynkCoHelper) |
 | 📶 蓝牙调试助手 | 低功耗蓝牙调试工具，扫描/读写特征值/订阅通知，可替代 nRF Connect | 微信小程序 + iOS · [独立仓库](https://github.com/shovelshit/BLE-debug) |
 

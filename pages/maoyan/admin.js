@@ -20,7 +20,7 @@ const els = {
   dashboardBack: $("btn-dashboard-back"), dashboardRefresh: $("btn-dashboard-refresh")
 };
 
-const SAME_ORIGIN_HOSTS = ["ltools.asia", "www.ltools.asia", "tools-a65.pages.dev"];
+const SAME_ORIGIN_HOSTS = ["ltools.asia", "www.ltools.asia", "movie.ltools.asia", "tools-a65.pages.dev"];
 const SAME_ORIGIN = SAME_ORIGIN_HOSTS.includes(location.hostname);
 const DEFAULT_WORKER = SAME_ORIGIN ? "" : "https://ltools.asia";
 const STATUS_LABEL = { active: "有效", expired: "已到期", suspended: "已暂停", revoked: "已撤销" };

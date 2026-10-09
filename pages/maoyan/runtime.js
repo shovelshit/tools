@@ -1,5 +1,9 @@
 (function (root) {
-  const enrollmentUrl = "https://ltools.asia/maoyan/claim.html";
+  function enrollmentUrl() {
+    return root.location?.hostname === "movie.ltools.asia"
+      ? `${root.location.origin}/claim.html`
+      : "https://ltools.asia/maoyan/claim.html";
+  }
   function createProfileGeneration() {
     let value = 0;
     const isCurrent = (generation) => generation === value;
@@ -49,7 +53,7 @@
     return {
       kind: "web",
       capabilities: Object.freeze({ downloads: true, updates: false, toolbox: true }),
-      openEnrollment: async () => { root.location.href = enrollmentUrl; return { opened: true }; },
+      openEnrollment: async () => { root.location.href = enrollmentUrl(); return { opened: true }; },
       getRuntimeInfo: async () => ({ kind: "web", canLoginMaoyan: false, persistentTokenStorage: true }),
       requestWorker,
       async connectWorker({ workerUrl, token, httpRiskConfirmed }) {
@@ -91,7 +95,7 @@
       ...bridge,
       capabilities: Object.freeze({ downloads: false, updates: typeof bridge.checkForUpdates === "function", toolbox: false }),
       openEnrollment: () => typeof bridge.openEnrollment === "function"
-        ? bridge.openEnrollment() : bridge.openExternal(enrollmentUrl),
+        ? bridge.openEnrollment() : bridge.openExternal(enrollmentUrl()),
       async requestWorker(path, options = {}) {
         const { signal, ...serializable } = options;
         if (signal?.aborted) {

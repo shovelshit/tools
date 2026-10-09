@@ -1,9 +1,16 @@
 const GITHUB_RELEASES_API = "https://api.github.com/repos/shovelshit/tools/releases/latest";
 const GITHUB_RELEASE_PREFIX = "/shovelshit/tools/releases/tag/";
 const MAX_RELEASE_NOTES_LENGTH = 4 * 1024;
-const CLAIM_URL = "https://ltools.asia/maoyan/claim.html";
-const DOWNLOAD_URL = "https://ltools.asia/maoyan/download";
-const SETUP_URLS = new Set(["https://apps.apple.com/cn/app/id1403753865", "https://sct.ftqq.com/sendkey", CLAIM_URL, DOWNLOAD_URL]);
+const CLAIM_URL = "https://movie.ltools.asia/claim.html";
+const DOWNLOAD_URL = "https://movie.ltools.asia/download";
+const SETUP_URLS = new Set([
+  "https://apps.apple.com/cn/app/id1403753865",
+  "https://sct.ftqq.com/sendkey",
+  CLAIM_URL,
+  DOWNLOAD_URL,
+  "https://ltools.asia/maoyan/claim.html",
+  "https://ltools.asia/maoyan/download"
+]);
 
 function normalizeVersion(value) {
   const match = typeof value === "string" && value.trim().match(/^v?(\d+)\.(\d+)\.(\d+)$/i);

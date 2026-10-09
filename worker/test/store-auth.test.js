@@ -5,8 +5,8 @@ import { createAccountEnv, seedAccount } from "./account-fixtures.js";
 
 const NOW = Date.parse("2026-09-16T04:00:00.000Z");
 
-function storeRequest(path, { method = "GET", cookie, body, headers = {} } = {}) {
-  return new Request(`https://worker.example${path}`, {
+function storeRequest(path, { method = "GET", cookie, body, headers = {}, host = "worker.example" } = {}) {
+  return new Request(`https://${host}${path}`, {
     method,
     headers: {
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
@@ -16,6 +16,18 @@ function storeRequest(path, { method = "GET", cookie, body, headers = {} } = {})
     body: body === undefined ? undefined : JSON.stringify(body)
   });
 }
+
+test("Store subdomain exposes auth at the module root and uses a host-wide cookie", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  env.NOW_MS = String(NOW);
+  const { key } = await seedAccount(env, { businessLine: "store", expiresAt: NOW + 60_000 });
+  const response = await worker.fetch(storeRequest("/auth/session", {
+    host: "store.ltools.asia",
+    method: "POST", body: { key }, headers: { Origin: "https://store.ltools.asia" }
+  }), env);
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("Set-Cookie"), /^store_session=[0-9a-f]{64}; HttpOnly; SameSite=Lax; Path=\/; Max-Age=86400; Secure$/);
+});
 
 test("a Store key creates a path-scoped browser session without storing its secret", async () => {
   const env = await createAccountEnv({ nowMs: NOW });

@@ -8,6 +8,8 @@ keep_vars = true
 # ============ 自定义域名路由 (zone: ltools.asia) ============
 # 注意: routes 必须在第一个 [table] 之前，否则会被解析为前一个 table 的子字段
 routes = [
+  { pattern = "movie.ltools.asia/*", zone_name = "ltools.asia" },
+  { pattern = "store.ltools.asia/*", zone_name = "ltools.asia" },
   { pattern = "ltools.asia/maoyan", zone_name = "ltools.asia" },
   { pattern = "ltools.asia/maoyan/*", zone_name = "ltools.asia" },
   { pattern = "www.ltools.asia/maoyan", zone_name = "ltools.asia" },
@@ -47,8 +49,12 @@ crons = ["*/3 * * * *"]
 # 公开申请域名与 Site Key 随代码管理；敏感值和其余运行变量保留在 Dashboard。
 # keep_vars 可确保部署时不删除未在 toml 中声明的 Dashboard 变量。
 [vars]
-ENROLLMENT_ORIGIN = "https://ltools.asia"
-ENROLLMENT_HOSTNAME = "ltools.asia"
+ENROLLMENT_ORIGIN = "https://movie.ltools.asia"
+ENROLLMENT_HOSTNAME = "movie.ltools.asia"
+ENROLLMENT_LEGACY_ORIGIN = "https://ltools.asia"
+ENROLLMENT_LEGACY_HOSTNAME = "ltools.asia"
+PUBLIC_WORKER_URL = "https://movie.ltools.asia"
+PUBLIC_WEB_URL = "https://movie.ltools.asia/"
 TURNSTILE_SITE_KEY = "0x4AAAAAAE57zkw_Hl1wrTbT"
 # CF_ACCOUNT_ID = "4872db2724154d6cbee0709216b70a01"
 # LOCK_SERVICE_ENABLED = "true"

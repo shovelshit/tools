@@ -35,7 +35,8 @@ function cookieValue(request) {
 
 function sessionCookie(value, url, maxAge) {
   const secure = url.protocol === "https:" ? "; Secure" : "";
-  return `store_session=${value}; HttpOnly; SameSite=Lax; Path=/store/; Max-Age=${maxAge}${secure}`;
+  const path = url.hostname === "store.ltools.asia" ? "/" : "/store/";
+  return `store_session=${value}; HttpOnly; SameSite=Lax; Path=${path}; Max-Age=${maxAge}${secure}`;
 }
 
 function response(data, status = 200, headers = {}) {

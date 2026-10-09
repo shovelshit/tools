@@ -23,9 +23,9 @@ test('enrollment reuses an isolated window and restricts top-level navigation', 
   assert.equal(win.options.webPreferences.session, session);
   assert.match(win.url, /claim.html\?client=desktop$/);
   const details = { isMainFrame: true, requestingUrl: win.url };
-  assert.equal(session.check(null, 'clipboard-sanitized-write', 'https://ltools.asia', details), true);
-  assert.equal(session.check(null, 'clipboard-read', 'https://ltools.asia', details), false);
-  assert.equal(session.check(null, 'clipboard-sanitized-write', 'https://ltools.asia', { ...details, isMainFrame: false }), false);
+  assert.equal(session.check(null, 'clipboard-sanitized-write', 'https://movie.ltools.asia', details), true);
+  assert.equal(session.check(null, 'clipboard-read', 'https://movie.ltools.asia', details), false);
+  assert.equal(session.check(null, 'clipboard-sanitized-write', 'https://movie.ltools.asia', { ...details, isMainFrame: false }), false);
   assert.equal(session.check(null, 'clipboard-sanitized-write', 'https://evil.example', { ...details, requestingUrl: 'https://evil.example/' }), false);
   let granted = false;
   session.request(null, 'clipboard-sanitized-write', value => { granted = value; }, details);
@@ -36,7 +36,7 @@ test('enrollment reuses an isolated window and restricts top-level navigation', 
     assert.equal(prevented, true);
   }
   let prevented = false;
-  win.webContents.emit('will-redirect', { preventDefault() { prevented = true; } }, 'https://ltools.asia/maoyan/claim?client=desktop');
+  win.webContents.emit('will-redirect', { preventDefault() { prevented = true; } }, 'https://movie.ltools.asia/claim?client=desktop');
   assert.equal(prevented, false);
   assert.deepEqual(win.popup(), { action: 'deny' });
 });

@@ -30,10 +30,10 @@ const { uploadSessionFile } = loadMain();
 test("download page opens in system browser even on the configured Worker origin", async () => {
   const opened = [];
   const shell = { openExternal: async url => opened.push(url) };
-  const workerProfile = { baseUrl: "https://ltools.asia" };
-  const url = "https://ltools.asia/maoyan/download";
+  const workerProfile = { baseUrl: "https://movie.ltools.asia" };
+  const url = "https://movie.ltools.asia/download";
   assert.deepEqual(await openExternal(url, { shell, workerProfile }), { opened: true });
-  for (const invalid of [url + "?next=evil", url + "/other", "http://ltools.asia/maoyan/download", "https://ltools.asia/api/status"]) {
+  for (const invalid of [url + "?next=evil", url + "/other", "http://movie.ltools.asia/download", "https://movie.ltools.asia/api/status"]) {
     assert.deepEqual(await openExternal(invalid, { shell, workerProfile }), { opened: false });
   }
   assert.deepEqual(opened, [url]);

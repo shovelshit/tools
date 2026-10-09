@@ -6,6 +6,8 @@ keep_vars = true
 
 # Replace both hostnames and zone_name values with a zone in your account.
 routes = [
+  { pattern = "movie.your-domain.example/*", zone_name = "your-domain.example" },
+  { pattern = "store.your-domain.example/*", zone_name = "your-domain.example" },
   { pattern = "your-domain.example/maoyan", zone_name = "your-domain.example" },
   { pattern = "your-domain.example/maoyan/*", zone_name = "your-domain.example" },
   { pattern = "www.your-domain.example/maoyan", zone_name = "your-domain.example" },
@@ -30,7 +32,7 @@ command = "npm run build:assets"
 [assets]
 directory = "./public"
 binding = "ASSETS"
-run_worker_first = ["/api/*", "/store", "/store/", "/store/*.html", "/store/auth/*", "/store/api/*", "/store/file*", "/maoyan", "/maoyan/", "/maoyan/*.html"]
+run_worker_first = ["/*", "/api/*", "/store", "/store/", "/store/*.html", "/store/auth/*", "/store/api/*", "/store/file*", "/maoyan", "/maoyan/", "/maoyan/*.html"]
 
 [triggers]
 crons = ["*/3 * * * *"]
@@ -39,8 +41,12 @@ crons = ["*/3 * * * *"]
 LOCK_SERVICE_ENABLED = "true"
 # 公开申请在 D1 管理设置中默认关闭。仅在准备开启时取消以下注释：
 # TURNSTILE_SITE_KEY = "replace-me"
-# ENROLLMENT_ORIGIN = "https://your-worker.example.workers.dev"
-# ENROLLMENT_HOSTNAME = "your-worker.example.workers.dev"
+# ENROLLMENT_ORIGIN = "https://movie.your-domain.example"
+# ENROLLMENT_HOSTNAME = "movie.your-domain.example"
+# ENROLLMENT_LEGACY_ORIGIN = "https://your-domain.example"
+# ENROLLMENT_LEGACY_HOSTNAME = "your-domain.example"
+# PUBLIC_WORKER_URL = "https://movie.your-domain.example"
+# PUBLIC_WEB_URL = "https://movie.your-domain.example/"
 
 [[kv_namespaces]]
 binding = "MAOYAN_KV"

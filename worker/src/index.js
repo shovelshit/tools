@@ -24,6 +24,7 @@ import { handleStatusApi } from "./maoyan/status-api.js";
 import { checkManualOperationThroughCoordinator } from "./maoyan/lock-runner.js";
 import { fetchManualCinemaThroughCoordinator } from "./maoyan/monitor-coordinator.js";
 import { handleEnrollmentApi } from "./maoyan/enrollment-api.js";
+import { canonicalModulePath, canonicalStorePath, isModuleHost } from "./common/module-routes.js";
 
 const DECIMAL = /^\d+$/;
 const MAOYAN_CSP = [
@@ -66,11 +67,12 @@ function staticAssetResponse(response, url, csp) {
 }
 
 export async function serveMaoyanAsset(request, env, url = new URL(request.url)) {
-  if (url.pathname === "/maoyan") {
+  if (!isModuleHost(url, "movie") && url.pathname === "/maoyan") {
     return Response.redirect(`${url.origin}/maoyan/`, 308);
   }
-  if (!url.pathname.startsWith("/maoyan/") || !env.ASSETS) return null;
-  const response = await env.ASSETS.fetch(request);
+  const pathname = isModuleHost(url, "movie") ? canonicalModulePath(url, "movie") : url.pathname;
+  if (!pathname.startsWith("/maoyan/") || !env.ASSETS) return null;
+  const response = await env.ASSETS.fetch(rewriteRequestPath(request, pathname));
   return staticAssetResponse(response, url, MAOYAN_CSP);
 }
 
@@ -85,10 +87,17 @@ export async function serveMaoyanApiAsset(request, env, url = new URL(request.ur
 }
 
 export async function serveStoreAsset(request, env, url = new URL(request.url)) {
-  if (url.pathname === "/store") return Response.redirect(`${url.origin}/store/`, 308);
-  if (!url.pathname.startsWith("/store/") || !env.ASSETS) return null;
-  const response = await env.ASSETS.fetch(request);
+  if (!isModuleHost(url, "store") && url.pathname === "/store") return Response.redirect(`${url.origin}/store/`, 308);
+  const pathname = canonicalStorePath(url);
+  if (!pathname.startsWith("/store/") || !env.ASSETS) return null;
+  const response = await env.ASSETS.fetch(rewriteRequestPath(request, pathname));
   return staticAssetResponse(response, url, STORE_CSP);
+}
+
+function rewriteRequestPath(request, pathname) {
+  const target = new URL(request.url);
+  target.pathname = pathname;
+  return new Request(target, request);
 }
 
 // 推送/上游失败的状态码: 凭据未配置属于客户端配置问题(400), 其余(渠道侧或猫眼侧异常)归为上游错误(502)
@@ -120,16 +129,19 @@ export default {
     const url = new URL(request.url);
     const enrollmentResponse = await handleEnrollmentApi(request, env, url);
     if (enrollmentResponse) return enrollmentResponse;
+    const storePath = canonicalStorePath(url);
+    const storeUrl = storePath === url.pathname ? url : new URL(url);
+    storeUrl.pathname = storePath;
     try {
-      const storeAuthResponse = await handleStoreAuth(request, env, url);
+      const storeAuthResponse = await handleStoreAuth(request, env, storeUrl);
       if (storeAuthResponse) return storeAuthResponse;
-      if (url.pathname.startsWith("/store/api/") || url.pathname === "/store/file") {
+      if (storePath.startsWith("/store/api/") || storePath === "/store/file") {
         await requireActiveStoreAccount(request, env, serviceNow(env));
-        if (url.pathname.startsWith("/store/api/") && request.method === "POST") {
-          requireStoreSameOrigin(request, url);
+        if (storePath.startsWith("/store/api/") && request.method === "POST") {
+          requireStoreSameOrigin(request, storeUrl);
         }
-        if (url.pathname.startsWith("/store/api/")) return handleStoreApi(request, url);
-        return handleStoreFile(url);
+        if (storePath.startsWith("/store/api/")) return handleStoreApi(request, storeUrl);
+        return handleStoreFile(storeUrl);
       }
     } catch (error) {
       return storeErrorResponse(error);

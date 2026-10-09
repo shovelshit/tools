@@ -22,20 +22,28 @@ function allowedOrigin(env) {
   try { return new URL(String(env.ENROLLMENT_ORIGIN || "")).origin; } catch { return ""; }
 }
 
+function allowedOrigins(env) {
+  return [...new Set([allowedOrigin(env), String(env.ENROLLMENT_LEGACY_ORIGIN || "").trim()].filter(Boolean))];
+}
+
+function allowedHostnames(env) {
+  return [...new Set([String(env.ENROLLMENT_HOSTNAME || "").trim(), String(env.ENROLLMENT_LEGACY_HOSTNAME || "").trim()].filter(Boolean))];
+}
+
 function response(env, data, status = 200, origin = "") {
   const configured = allowedOrigin(env);
   return json(data, status, {
     "Cache-Control": "no-store",
     "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff",
-    "Access-Control-Allow-Origin": configured || "null",
+    "Access-Control-Allow-Origin": origin || configured || "null",
     Vary: "Origin"
   });
 }
 
 function requireOrigin(request, env) {
   const origin = String(request.headers.get("Origin") || "");
-  if (!origin || origin !== allowedOrigin(env)) throw new EnrollmentApiError("FORBIDDEN", "申请来源无效", 403);
+  if (!origin || !allowedOrigins(env).includes(origin)) throw new EnrollmentApiError("FORBIDDEN", "申请来源无效", 403);
   return origin;
 }
 
@@ -87,7 +95,8 @@ export async function verifyTurnstile(env, {
     throw new EnrollmentApiError("TURNSTILE_UNAVAILABLE", "人机验证服务暂时不可用", 503);
   }
   const challengeAt = Date.parse(result.challenge_ts || "");
-  if (result.success !== true || result.hostname !== hostname || result.action !== action ||
+  const hostnames = Array.isArray(hostname) ? hostname : [hostname];
+  if (result.success !== true || !hostnames.includes(result.hostname) || result.action !== action ||
       !Number.isFinite(challengeAt) || Math.abs(nowMs - challengeAt) > 300_000) {
     throw new EnrollmentApiError("TURNSTILE_INVALID", "人机验证无效");
   }
@@ -106,7 +115,8 @@ function errorResponse(env, error, origin = "") {
 
 export async function handleEnrollmentApi(request, env, url, { fetchImpl = fetch } = {}) {
   if (!url.pathname.startsWith("/api/enrollment/")) return null;
-  let origin = "";
+  const requestOrigin = String(request.headers.get("Origin") || "");
+  let origin = allowedOrigins(env).includes(requestOrigin) ? requestOrigin : "";
   try {
     if (request.method === "OPTIONS") {
       origin = requireOrigin(request, env);
@@ -140,11 +150,11 @@ export async function handleEnrollmentApi(request, env, url, { fetchImpl = fetch
         workerUrl: String(env.PUBLIC_WORKER_URL || new URL(request.url).origin),
         webUrl: String(env.PUBLIC_WEB_URL || new URL("/maoyan/", allowedOrigin(env) || new URL(request.url).origin).href),
         sourceUrl: String(env.SOURCE_URL || "https://github.com/shovelshit/tools")
-      });
+      }, 200, origin);
     }
     if (url.pathname === "/api/enrollment/status" && request.method === "GET") {
       const id = requestId(url.searchParams.get("request_id"));
-      return response(env, { ok: true, ...await readEnrollmentStatus(env.DB, id, serviceNow(env)) });
+      return response(env, { ok: true, ...await readEnrollmentStatus(env.DB, id, serviceNow(env)) }, 200, origin);
     }
     origin = requireOrigin(request, env);
     if (url.pathname === "/api/enrollment/reserve" && request.method === "POST") {
@@ -175,7 +185,7 @@ export async function handleEnrollmentApi(request, env, url, { fetchImpl = fetch
         token: body.turnstileToken,
         edgeIp,
         requestId: id,
-        hostname: String(env.ENROLLMENT_HOSTNAME || ""),
+        hostname: allowedHostnames(env),
         action: "enroll"
       }, fetchImpl, serviceNow(env));
       const result = await reserveEnrollment(env, { requestId: id, ...identity, nowMs: serviceNow(env) });

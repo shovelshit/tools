@@ -26,6 +26,12 @@ test("runtime capabilities isolate downloads and native controls with old-bridge
   assert.deepEqual(opened, ["https://ltools.asia/maoyan/claim.html"]);
 });
 
+test("movie subdomain uses root enrollment path", async () => {
+  const scope = loadRuntime({ location: { hostname: "movie.ltools.asia", origin: "https://movie.ltools.asia", href: "" } });
+  await scope.createWebRuntime().openEnrollment();
+  assert.equal(scope.location.href, "https://movie.ltools.asia/claim.html");
+});
+
 test("web runtime sends relative API requests with the token header", async () => {
   const { createWebRuntime } = loadRuntime();
   const requests = [];
