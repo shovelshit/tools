@@ -79,7 +79,6 @@ test("parsed Worker configurations keep custom routes at the top level", async (
     readFile(new URL("../wrangler.example.toml", import.meta.url), "utf8")
   ]);
   const expectedRouteSuffixes = [
-    "/*", "/*",
     "/maoyan", "/maoyan/*", "/maoyan", "/maoyan/*",
     "/api/*", "/api/*",
     "/store", "/store",
@@ -93,8 +92,13 @@ test("parsed Worker configurations keep custom routes at the top level", async (
     const config = parseToml(text);
     assert.equal(config.assets.routes, undefined);
     assert.equal(Array.isArray(config.routes), true);
+    const domains = config.routes.filter((route) => route.custom_domain);
+    assert.equal(domains.length, 2);
+    assert.ok(domains.every((route) => !route.pattern.includes("/")));
+    assert.ok(domains.some((route) => route.pattern.startsWith("movie.")));
+    assert.ok(domains.some((route) => route.pattern.startsWith("store.")));
     assert.deepEqual(
-      config.routes.map((route) => route.pattern.slice(route.pattern.indexOf("/"))),
+      config.routes.filter((route) => !route.custom_domain).map((route) => route.pattern.slice(route.pattern.indexOf("/"))),
       expectedRouteSuffixes
     );
     assert.ok(config.assets.run_worker_first.includes("/store/auth/*"));

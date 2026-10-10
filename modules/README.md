@@ -19,9 +19,9 @@ git -C modules/store log -1 --oneline
 
 ## 上线前置条件
 
-需要在 Cloudflare 的 `ltools.asia` 区域创建并代理以下 DNS 记录，然后再部署 Worker：
+Wrangler 使用 Worker Custom Domain 接入以下子域名，Cloudflare 自动管理 DNS 和证书：
 
 - `movie.ltools.asia`
 - `store.ltools.asia`
 
-仓库中的 Wrangler 路由只声明 Worker 绑定，不会替代 DNS 配置，也不会自动完成域名证书或代理状态设置。
+旧的 `ltools.asia/maoyan/*`、`ltools.asia/store/*` 仍保留为普通 Worker routes，需要已有的代理 DNS。现状、预检和回滚步骤见 [Cloudflare 运维](../knowledge/cloudflare.md)。

@@ -66,11 +66,15 @@ Cron 每 3 分钟触发 Worker scheduled 入口；`cron.js` 解析步进表达�
 
 只有主仓库部署 Worker。切换前备份并记录 D1/KV/DO 基线，真正暂停相关写入
 和调度并保留可回滚材料；远程写入后独立核对数量、版本和任务状态。需要在
-`ltools.asia` 区域创建并代理 `movie.ltools.asia`、`store.ltools.asia` DNS；
-Wrangler routes 不会创建 DNS 或证书。
+`movie.ltools.asia`、`store.ltools.asia` 使用 Wrangler `custom_domain = true`，
+由 Cloudflare 管理 DNS 和证书；旧路径的普通 routes 不会创建 DNS。
+当前主分支由 Cloudflare Workers Builds 自动发布 Worker，两个 Pages 项目
+分别发布工具入口和教程；不是 GitHub Actions 部署。具体配置、核验和
+回滚见 [Cloudflare 运维](cloudflare.md)。
 
 生产需要 `worker/DEPLOY-D1.md` 和 Wrangler 配置中的绑定及
 `ADMIN_TOKEN`、`SESSION_ENCRYPTION_KEY`、`ENROLLMENT_HMAC_KEY` 等 secret。
 预检只核对名称，不打印值。子仓库 CI 只测源码；主仓库
 `.github/workflows/module-update.yml` 只更新 gitlink 并创建/更新 PR，绝不
-自动部署 Worker，且需要仓库允许 Actions 使用可创建 PR 的 token。
+自动部署 Worker；PR 合并到主分支后会触发上述 Cloudflare 构建。
+创建 PR 需要仓库允许 Actions 使用可创建 PR 的 token。

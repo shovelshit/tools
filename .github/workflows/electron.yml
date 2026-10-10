@@ -19,6 +19,10 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TOOLS_REPO_ROOT: ${{ github.workspace }}
+      MAOYAN_E2E_CHROME: /usr/bin/google-chrome
     steps:
       - uses: actions/checkout@v4
         with:
@@ -38,13 +42,13 @@ jobs:
       - run: npm --prefix modules/movie/desktop test
       - run: node --test modules/movie/pages/maoyan/*.test.cjs
       - run: node --test modules/store/pages/store/*.test.cjs
+      - name: Check integration browser
+        run: test -x "$MAOYAN_E2E_CHROME" && "$MAOYAN_E2E_CHROME" --version
       - name: Run parent-backed Movie enrollment integration
-        env:
-          TOOLS_REPO_ROOT: ${{ github.workspace }}
+        timeout-minutes: 5
         run: node modules/movie/desktop/test/claim-integration.cjs "$RUNNER_TEMP/claim-integration"
       - name: Run parent-backed Movie UI verification
-        env:
-          TOOLS_REPO_ROOT: ${{ github.workspace }}
+        timeout-minutes: 5
         run: npm --prefix modules/movie/desktop run test:e2e -- --output "$RUNNER_TEMP/maoyan-ui-verification"
 
   prepare_release:
@@ -84,6 +88,7 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     permissions:
       contents: write
     env:

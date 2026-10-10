@@ -5,7 +5,7 @@
 ## 1. Fork 与安装
 
 ```bash
-git clone https://github.com/<your-account>/tools.git
+git clone --recurse-submodules https://github.com/<your-account>/tools.git
 cd tools
 npm --prefix worker ci
 cp worker/wrangler.example.toml worker/wrangler.local.toml
@@ -21,7 +21,7 @@ npx wrangler d1 create my-maoyan-db
 npx wrangler kv namespace create MAOYAN_KV
 ```
 
-把命令返回的 D1 `database_id` 和 KV `id` 写入 `wrangler.local.toml`，不要保留 `REPLACE_WITH_*`。把模板顶部 `routes` 中的示例域名和 `zone_name` 一并替换为自己的域名；只使用 `workers.dev` 时删除整个 `routes` 数组。四个 Durable Object 及 `[[migrations]]` 声明已在模板中列出，无需单独创建。这些声明是 Cloudflare Durable Object 类注册元数据，不是 D1 数据库升级脚本，请勿删除或改写。
+把命令返回的 D1 `database_id` 和 KV `id` 写入 `wrangler.local.toml`，不要保留 `REPLACE_WITH_*`。把模板顶部 `routes` 中的示例域名和 `zone_name` 一并替换为自己的域名；两条 `custom_domain = true` 声明由 Cloudflare 创建 DNS 和证书，域名不能带 `/*`，也不能覆盖已有 CNAME。旧路径的普通 Worker routes 仍需要已代理的 DNS。只使用 `workers.dev` 时删除整个 `routes` 数组。四个 Durable Object 及 `[[migrations]]` 声明已在模板中列出，无需单独创建。这些声明是 Cloudflare Durable Object 类注册元数据，不是 D1 数据库升级脚本，请勿删除或改写。
 
 ## 3. 配置 secret
 
@@ -44,7 +44,9 @@ node scripts/deploy-preflight.mjs --config wrangler.local.toml --secrets ADMIN_T
 npx wrangler deploy --config wrangler.local.toml
 ```
 
-预检只核对绑定和 secret 名称，不读取或打印 secret 值。部署后访问 `https://<你的 Worker 域名>/maoyan/`，使用管理员令牌登录，先上传猫眼登录态并测试通知，再开启监控。
+预检只核对绑定和 secret 名称，不读取或打印 secret 值。`--secrets` 是已经核对的名称清单，不会查询远端；先运行 `npx wrangler secret list --config wrangler.local.toml` 确认真正存在，不能用手工传入名称代替远端检查。部署后访问 `https://<你的 Worker 域名>/maoyan/`，使用管理员令牌登录，先上传猫眼登录态并测试通知，再开启监控。
+
+维护者当前环境的构建和上线流程见 [Cloudflare 运维](../knowledge/cloudflare.md)。生产已有库不要重放完整 `schema.sql`；客户端打包发布与 Worker/Pages 发布是独立链路。
 
 ## 5. 可选：开启公开申请
 

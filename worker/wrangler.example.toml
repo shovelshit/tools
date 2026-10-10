@@ -6,8 +6,8 @@ keep_vars = true
 
 # Replace both hostnames and zone_name values with a zone in your account.
 routes = [
-  { pattern = "movie.your-domain.example/*", zone_name = "your-domain.example" },
-  { pattern = "store.your-domain.example/*", zone_name = "your-domain.example" },
+  { pattern = "movie.your-domain.example", custom_domain = true },
+  { pattern = "store.your-domain.example", custom_domain = true },
   { pattern = "your-domain.example/maoyan", zone_name = "your-domain.example" },
   { pattern = "your-domain.example/maoyan/*", zone_name = "your-domain.example" },
   { pattern = "www.your-domain.example/maoyan", zone_name = "your-domain.example" },
