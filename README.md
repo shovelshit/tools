@@ -4,7 +4,7 @@ Cloudflare Worker 部署总仓，包含电影监控和应用商店。在线入�
 [ltools.asia](https://ltools.asia/)、[movie.ltools.asia](https://movie.ltools.asia/)、
 [store.ltools.asia](https://store.ltools.asia/)。
 
-先读[仓库知识库](knowledge/README.md)了解请求路由、模块所有权、认证/数据/调度边界和部署前置条件；源码入口见[模块注册表](modules/README.md)、
+先读[仓库知识库](knowledge/README.md)；[Movie 架构与代码解释](knowledge/movie.md)包含架构图、调度、座位解析及前端/Electron 导航。源码入口见[模块注册表](modules/README.md)、
 [Movie](modules/movie/README.md)和[Store](modules/store/README.md)。
 
 ## 快速检查

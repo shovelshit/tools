@@ -3,6 +3,15 @@
 本仓库是 `ltools.asia` 的部署总仓。当前代码、配置和已固定的
 submodule 才是现状依据；历史说明不能替代线上状态核实。
 
+## 专题导航
+
+- [Movie 架构与代码导航](movie.md)：整体架构、请求认证、仓库边界和阅读顺序。
+- [Movie 监控、数据与通知](movie-monitoring.md)：批次、提交顺序、锁座及重试。
+- [Movie 座位解析与反馈](movie-seats.md)：策略、原始标识与管理员闭环。
+- [Movie 前端与 Electron](../modules/movie/knowledge/README.md)：共享页面和桌面安全边界。
+- [交互架构图](diagrams/movie-architecture.html)：组件与固定版本源码证据。
+- [Cloudflare 运维](cloudflare.md)：构建、域名、权限、核验与回滚。
+
 ## 请求路由与构建
 
 `worker/src/index.js` 先处理账号/认证，再按 Host 和路径分流 API、文件和
@@ -56,7 +65,8 @@ Store 页面不复制这些逻辑。Movie 锁座入口在 `worker/src/maoyan/loc
 下单参数。座位解析策略在 `worker/src/maoyan/seat-layout/strategies/`。
 
 Cron 每 3 分钟触发 Worker scheduled 入口；`cron.js` 解析步进表达式，
-`tokens.js` 执行监控和维护扫描，`lock-runner.js` 在数据落库后协调锁座。
+`monitor-dispatcher.js` 和 `monitor-coordinator.js` 协调当前监控主链路，
+`tokens.js` 执行维护并保留旧监控回退，`lock-runner.js` 协调锁座。
 业务窗口和重试由代码判定，不能仅凭配置中的“暂停”字段推断已停止写入。
 
 正式下单使用移动站/主站对应接口和 Cookie/User-Agent；旧 Electron 登录捕获

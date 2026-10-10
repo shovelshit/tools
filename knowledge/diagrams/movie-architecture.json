@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Movie 运行时架构",
+    "locale": "zh-CN",
+    "output": "knowledge/diagrams/movie-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/shovelshit/tools.git",
+      "revision": "4d3341ca07c0622ce4befa68ac587f0ae05e3d76",
+      "provider": "github",
+      "link_mode": "web"
+    }
+  },
+  "components": [
+    { "id": "clients", "type": "frontend", "label": "Web / Electron", "sublabel": "共享 Movie 页面", "pos": [40, 220], "size": [190, 72], "sources": [{ "path": ".gitmodules", "line": 1, "end_line": 4 }, { "path": "worker/scripts/build-assets.mjs", "line": 1, "end_line": 55 }] },
+    { "id": "cron", "type": "cloud", "label": "Cron", "sublabel": "每 3 分钟检查业务窗口", "pos": [430, 30], "size": [230, 72], "sources": [{ "path": "worker/wrangler.toml", "line": 39, "end_line": 46 }, { "path": "worker/src/index.js", "line": 381, "end_line": 397 }] },
+    { "id": "worker", "type": "backend", "label": "Worker 与四类 DO", "sublabel": "认证 / 监控 / 锁座 / 通知", "pos": [430, 220], "size": [230, 72], "sources": [{ "path": "worker/src/index.js", "line": 127, "end_line": 203 }, { "path": "worker/src/index.js", "line": 381, "end_line": 397 }, { "path": "worker/wrangler.toml", "line": 81, "end_line": 95 }] },
+    { "id": "maoyan", "type": "external", "label": "猫眼", "sublabel": "场次 / 座位 / 未支付订单", "pos": [870, 220], "size": [240, 72], "sources": [{ "path": "worker/src/maoyan/monitor-coordinator.js", "line": 75, "end_line": 108 }, { "path": "worker/src/maoyan/lock-client.js", "line": 324, "end_line": 341 }, { "path": "worker/src/maoyan/lock-client.js", "line": 370, "end_line": 408 }] },
+    { "id": "assets", "type": "cloud", "label": "ASSETS", "sublabel": "固定子模块静态资源", "pos": [40, 490], "size": [190, 72], "sources": [{ "path": "worker/wrangler.toml", "line": 32, "end_line": 37 }, { "path": "worker/src/index.js", "line": 69, "end_line": 76 }] },
+    { "id": "d1", "type": "database", "label": "D1", "sublabel": "业务状态 / 通知 outbox", "pos": [320, 490], "size": [200, 72], "sources": [{ "path": "worker/schema.sql", "line": 276, "end_line": 367 }, { "path": "worker/src/maoyan/monitor-coordinator.js", "line": 44, "end_line": 72 }, { "path": "worker/src/maoyan/notification-outbox.js", "line": 170, "end_line": 245 }] },
+    { "id": "kv", "type": "database", "label": "KV", "sublabel": "加密会话 / 影院搜索缓存", "pos": [570, 490], "size": [200, 72], "sources": [{ "path": "worker/wrangler.toml", "line": 67, "end_line": 72 }, { "path": "worker/src/maoyan/lock-session.js", "line": 250, "end_line": 269 }] },
+    { "id": "push", "type": "external", "label": "Bark / Server酱", "sublabel": "通知渠道适配", "pos": [870, 490], "size": [240, 72], "sources": [{ "path": "worker/src/maoyan/notify.js", "line": 1, "end_line": 51 }, { "path": "worker/src/maoyan/notification-outbox.js", "line": 104, "end_line": 131 }] }
+  ],
+  "connections": [
+    { "from": "clients", "to": "worker", "label": "凭据 API", "variant": "security" },
+    { "from": "cron", "to": "worker", "label": "scheduled", "variant": "emphasis" },
+    { "from": "worker", "to": "maoyan", "label": "受限 HTTPS", "variant": "emphasis" },
+    { "from": "worker", "to": "assets", "label": "页面资源" },
+    { "from": "worker", "to": "d1", "label": "状态与进度" },
+    { "from": "worker", "to": "kv", "label": "会话与缓存", "variant": "security" },
+    { "from": "worker", "to": "push", "label": "outbox 投递" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "仓库所有权", "items": ["Movie 子仓库拥有共享页面与 Electron", "tools 固定 gitlink 并部署所有云端运行时", "安装包更新不等同于线上 Web 发布"] },
+    { "dot": "emerald", "title": "四类协调器", "items": ["MonitorDispatcher 保留全局批次与游标", "MonitorCoordinator 按影院共享场次数据", "LockCoordinator 按用户协调规则与会话", "NotificationDispatcher 按通知通道重试"] },
+    { "dot": "amber", "title": "数据与失败边界", "items": ["D1 分开保存影院 active 与 current 状态", "终态事件的通知可重试，下单不可盲重试", "显示坐标不改写供应商原始 seatNo", "窗口外仍可维护及恢复紧急通知"] }
+  ]
+}
