@@ -56,6 +56,16 @@ curl -I https://ltools.asia/store/
 JSON `401`；网页有 CSP 和 `no-store`。同时检查 JS/CSS、背景图片、申请页和
 下载页。实际登录和通知测试使用本人账号，不在公共日志中暴露密钥。
 
+下载页没有版本时，先独立检查 GitHub Release 是否已经公开且包含三个安装包
+和对应 `.sha256`。`/api/releases` 返回 `version: null`、空 `assets`、
+`stale: true` 表示 Worker 未取得可用发布信息，不代表打包失败。即使本机
+或本地 workerd 请求成功，也不能据此认定生产侧的 GitHub 请求正常。
+查看日志中的 `release source unavailable` 及 `reason`，再区分上游 HTTP
+错误、重定向、超时和元数据校验失败；未获得日志前不要猜测原因或轮换密钥。
+保留日志查询需要 Cloudflare `Workers Observability Read` 权限；日志接口的
+认证错误与业务接口失败是两件事。排查期间可直接从
+[GitHub Releases](https://github.com/shovelshit/tools/releases/latest) 下载安装包。
+
 检查远端 D1/KV/四个 DO 绑定和 `*/3 * * * *` Cron 未变化；域名接入不需要
 D1 数据迁移或暂停 Cron。涉及数据库迁移则必须按 [部署手册](../worker/DEPLOY-D1.md)
 备份、记录用户/配置/进行中任务/通知出箱基线、真正暂停写入和调度后操作。
