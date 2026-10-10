@@ -11,3 +11,6 @@
 *.webp binary
 *.woff binary
 *.woff2 binary
+
+# Preserve byte-exact generated output; edit the diagram JSON instead.
+knowledge/diagrams/movie-architecture.html linguist-generated=true -whitespace
