@@ -9,7 +9,7 @@ import { authenticate, requireActiveAccount, serviceNow } from "./maoyan/auth.js
 import { accountErrorResponse, handleAccountApi, handlePublicAccountApi } from "./maoyan/account-api.js";
 import { requireBusinessAccess } from "./common/business.js";
 import { handleStoreApi, handleStoreFile } from "./store/proxy.js";
-import { handleStoreAuth, requireStoreSameOrigin, storeErrorResponse } from "./store/auth.js";
+import { handleStoreAuth, requireActiveStoreAccount, requireStoreSameOrigin, storeErrorResponse } from "./store/auth.js";
 import { handleGithubReleases } from "./github/releases.js";
 import { testNotification } from "./maoyan/notification-copy.js";
 
@@ -138,11 +138,11 @@ export default {
     try {
       const storeAuthResponse = await handleStoreAuth(request, env, storeUrl);
       if (storeAuthResponse) return storeAuthResponse;
-      const githubResponse = await handleGithubReleases(request, storeUrl, env);
-      if (githubResponse) return githubResponse;
       if (storePath.startsWith("/store/api/") || storePath === "/store/file") {
-        // 应用商店已改为免登录的 APK 下载页：/store/api 与 /store/file 不再要求账号会话。
-        // 仅对 POST 保留同源校验，避免被第三方页面当作开放代理滥用。
+        // 应用商店需要登录：会话 90 天有效，平板/车机长期免登录
+        await requireActiveStoreAccount(request, env, serviceNow(env));
+        const githubResponse = await handleGithubReleases(request, storeUrl, env);
+        if (githubResponse) return githubResponse;
         if (storePath.startsWith("/store/api/") && request.method === "POST") {
           requireStoreSameOrigin(request, storeUrl);
         }

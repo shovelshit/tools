@@ -15,35 +15,29 @@ async function storeSession(env) {
   return response.headers.get("Set-Cookie").split(";")[0];
 }
 
-test("anonymous Store file access reaches the provider without a session", async () => {
+test("Store file access is denied before any provider request", async () => {
   const env = await createAccountEnv({ nowMs: NOW });
   env.NOW_MS = String(NOW);
   let upstreamCalls = 0;
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => {
-    upstreamCalls += 1;
-    return new Response("payload", { headers: { "Content-Type": "application/octet-stream" } });
-  };
+  globalThis.fetch = async () => { upstreamCalls += 1; return new Response("unexpected"); };
   try {
     const response = await worker.fetch(new Request(
       "https://worker.example/store/file?url=http%3A%2F%2Fappstore.cnmlynk.org%2Fsample.apk"
     ), env);
-    assert.equal(response.status, 200);
-    assert.equal(upstreamCalls, 1);
+    assert.equal(response.status, 401);
+    assert.equal(upstreamCalls, 0);
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test("anonymous listing, detail, preview, and download reach the provider", async () => {
+test("listing, detail, preview, and download return 401 before provider dispatch", async () => {
   const env = await createAccountEnv({ nowMs: NOW });
   env.NOW_MS = String(NOW);
   let upstreamCalls = 0;
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => {
-    upstreamCalls += 1;
-    return new Response("{}", { headers: { "Content-Type": "application/json" } });
-  };
+  globalThis.fetch = async () => { upstreamCalls += 1; return new Response("unexpected"); };
   try {
     const requests = [
       new Request("https://worker.example/store/api/fs/list", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }),
@@ -51,14 +45,14 @@ test("anonymous listing, detail, preview, and download reach the provider", asyn
       new Request("https://worker.example/store/file?url=http%3A%2F%2Fappstore.cnmlynk.org%2Fpreview.txt"),
       new Request("https://worker.example/store/file?url=http%3A%2F%2Fappstore.cnmlynk.org%2Fdownload.apk")
     ];
-    for (const request of requests) assert.equal((await worker.fetch(request, env)).status, 200);
-    assert.equal(upstreamCalls, 4);
+    for (const request of requests) assert.equal((await worker.fetch(request, env)).status, 401);
+    assert.equal(upstreamCalls, 0);
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test("forged Store session cookies no longer block anonymous access", async () => {
+test("forged Store session cookies are rejected", async () => {
   const env = await createAccountEnv({ nowMs: NOW });
   env.NOW_MS = String(NOW);
   const init = { headers: { Cookie: "store_session=deadbeef", Origin: "https://worker.example" } };
@@ -80,11 +74,11 @@ test("forged Store session cookies no longer block anonymous access", async () =
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => {
     upstreamCalls += 1;
-    return new Response("{}", { headers: { "Content-Type": "application/json" } });
+    return new Response("unexpected");
   };
   try {
-    for (const request of requests) assert.equal((await worker.fetch(request, env)).status, 200);
-    assert.equal(upstreamCalls, 4);
+    for (const request of requests) assert.equal((await worker.fetch(request, env)).status, 401);
+    assert.equal(upstreamCalls, 0);
   } finally {
     globalThis.fetch = originalFetch;
   }

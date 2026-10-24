@@ -6,7 +6,11 @@ import { accountStatus, getAccount, getAccountByKey, hashAccessKey } from "../ma
 import { renewAccount } from "../maoyan/enrollment-store.js";
 
 const STORE_BUSINESS = "store";
-const SESSION_MS = 24 * 60 * 60 * 1000;
+// 会话有效期。Cookie 寿命受浏览器 400 天上限约束，无法真正无限；
+// 每次通过 authenticateStore 验证时会滑动续期（见 RENEW_MS），
+// 只要一年内打开过一次页面就永不过期，对车机等效「不限期」。
+const SESSION_MS = 365 * 24 * 60 * 60 * 1000;
+const RENEW_MS = 180 * 24 * 60 * 60 * 1000; // 剩余有效期低于 180 天时自动续
 
 class StoreAuthError extends Error {
   constructor(code, message) {
@@ -98,6 +102,14 @@ export async function authenticateStore(request, env, nowMs = Date.now()) {
   }
   const account = await getAccount(env.DB, row.user_id);
   if (!account || accountStatus(account, nowMs) === "revoked") return null;
+
+  // 滑动续期：会话快过期时自动延长（不换 cookie），一年内用过一次就永不过期
+  const remaining = Number(row.expires_at) - nowMs;
+  if (remaining < RENEW_MS) {
+    await env.DB.prepare("UPDATE store_sessions SET expires_at=? WHERE token_hash=?")
+      .bind(nowMs + SESSION_MS, tokenHash).run()
+      .catch(() => null); // 续期失败不影响本次访问
+  }
   return accountPrincipal(account, "store_session", nowMs);
 }
 
@@ -137,6 +149,16 @@ async function storeLogin(request, env, url) {
   });
 }
 
+/** 登录后延长已有会话（同 token），用于「记住我」式的长会话 */
+async function extendSession(env, request, url, nowMs) {
+  const raw = cookieValue(request);
+  if (!raw) return null;
+  const tokenHash = await hashAccessKey(raw);
+  await env.DB.prepare("UPDATE store_sessions SET expires_at=? WHERE token_hash=?")
+    .bind(nowMs + SESSION_MS, tokenHash).run();
+  return sessionCookie(raw, url, SESSION_MS / 1000);
+}
+
 async function storePrincipal(request, env, nowMs) {
   const principal = await authenticateStore(request, env, nowMs);
   if (!principal) fail("UNAUTHORIZED", "登录状态无效");
@@ -152,7 +174,13 @@ export async function handleStoreAuth(request, env, url) {
   }
   if (url.pathname === "/store/auth/session" && request.method === "GET") {
     const principal = await storePrincipal(request, env, nowMs);
-    return response({ ok: true, account: publicAccount(await getAccount(env.DB, principal.userId), nowMs) });
+    const refreshed = await extendSession(env, request, url, nowMs).catch(() => null);
+    const headers = refreshed ? { "Set-Cookie": refreshed } : {};
+    return response(
+      { ok: true, account: publicAccount(await getAccount(env.DB, principal.userId), nowMs) },
+      200,
+      headers
+    );
   }
   if (url.pathname === "/store/auth/logout" && request.method === "POST") {
     requireStoreSameOrigin(request, url);

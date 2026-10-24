@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import worker from "../src/index.js";
-import { createAccountEnv } from "./account-fixtures.js";
+import { createAccountEnv, seedAccount } from "./account-fixtures.js";
 
 const REPOS = [
   {
@@ -60,14 +60,29 @@ function installFetch(calls) {
   };
 }
 
+async function storeCookie(env) {
+  const { key } = await seedAccount(env, { businessLine: "store", expiresAt: Date.now() + 86_400_000 });
+  const login = await worker.fetch(new Request("https://worker.example/store/auth/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key })
+  }), env);
+  return login.headers.get("Set-Cookie").split(";")[0];
+}
+
+function releaseRequest(url, cookie) {
+  return new Request(url, { headers: { Cookie: cookie } });
+}
+
 test("扫描账号公开仓库的 releases 并返回下载地址", async () => {
   const env = await createAccountEnv();
+  const cookie = await storeCookie(env);
   const calls = [];
   const originalFetch = globalThis.fetch;
   installFetch(calls);
   try {
     const response = await worker.fetch(
-      new Request("https://worker.example/store/api/github/releases?user=alice"), env);
+      releaseRequest("https://worker.example/store/api/github/releases?user=alice", cookie), env);
     assert.equal(response.status, 200);
     const body = await response.json();
     assert.equal(body.user, "alice");
@@ -89,14 +104,15 @@ function assertsCalls(calls) {
 
 test("同一账号第二次请求命中 KV 缓存", async () => {
   const env = await createAccountEnv();
+  const cookie = await storeCookie(env);
   const calls = [];
   const originalFetch = globalThis.fetch;
   installFetch(calls);
   try {
     const url = "https://worker.example/store/api/github/releases?user=alice";
-    await worker.fetch(new Request(url), env);
+    await worker.fetch(releaseRequest(url, cookie), env);
     const first = calls.length;
-    const cached = await worker.fetch(new Request(url), env);
+    const cached = await worker.fetch(releaseRequest(url, cookie), env);
     assert.equal(cached.status, 200);
     assert.equal(cached.headers.get("X-Cache"), "hit");
     assert.equal(calls.length, first, "缓存命中时不应再请求 GitHub");
@@ -105,15 +121,24 @@ test("同一账号第二次请求命中 KV 缓存", async () => {
   }
 });
 
-test("非法账号名直接拒绝", async () => {
+test("未登录访问 GitHub releases 被拒绝", async () => {
   const env = await createAccountEnv();
   const response = await worker.fetch(
-    new Request("https://worker.example/store/api/github/releases?user=bad%20name!"), env);
+    new Request("https://worker.example/store/api/github/releases?user=alice"), env);
+  assert.equal(response.status, 401);
+});
+
+test("非法账号名直接拒绝", async () => {
+  const env = await createAccountEnv();
+  const cookie = await storeCookie(env);
+  const response = await worker.fetch(
+    releaseRequest("https://worker.example/store/api/github/releases?user=bad%20name!", cookie), env);
   assert.equal(response.status, 400);
 });
 
 test("GitHub 限流时返回错误而不是 500", async () => {
   const env = await createAccountEnv();
+  const cookie = await storeCookie(env);
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response("{}", {
     status: 403,
@@ -121,7 +146,7 @@ test("GitHub 限流时返回错误而不是 500", async () => {
   });
   try {
     const response = await worker.fetch(
-      new Request("https://worker.example/store/api/github/releases?user=alice"), env);
+      releaseRequest("https://worker.example/store/api/github/releases?user=alice", cookie), env);
     assert.equal(response.status, 502);
     const body = await response.json();
     assert.match(body.error, /频率超限/);

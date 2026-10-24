@@ -26,7 +26,7 @@ test("Store subdomain exposes auth at the module root and uses a host-wide cooki
     method: "POST", body: { key }, headers: { Origin: "https://store.ltools.asia" }
   }), env);
   assert.equal(response.status, 200);
-  assert.match(response.headers.get("Set-Cookie"), /^store_session=[0-9a-f]{64}; HttpOnly; SameSite=Lax; Path=\/; Max-Age=86400; Secure$/);
+  assert.match(response.headers.get("Set-Cookie"), /^store_session=[0-9a-f]{64}; HttpOnly; SameSite=Lax; Path=\/; Max-Age=31536000; Secure$/);
 });
 
 test("a Store key creates a path-scoped browser session without storing its secret", async () => {
@@ -40,7 +40,7 @@ test("a Store key creates a path-scoped browser session without storing its secr
 
   assert.equal(response.status, 200);
   const cookie = response.headers.get("Set-Cookie");
-  assert.match(cookie, /^store_session=[0-9a-f]{64}; HttpOnly; SameSite=Lax; Path=\/store\/; Max-Age=86400; Secure$/);
+  assert.match(cookie, /^store_session=[0-9a-f]{64}; HttpOnly; SameSite=Lax; Path=\/store\/; Max-Age=31536000; Secure$/);
   assert.equal(response.headers.get("Cache-Control"), "no-store");
   assert.equal((await response.json()).account.userId, account.id);
   const session = await env.DB.prepare("SELECT token_hash,business_line,user_id,expires_at FROM store_sessions").first();
@@ -91,6 +91,28 @@ test("Store session grants only its owner account inspection and logout", async 
   assert.match(logout.headers.get("Set-Cookie"), /^store_session=; HttpOnly; SameSite=Lax; Path=\/store\/; Max-Age=0; Secure$/);
   assert.equal(await env.DB.prepare("SELECT 1 AS ok FROM store_sessions").first(), null);
   assert.equal((await worker.fetch(storeRequest("/store/auth/session", { cookie }), env)).status, 401);
+});
+
+test("opening the page slides the Store session expiry forward", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  env.NOW_MS = String(NOW);
+  const { key } = await seedAccount(env, { businessLine: "store", expiresAt: NOW + 365 * 86_400_000 });
+  const login = await worker.fetch(storeRequest("/store/auth/session", {
+    method: "POST", body: { key }
+  }), env);
+  const cookie = login.headers.get("Set-Cookie").split(";")[0];
+  const before = await env.DB.prepare("SELECT expires_at FROM store_sessions").first();
+
+  // 模拟 100 天后再次访问：剩余有效期低于 180 天时应自动续期
+  const later = NOW + 100 * 86_400_000;
+  env.NOW_MS = String(later);
+  const inspect = await worker.fetch(storeRequest("/store/auth/session", { cookie }), env);
+  assert.equal(inspect.status, 200);
+  assert.match(inspect.headers.get("Set-Cookie") || "", /Max-Age=31536000/);
+
+  const after = await env.DB.prepare("SELECT expires_at FROM store_sessions").first();
+  assert.ok(after.expires_at > before.expires_at, `应续期: ${before.expires_at} -> ${after.expires_at}`);
+  assert.equal(after.expires_at, later + 365 * 86_400_000);
 });
 
 test("Store logout clears an invalid browser cookie idempotently", async () => {
@@ -149,7 +171,7 @@ test("an expired Store session can inspect and renew only its Store account", as
   assert.equal(Object.hasOwn(body, "resume"), false);
 });
 
-test("suspended Store accounts no longer block anonymous file access", async () => {
+test("Store sessions recheck suspended accounts before download access", async () => {
   const env = await createAccountEnv({ nowMs: NOW });
   env.NOW_MS = String(NOW);
   const { key } = await seedAccount(env, {
@@ -158,18 +180,10 @@ test("suspended Store accounts no longer block anonymous file access", async () 
   const login = await worker.fetch(storeRequest("/store/auth/session", {
     method: "POST", body: { key }
   }), env);
-  const cookie = login.headers.get("Set-Cookie")?.split(";")[0] || "store_session=deadbeef";
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => new Response("payload", {
-    headers: { "Content-Type": "application/octet-stream" }
-  });
-  try {
-    // 应用商店已免登录：会话状态不再参与 /store/file 的放行判断
-    const response = await worker.fetch(storeRequest("/store/file?url=http://appstore.cnmlynk.org/download", { cookie }), env);
-    assert.equal(response.status, 200);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+  const cookie = login.headers.get("Set-Cookie").split(";")[0];
+  const response = await worker.fetch(storeRequest("/store/file?url=http://appstore.cnmlynk.org/download", { cookie }), env);
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).code, "ACCOUNT_SUSPENDED");
 });
 
 test("Store API mutation rejects cross-site requests and does not emit wildcard CORS", async () => {
