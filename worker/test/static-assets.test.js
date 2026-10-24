@@ -68,9 +68,11 @@ test("static asset build includes the isolated Store browser application", async
   const root = await mkdtemp(join(tmpdir(), "store-assets-"));
   const target = join(root, "public");
   await buildAssets({ target });
-  assert.match(await readFile(join(target, "store/index.html"), "utf8"), /auth\.js/);
-  assert.match(await readFile(join(target, "store/auth.js"), "utf8"), /store:authenticated/);
-  assert.ok((await walk(target)).includes("store/auth.css"));
+  const html = await readFile(join(target, "store/index.html"), "utf8");
+  assert.match(html, /\/store\/api/);
+  // 应用商店改为免登录的 APK 下载页，不应再携带账号门禁资源
+  assert.equal(html.includes("auth.js"), false);
+  assert.equal((await walk(target)).includes("store/auth.css"), false);
 });
 
 test("parsed Worker configurations keep custom routes at the top level", async () => {

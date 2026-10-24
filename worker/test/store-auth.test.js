@@ -149,7 +149,7 @@ test("an expired Store session can inspect and renew only its Store account", as
   assert.equal(Object.hasOwn(body, "resume"), false);
 });
 
-test("Store sessions recheck suspended accounts before download access", async () => {
+test("suspended Store accounts no longer block anonymous file access", async () => {
   const env = await createAccountEnv({ nowMs: NOW });
   env.NOW_MS = String(NOW);
   const { key } = await seedAccount(env, {
@@ -158,11 +158,18 @@ test("Store sessions recheck suspended accounts before download access", async (
   const login = await worker.fetch(storeRequest("/store/auth/session", {
     method: "POST", body: { key }
   }), env);
-  const cookie = login.headers.get("Set-Cookie").split(";")[0];
-
-  const response = await worker.fetch(storeRequest("/store/file?url=http://appstore.cnmlynk.org/download", { cookie }), env);
-  assert.equal(response.status, 403);
-  assert.equal((await response.json()).code, "ACCOUNT_SUSPENDED");
+  const cookie = login.headers.get("Set-Cookie")?.split(";")[0] || "store_session=deadbeef";
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("payload", {
+    headers: { "Content-Type": "application/octet-stream" }
+  });
+  try {
+    // 应用商店已免登录：会话状态不再参与 /store/file 的放行判断
+    const response = await worker.fetch(storeRequest("/store/file?url=http://appstore.cnmlynk.org/download", { cookie }), env);
+    assert.equal(response.status, 200);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("Store API mutation rejects cross-site requests and does not emit wildcard CORS", async () => {

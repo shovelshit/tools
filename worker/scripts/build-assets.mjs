@@ -6,6 +6,7 @@ const WORKER_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO_ROOT = resolve(WORKER_ROOT, "..");
 const MOVIE_ROOT = join(REPO_ROOT, "modules", "movie");
 const STORE_ROOT = join(REPO_ROOT, "modules", "store");
+const STORE_PAGES = join(STORE_ROOT, "pages", "store");
 
 const PAGE_FILES = [
   "index.html", "admin.html", "claim.html", "download.html",
@@ -32,10 +33,10 @@ export const STATIC_ASSET_FILES = [
     source: join(WORKER_ROOT, "node_modules", "@thumbmarkjs", "thumbmarkjs", "LICENSE"),
     target: "maoyan/vendor/THUMBMARK-LICENSE"
   },
-  ...["index.html", "auth.js", "auth.css"].map((name) => ({
-    source: join(STORE_ROOT, "pages", "store", name),
-    target: `store/${name}`
-  }))
+  {
+    source: join(STORE_PAGES, "index.html"),
+    target: "store/index.html"
+  }
 ];
 
 function assertControlledTarget(target) {
