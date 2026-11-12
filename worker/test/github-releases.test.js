@@ -212,7 +212,8 @@ test("私有附件通过同源接口传输，重定向时不向下载域名发�
   const calls = [];
   globalThis.fetch = async (input, init = {}) => {
     const url = String(input);
-    calls.push({ url, headers: new Headers(init.headers || {}) });
+    if (init.redirect && !["follow", "manual"].includes(init.redirect)) throw new TypeError("Invalid redirect value, must be follow or manual");
+    calls.push({ url, headers: new Headers(init.headers || {}), redirect: init.redirect });
     if (url.endsWith("/releases?per_page=30")) return new Response(JSON.stringify([{
       assets: [{ id: 42, name: "private-app.apk", content_type: "application/vnd.android.package-archive" }]
     }]));
@@ -230,8 +231,111 @@ test("私有附件通过同源接口传输，重定向时不向下载域名发�
     const response = await worker.fetch(request("/store/api/github/asset?account=alice&repo=alice/private-app&id=42", cookie), env);
     assert.equal(response.status, 200);
     assert.equal(await response.text(), "apk-binary");
+    assert.equal(calls.at(-1).redirect, "manual");
     assert.equal(calls.at(-1).headers.has("Authorization"), false);
+    assert.equal(calls.at(-1).headers.has("Cookie"), false);
     assert.match(response.headers.get("Content-Disposition"), /private-app\.apk/);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("私有 JSON 附件保留文件名和 MIME 类型", async () => {
+  const env = await createAccountEnv();
+  env.GITHUB_TOKEN_ENCRYPTION_KEY = testEncryptionKey();
+  const cookie = await storeCookie(env);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = String(input);
+    if (init.redirect && !["follow", "manual"].includes(init.redirect)) throw new TypeError("Invalid redirect value, must be follow or manual");
+    if (url.endsWith("/releases?per_page=30")) return new Response(JSON.stringify([{
+      assets: [{ id: 42, name: "release notes.json", content_type: "application/json" }]
+    }]));
+    if (url.endsWith("/releases/assets/42")) return new Response(null, {
+      status: 302, headers: { Location: "https://release-assets.githubusercontent.com/a-signed-link" }
+    });
+    if (url.startsWith("https://release-assets.githubusercontent.com/")) return new Response('{"version":9}');
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+  try {
+    await worker.fetch(request("/store/api/github/accounts", cookie, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ login: "alice", token: "ghp-private-token" })
+    }), env);
+    const response = await worker.fetch(request("/store/api/github/asset?account=alice&repo=alice/private-app&id=42", cookie), env);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("Content-Type"), "application/json");
+    assert.equal(response.headers.get("Content-Disposition"), "attachment; filename*=UTF-8''release%20notes.json");
+    assert.equal(await response.text(), '{"version":9}');
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("私有附件拒绝二次重定向和失败的签名下载", async () => {
+  const env = await createAccountEnv();
+  env.GITHUB_TOKEN_ENCRYPTION_KEY = testEncryptionKey();
+  const cookie = await storeCookie(env);
+  const originalFetch = globalThis.fetch;
+  let signedResponse;
+  const calls = [];
+  globalThis.fetch = async (input, init = {}) => {
+    const url = String(input);
+    if (init.redirect && !["follow", "manual"].includes(init.redirect)) throw new TypeError("Invalid redirect value, must be follow or manual");
+    calls.push(url);
+    if (url.endsWith("/releases?per_page=30")) return new Response(JSON.stringify([{
+      assets: [{ id: 42, name: "private-app.apk", content_type: "application/vnd.android.package-archive" }]
+    }]));
+    if (url.endsWith("/releases/assets/42")) return new Response(null, {
+      status: 302, headers: { Location: "https://release-assets.githubusercontent.com/a-signed-link" }
+    });
+    if (url.startsWith("https://release-assets.githubusercontent.com/")) return signedResponse;
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+  try {
+    await worker.fetch(request("/store/api/github/accounts", cookie, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ login: "alice", token: "ghp-private-token" })
+    }), env);
+    const path = "/store/api/github/asset?account=alice&repo=alice/private-app&id=42";
+    signedResponse = new Response(null, { status: 302, headers: { Location: "https://attacker.example/file" } });
+    const redirected = await worker.fetch(request(path, cookie), env);
+    assert.equal(redirected.status, 502);
+    assert.equal((await redirected.json()).error, "下载失败");
+    assert.equal(calls.length, 3);
+    calls.length = 0;
+    signedResponse = new Response("upstream error", { status: 503 });
+    const failed = await worker.fetch(request(path, cookie), env);
+    assert.equal(failed.status, 502);
+    assert.equal((await failed.json()).error, "下载失败");
+    assert.equal(calls.length, 3);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("私有附件拒绝非 HTTPS 或非指定主机下载地址，且不请求该地址", async () => {
+  const env = await createAccountEnv();
+  env.GITHUB_TOKEN_ENCRYPTION_KEY = testEncryptionKey();
+  const cookie = await storeCookie(env);
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  let location;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    calls.push(url);
+    if (url.endsWith("/releases?per_page=30")) return new Response(JSON.stringify([{
+      assets: [{ id: 42, name: "private-app.apk", content_type: "application/vnd.android.package-archive" }]
+    }]));
+    if (url.endsWith("/releases/assets/42")) return new Response(null, { status: 302, headers: { Location: location } });
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+  try {
+    await worker.fetch(request("/store/api/github/accounts", cookie, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ login: "alice", token: "ghp-private-token" })
+    }), env);
+    const path = "/store/api/github/asset?account=alice&repo=alice/private-app&id=42";
+    for (location of ["http://release-assets.githubusercontent.com/file", "https://release-assets.githubusercontent.com.attacker.example/file"]) {
+      const response = await worker.fetch(request(path, cookie), env);
+      assert.equal(response.status, 502);
+      assert.equal((await response.json()).error, "下载地址无效");
+    }
+    assert.equal(calls.length, 4);
   } finally { globalThis.fetch = originalFetch; }
 });
 

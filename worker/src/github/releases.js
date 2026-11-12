@@ -133,8 +133,8 @@ async function assetResponse(login, repo, assetId, token) {
   if (response.status >= 300 && response.status < 400) {
     const target = new URL(response.headers.get("Location") || "");
     if (target.protocol !== "https:" || target.hostname !== "release-assets.githubusercontent.com") fail("下载地址无效", 502);
-    const download = await fetch(target, { redirect: "error" });
-    if (!download.ok) fail("下载失败", 502);
+    const download = await fetch(target, { redirect: "manual" });
+    if (download.status < 200 || download.status >= 300) fail("下载失败", 502);
     return new Response(download.body, {
       headers: { "Content-Type": asset.content_type || "application/octet-stream", "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(asset.name)}`, "Cache-Control": "private, no-store" }
     });
