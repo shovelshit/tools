@@ -19,26 +19,26 @@ function configData(config) {
 // ---------- config(每令牌一行 JSON) ----------
 
 export async function getConfig(db, tokenId) {
-  const row = await db.prepare("SELECT data,version FROM user_config WHERE token_id = ?").bind(tokenId).first();
+  const row = await db.prepare("SELECT data,version FROM user_config WHERE token_id = ? AND business_line='maoyan'").bind(tokenId).first();
   return row ? { ...JSON.parse(row.data), version: Number(row.version) } : null;
 }
 
 export async function getConfigRecord(db, tokenId) {
-  const row = await db.prepare("SELECT data,version FROM user_config WHERE token_id = ?").bind(tokenId).first();
+  const row = await db.prepare("SELECT data,version FROM user_config WHERE token_id = ? AND business_line='maoyan'").bind(tokenId).first();
   return row ? { raw: row.data, config: { ...JSON.parse(row.data), version: Number(row.version) } } : null;
 }
 
 export async function putConfig(db, tokenId, config) {
   await db.prepare(
-    "INSERT INTO user_config (token_id, data, updated_at, version) VALUES (?, ?, ?, 1) " +
-    "ON CONFLICT(token_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at, version=user_config.version+1"
+    "INSERT INTO user_config (token_id, data, updated_at, version, business_line) VALUES (?, ?, ?, 1, 'maoyan') " +
+    "ON CONFLICT(token_id,business_line) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at, version=user_config.version+1"
   ).bind(tokenId, JSON.stringify(configData(config)), nowIso()).run();
 }
 
 export async function putConfigVersioned(db, tokenId, config, expectedVersion) {
   const expected = Number(expectedVersion);
   const result = await db.prepare(
-    "UPDATE user_config SET data=?,updated_at=?,version=version+1 WHERE token_id=? AND version=?"
+    "UPDATE user_config SET data=?,updated_at=?,version=version+1 WHERE token_id=? AND version=? AND business_line='maoyan'"
   ).bind(JSON.stringify(configData(config)), nowIso(), tokenId, expected).run();
   if (Number(result?.meta?.changes || 0) !== 1) {
     const error = new Error("配置已在其他设备更新，请刷新后重试");
@@ -50,12 +50,12 @@ export async function putConfigVersioned(db, tokenId, config, expectedVersion) {
 
 export async function replaceConfigIfUnchanged(db, tokenId, expectedRaw, config) {
   return await db.prepare(
-    "UPDATE user_config SET data=?,updated_at=?,version=version+1 WHERE token_id=? AND data=?"
+    "UPDATE user_config SET data=?,updated_at=?,version=version+1 WHERE token_id=? AND data=? AND business_line='maoyan'"
   ).bind(JSON.stringify(configData(config)), nowIso(), tokenId, expectedRaw).run();
 }
 
 export async function deleteConfig(db, tokenId) {
-  await db.prepare("DELETE FROM user_config WHERE token_id = ?").bind(tokenId).run();
+  await db.prepare("DELETE FROM user_config WHERE token_id = ? AND business_line='maoyan'").bind(tokenId).run();
 }
 
 // ---------- encrypted session version pointer (payload remains in KV) ----------

@@ -93,7 +93,7 @@ export async function listRunSubscribers(DB, { cinemaId, runId, startedAt, after
   const pageSize = clampLimit(limit, 10, 20);
   const { results } = await DB.prepare(
     "SELECT s.user_id,s.cinema_id,s.enabled,s.config_version,s.baseline_version,s.next_due_at,s.last_run_id,c.data,l.data AS lock_data " +
-    "FROM monitor_subscriptions s JOIN users u ON u.id=s.user_id JOIN user_config c ON c.token_id=s.user_id AND c.version=s.config_version " +
+    "FROM monitor_subscriptions s JOIN users u ON u.id=s.user_id JOIN user_config c ON c.token_id=s.user_id AND c.business_line='maoyan' AND c.version=s.config_version " +
     "LEFT JOIN lock_rule l ON l.token_id=s.user_id WHERE s.cinema_id=? AND s.enabled=1 AND s.next_due_at<=? AND s.updated_at<=? " +
     "AND (s.last_run_id IS NULL OR s.last_run_id<>?) AND s.user_id>? AND u.state='active' AND u.business_line='maoyan' " +
     "AND (u.role='admin' OR u.expires_at>?) ORDER BY s.user_id LIMIT ?"
@@ -246,7 +246,7 @@ export async function syncSubscription(DB, userId, config, configVersion, nowMs 
 export async function saveConfigWithSubscription(DB, {
   userId, storedConfig, config, expectedVersion, nowMs = Date.now()
 }) {
-  const configRow = await DB.prepare("SELECT version FROM user_config WHERE token_id=?").bind(userId).first();
+  const configRow = await DB.prepare("SELECT version FROM user_config WHERE token_id=? AND business_line='maoyan'").bind(userId).first();
   const currentVersion = configRow ? Number(configRow.version) : 0;
   const expected = expectedVersion === undefined ? currentVersion : Number(expectedVersion);
   if (!Number.isInteger(expected) || expected < 0) {
@@ -264,13 +264,13 @@ export async function saveConfigWithSubscription(DB, {
   const requestId = `config:${userId}:${expected}:${crypto.randomUUID()}`;
   const statements = [
     DB.prepare(
-      "INSERT INTO mutation_guards(request_id,ok) VALUES (?,CASE WHEN EXISTS (SELECT 1 FROM users WHERE id=?) " +
-      "AND ((?=0 AND NOT EXISTS (SELECT 1 FROM user_config WHERE token_id=?)) OR " +
-      "EXISTS (SELECT 1 FROM user_config WHERE token_id=? AND version=?)) THEN 1 ELSE 0 END)"
+      "INSERT INTO mutation_guards(request_id,ok) VALUES (?,CASE WHEN EXISTS (SELECT 1 FROM users WHERE id=? AND business_line='maoyan') " +
+      "AND ((?=0 AND NOT EXISTS (SELECT 1 FROM user_config WHERE token_id=? AND business_line='maoyan')) OR " +
+      "EXISTS (SELECT 1 FROM user_config WHERE token_id=? AND business_line='maoyan' AND version=?)) THEN 1 ELSE 0 END)"
     ).bind(requestId, userId, expected, userId, userId, expected),
     DB.prepare(
-      "INSERT INTO user_config(token_id,data,updated_at,version) VALUES (?,?,?,?) " +
-      "ON CONFLICT(token_id) DO UPDATE SET data=excluded.data,updated_at=excluded.updated_at,version=excluded.version"
+      "INSERT INTO user_config(token_id,data,updated_at,version,business_line) VALUES (?,?,?,?,'maoyan') " +
+      "ON CONFLICT(token_id,business_line) DO UPDATE SET data=excluded.data,updated_at=excluded.updated_at,version=excluded.version"
     ).bind(userId, JSON.stringify(storedConfig || {}), new Date(nowMs).toISOString(), nextVersion),
     DB.prepare(
       "INSERT INTO monitor_subscriptions(user_id,cinema_id,enabled,config_version,baseline_version,next_due_at,updated_at) " +
@@ -313,7 +313,7 @@ export async function listSubscribers(DB, { cinemaId, afterUserId = "", limit = 
   const { results } = await DB.prepare(
     "SELECT s.user_id,s.cinema_id,s.enabled,s.config_version,s.baseline_version,s.next_due_at,c.data,l.data AS lock_data " +
     "FROM monitor_subscriptions s JOIN users u ON u.id=s.user_id " +
-    "JOIN user_config c ON c.token_id=s.user_id AND c.version=s.config_version " +
+    "JOIN user_config c ON c.token_id=s.user_id AND c.business_line='maoyan' AND c.version=s.config_version " +
     "LEFT JOIN lock_rule l ON l.token_id=s.user_id " +
     "WHERE s.cinema_id=? AND s.enabled=1 AND s.next_due_at<=? AND s.user_id>? AND u.state='active' " +
     "AND u.business_line='maoyan' AND (u.role='admin' OR u.expires_at>?) ORDER BY s.user_id LIMIT ?"

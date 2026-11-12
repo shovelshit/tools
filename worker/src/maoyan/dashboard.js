@@ -252,7 +252,7 @@ async function readUsers(DB, businessLine, nowMs) {
     "SELECT u.id,u.remark,u.state,u.expires_at,s.cinema_id,s.enabled,s.next_due_at," +
     "c.data AS config_data,cs.current_data AS status_data,cs.run_state,cs.active_run_id,cs.attempt_count,cs.completed_at,lr.data AS lock_data " +
     "FROM users u LEFT JOIN monitor_subscriptions s ON s.user_id=u.id " +
-    "LEFT JOIN user_config c ON c.token_id=u.id AND c.version=s.config_version " +
+    "LEFT JOIN user_config c ON c.token_id=u.id AND c.business_line='maoyan' AND c.version=s.config_version " +
     "LEFT JOIN cinema_state cs ON cs.cinema_id=s.cinema_id LEFT JOIN lock_rule lr ON lr.token_id=u.id " +
     `WHERE ${ACTIVE_USER_WHERE} ORDER BY s.enabled DESC,u.created_at DESC,u.id DESC LIMIT 100`,
     businessLine, nowMs

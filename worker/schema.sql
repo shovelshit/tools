@@ -234,11 +234,16 @@ BEGIN
 END;
 
 CREATE TABLE IF NOT EXISTS user_config (
-  token_id TEXT PRIMARY KEY,
+  token_id TEXT NOT NULL,
   data TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0)
+  version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+  business_line TEXT NOT NULL DEFAULT 'maoyan' CHECK (business_line IN ('maoyan', 'store')),
+  PRIMARY KEY (token_id, business_line)
 );
+
+CREATE INDEX IF NOT EXISTS idx_user_config_business_line
+  ON user_config(business_line, token_id);
 
 CREATE TABLE IF NOT EXISTS monitor_status (
   token_id TEXT PRIMARY KEY,

@@ -112,3 +112,19 @@ npx wrangler d1 execute my-maoyan-db --remote --command "PRAGMA index_list(audit
 ```
 
 首次 cron 写入一条观测起点审计事件。后台分别显示三项扫描的“未开始观测”“未执行”“未完成”“已完成”及最近完成时刻；“已完成”仅表示当天扫描和提醒入队经关窗核验，不表示推送渠道送达。推送结果仍查看通知状态。上线前验证现有表列和出箱数量，部署后在维护窗口及关窗后的 cron 分别检查三项状态；生产 D1 迁移和 Worker 发布均需要单独执行。
+
+# Store GitHub Token 与配置迁移
+
+新增 `GITHUB_TOKEN_ENCRYPTION_KEY` Worker Secret，用于 AES-GCM 加密 Store 用户绑定的 GitHub Token。
+仅核对 Secret 名称，勿在日志、终端输出或仓库文件中记录明文值。轮换密钥前须规划已保存 Token 的重新绑定。
+
+既有 D1 需要先执行 `user_config` 业务线迁移，才能部署新 Worker：
+
+1. 备份 D1，清点 `user_config` 行数、版本和当前任务/未处理状态；真正暂停 Worker 写入及定时调度。
+2. 在 `worker/` 下运行 `node scripts/migrate-user-config-business-line.mjs`，确认待迁移行数。
+3. 完成备份且暂停后运行 `node scripts/migrate-user-config-business-line.mjs --apply --paused`。
+   工具会核对 schema，已完成则跳过；写入后独立核对旧行数与新 `maoyan` 行数。
+4. 部署新版 Worker，验证既有 Movie 配置版本、Store 管理员登录和新的 GitHub 绑定/私有下载流程。
+5. 恢复调度并观察完整运行周期，确认稳定前保留备份及回滚材料。
+
+此迁移保留既有配置内容和版本；若客户端报错，先重新执行只读检查确认实际 schema 和行数，再决定是否重试。上述命令仅是操作说明，本地开发未执行远程迁移或部署。

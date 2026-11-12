@@ -24,7 +24,7 @@ export async function readStatusSummary(env, principal) {
   const row = await env.DB.prepare(
     "SELECT s.data AS status_data,s.changes_version,c.data AS config_data,l.data AS lock_data " +
     "FROM users u LEFT JOIN monitor_status s ON s.token_id=u.id " +
-    "LEFT JOIN user_config c ON c.token_id=u.id LEFT JOIN lock_rule l ON l.token_id=u.id WHERE u.id=?"
+    "LEFT JOIN user_config c ON c.token_id=u.id AND c.business_line='maoyan' LEFT JOIN lock_rule l ON l.token_id=u.id WHERE u.id=?"
   ).bind(principal.userId).first();
   let status = {};
   let config = {};

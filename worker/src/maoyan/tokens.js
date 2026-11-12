@@ -87,7 +87,7 @@ function candidateQuery(job) {
     "WHEN u.expires_at>=? AND u.expires_at<? THEN 'one-day' " +
     "WHEN u.expires_at>=? AND u.expires_at<? THEN 'three-day' END";
   return "SELECT u.id,u.expires_at,c.version AS config_version FROM users u " +
-    "LEFT JOIN user_config c ON c.token_id=u.id WHERE " + active +
+    "LEFT JOIN user_config c ON c.token_id=u.id AND c.business_line='maoyan' WHERE " + active +
     " AND ((u.expires_at<=? AND u.expires_at+?>?) " +
     "OR (u.expires_at>=? AND u.expires_at<?) OR (u.expires_at>=? AND u.expires_at<?)) " +
     "AND NOT EXISTS (SELECT 1 FROM notification_outbox o WHERE o.event_key=" +

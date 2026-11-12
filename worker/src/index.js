@@ -140,8 +140,11 @@ export default {
       if (storeAuthResponse) return storeAuthResponse;
       if (storePath.startsWith("/store/api/") || storePath === "/store/file") {
         // 应用商店需要登录：会话 90 天有效，平板/车机长期免登录
-        await requireActiveStoreAccount(request, env, serviceNow(env));
-        const githubResponse = await handleGithubReleases(request, storeUrl, env);
+        const storePrincipal = await requireActiveStoreAccount(request, env, serviceNow(env));
+        if (storePath.startsWith("/store/api/github/") && request.method !== "GET") {
+          requireStoreSameOrigin(request, storeUrl);
+        }
+        const githubResponse = await handleGithubReleases(request, storeUrl, env, storePrincipal);
         if (githubResponse) return githubResponse;
         if (storePath.startsWith("/store/api/") && request.method === "POST") {
           requireStoreSameOrigin(request, storeUrl);

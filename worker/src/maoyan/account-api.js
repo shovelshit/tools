@@ -86,7 +86,7 @@ export async function listAdminAccounts(env, url, nowMs) {
     "SELECT u.id,u.role,u.remark,u.state,u.created_at,u.expires_at,u.archived_at,u.source,u.business_line,u.version," +
     "k.key_prefix,k.key_suffix,c.data AS config_data,s.data AS status_data " +
     "FROM users u LEFT JOIN access_keys k ON k.user_id=u.id " +
-    "LEFT JOIN user_config c ON c.token_id=u.id LEFT JOIN monitor_status s ON s.token_id=u.id " +
+    "LEFT JOIN user_config c ON c.token_id=u.id AND c.business_line=u.business_line LEFT JOIN monitor_status s ON s.token_id=u.id " +
     "WHERE u.role='user' AND u.business_line=? ORDER BY u.created_at DESC,u.id DESC"
   ).bind(businessLine).all();
   let accounts = results.map((row) => adminAccount(row, nowMs));
@@ -179,7 +179,7 @@ export async function handleAdminAccountApi(request, env, url) {
     const row = await env.DB.prepare(
       "SELECT u.*,k.key_prefix,k.key_suffix,c.data AS config_data,s.data AS status_data " +
       "FROM users u LEFT JOIN access_keys k ON k.user_id=u.id " +
-      "LEFT JOIN user_config c ON c.token_id=u.id LEFT JOIN monitor_status s ON s.token_id=u.id WHERE u.id=?"
+      "LEFT JOIN user_config c ON c.token_id=u.id AND c.business_line=u.business_line LEFT JOIN monitor_status s ON s.token_id=u.id WHERE u.id=?"
     ).bind(account.id).first();
     return json({
       ok: true,
