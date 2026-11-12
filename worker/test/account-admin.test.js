@@ -63,6 +63,22 @@ test("admin account list is paged, filterable and credential-safe", async () => 
   assert.equal(Object.hasOwn(payload.accounts[0], "token"), false);
 });
 
+test("admin account monitor state reflects eligibility without changing saved intent", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  env.NOW_MS = String(NOW);
+  const expired = await seedAccount(env, { expiresAt: NOW, config: { enabled: true, cinemaId: "25428" } });
+  const suspended = await seedAccount(env, { state: "suspended", expiresAt: NOW + 60_000, config: { enabled: true } });
+  const active = await seedAccount(env, { expiresAt: NOW + 60_000, config: { enabled: true } });
+
+  const response = await worker.fetch(request("/api/admin/accounts"), env);
+  assert.equal(response.status, 200);
+  const accounts = (await response.json()).accounts;
+  assert.equal(accounts.find((row) => row.userId === expired.account.id).monitorState, "stopped");
+  assert.equal(accounts.find((row) => row.userId === suspended.account.id).monitorState, "stopped");
+  assert.equal(accounts.find((row) => row.userId === active.account.id).monitorState, "monitoring");
+  assert.equal((await db.getConfig(env.DB, expired.account.id)).enabled, true);
+});
+
 test("managed account key is returned once and creation obeys request idempotency", async () => {
   const env = await createAccountEnv({ nowMs: NOW, maxUsers: 1 });
   env.NOW_MS = String(NOW);

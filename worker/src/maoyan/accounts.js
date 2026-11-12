@@ -24,6 +24,10 @@ export function accountStatus(account, nowMs = Date.now()) {
   return account?.state === "suspended" ? "suspended" : "active";
 }
 
+export function effectiveMonitorEnabled(config, status) {
+  return config?.enabled === true && status === "active";
+}
+
 export async function hashAccessKey(raw) {
   const bytes = new TextEncoder().encode(String(raw || ""));
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));

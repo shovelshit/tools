@@ -1,5 +1,5 @@
 import { json } from "../common/http.js";
-import { accountStatus, getAccount } from "./accounts.js";
+import { accountStatus, effectiveMonitorEnabled, getAccount } from "./accounts.js";
 import { exchangeSession, publicAccount, serviceNow } from "./auth.js";
 import { createManagedAccount, readCapacity, readServiceSettings, renewAccount, updateManagedAccount, updateServiceSettings } from "./enrollment-store.js";
 import { resumeAfterRenewal } from "./account-lifecycle.js";
@@ -59,11 +59,12 @@ function adminAccount(row, nowMs) {
     businessLine: row.business_line || "maoyan",
     version: Number(row.version)
   };
+  const statusName = accountStatus(account, nowMs);
   return {
     userId: account.id,
     remark: account.remark,
     state: account.state,
-    accountStatus: accountStatus(account, nowMs),
+    accountStatus: statusName,
     createdAt: account.createdAt,
     expiresAt: account.expiresAt,
     archivedAt: account.archivedAt,
@@ -71,7 +72,7 @@ function adminAccount(row, nowMs) {
     businessLine: account.businessLine,
     accountVersion: account.version,
     keyHint: `${row.key_prefix || ""}...${row.key_suffix || ""}`,
-    monitorState: account.businessLine === "maoyan" ? (config.enabled === true ? "monitoring" : "stopped") : null,
+    monitorState: account.businessLine === "maoyan" ? (effectiveMonitorEnabled(config, statusName) ? "monitoring" : "stopped") : null,
     lastActivityAt: account.businessLine === "maoyan" ? (status.lastCheck || null) : null
   };
 }

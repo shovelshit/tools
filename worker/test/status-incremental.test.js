@@ -26,6 +26,26 @@ test("summary status does not select change-log payloads", async () => {
   assert.equal(env.DB.queries.some((query) => /FROM\s+change_log/i.test(query.sql)), false);
 });
 
+test("expired account status reports stopped on summary and legacy views while retaining config", async () => {
+  const env = await createAccountEnv({ nowMs: NOW });
+  env.NOW_MS = String(NOW);
+  const { account, key } = await seedAccount(env, {
+    expiresAt: NOW, config: { enabled: true, cinemaId: "25428", selectedMovieIds: ["7"] }
+  });
+
+  for (const path of ["/api/status?view=summary", "/api/status"]) {
+    const response = await worker.fetch(request(path, key), env);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.status.enabled, false, path);
+    if (path.includes("summary")) {
+      assert.equal(body.account.accountStatus, "expired");
+      assert.equal(body.pollAfterSeconds, null);
+    }
+  }
+  assert.equal((await db.getConfig(env.DB, account.id)).enabled, true);
+});
+
 test("incremental changes paginate without overlap and stay account-scoped", async () => {
   const env = await createAccountEnv({ nowMs: NOW });
   env.NOW_MS = String(NOW);

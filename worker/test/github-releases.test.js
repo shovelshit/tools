@@ -85,11 +85,57 @@ test("绑定 GitHub 账号后可以加载账号仓库列表", async () => {
     const body = await response.json();
     assert.equal(body.repos.length, 2);
     assert.equal(body.repos[1].private, true);
+    assert.equal(response.headers.get("X-Cache"), "private");
+    assert.match(calls[0].url, /\/user\/repos\?per_page=100&page=1&affiliation=owner,collaborator,organization_member&sort=pushed/);
     assert.equal(calls.some((call) => call.headers.get("Authorization") === "Bearer ghp-private-token"), true);
     assert.doesNotMatch(JSON.stringify(body), /ghp-private-token/);
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("GitHub 私有仓库缺失时区分上游权限与账号归属过滤", async () => {
+  const env = await createAccountEnv();
+  env.GITHUB_TOKEN_ENCRYPTION_KEY = testEncryptionKey();
+  const cookie = await storeCookie(env);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_input, init) => {
+    assert.equal(new Headers(init.headers).get("Authorization"), "Bearer ghp_public-only-token");
+    return new Response(JSON.stringify([
+      REPOS[0], { ...REPOS[1], owner: { login: "other" }, full_name: "other/private-app" }
+    ]), { headers: { "x-oauth-scopes": "read:user, public_repo" } });
+  };
+  try {
+    await worker.fetch(request("/store/api/github/accounts", cookie, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ login: "alice", token: "ghp_public-only-token" })
+    }), env);
+    const response = await worker.fetch(request("/store/api/github/repos?account=alice", cookie), env);
+    const body = await response.json();
+    assert.equal(response.headers.get("X-Cache"), "private");
+    assert.deepEqual(body.repos.map((repo) => repo.fullName), ["alice/app-one"]);
+    assert.deepEqual(body.diagnostics, {
+      upstreamPrivateCount: 1, accountPrivateCount: 0, classicRepoScopeMissing: true
+    });
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("fine-grained PAT 没有 OAuth scope 头时不误报缺少 classic repo 权限", async () => {
+  const env = await createAccountEnv();
+  env.GITHUB_TOKEN_ENCRYPTION_KEY = testEncryptionKey();
+  const cookie = await storeCookie(env);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify([REPOS[0]]), {
+    headers: { "x-oauth-scopes": "" }
+  });
+  try {
+    await worker.fetch(request("/store/api/github/accounts", cookie, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ login: "alice", token: "github_pat_public-only-token" })
+    }), env);
+    const response = await worker.fetch(request("/store/api/github/repos?account=alice", cookie), env);
+    assert.equal((await response.json()).diagnostics.classicRepoScopeMissing, null);
+  } finally { globalThis.fetch = originalFetch; }
 });
 
 test("只在用户请求具体仓库时加载 Release", async () => {

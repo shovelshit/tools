@@ -3,6 +3,7 @@ import { json } from "../common/http.js";
 import { describeCrons, isMinuteStepCrons, minBatchMinutes, resolveCronExprs } from "./cron.js";
 import { readBusinessPolicy } from "./business-policy-store.js";
 import { formatMonitorWindowLabel } from "./business-time.js";
+import { effectiveMonitorEnabled } from "./accounts.js";
 
 function lockSummary(data) {
   if (!data) return null;
@@ -31,6 +32,7 @@ export async function readStatusSummary(env, principal) {
   try { status = JSON.parse(row?.status_data || "{}"); } catch {}
   try { config = JSON.parse(row?.config_data || "{}"); } catch {}
   const [cronExprs, policy] = await Promise.all([resolveCronExprs(env), readBusinessPolicy(env.DB)]);
+  const enabled = effectiveMonitorEnabled(config, principal.accountStatus);
   return {
     account: {
       userId: principal.userId,
@@ -45,12 +47,12 @@ export async function readStatusSummary(env, principal) {
       lastError: status.lastError || null,
       cinemaName: status.cinemaName,
       newTotal: status.newTotal,
-      enabled: config.enabled === true
+      enabled
     },
     changesVersion: Number(row?.changes_version || 0),
     lockSummary: lockSummary(row?.lock_data),
     lockServiceEnabled: String(env.LOCK_SERVICE_ENABLED) === "true",
-    pollAfterSeconds: config.enabled === true ? 180 : null,
+    pollAfterSeconds: enabled ? 180 : null,
     cronMinutes: minBatchMinutes(cronExprs),
     cronExprs,
     cronText: describeCrons(cronExprs) + " · " + formatMonitorWindowLabel(policy),

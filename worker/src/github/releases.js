@@ -81,11 +81,19 @@ async function account(env, userId, login) {
 
 async function listRepos(login, token, page) {
   const path = token
-    ? `/user/repos?per_page=100&page=${page}&affiliation=owner,collaborator,organization_member&sort=pushed`
+    ? `/user/repos?per_page=100&page=${page}&affiliation=owner,collaborator,organization_member&sort=pushed&visibility=all`
     : `/users/${encodeURIComponent(login)}/repos?per_page=100&page=${page}&type=owner&sort=pushed`;
-  const batch = await (await github(path, token)).json();
+  const response = await github(path, token);
+  const batch = await response.json();
   const repos = batch.filter((item) => item.owner?.login?.toLowerCase() === login.toLowerCase());
-  return { hasMore: batch.length === 100, repos: repos.filter((item) => !item.archived).map((item) => ({
+  const visible = repos.filter((item) => !item.archived);
+  const scopes = response.headers.get("x-oauth-scopes");
+  return { hasMore: batch.length === 100, ...(token ? { diagnostics: {
+    upstreamPrivateCount: batch.filter((item) => item.private).length,
+    accountPrivateCount: visible.filter((item) => item.private).length,
+    classicRepoScopeMissing: !token.startsWith("ghp_") || scopes === null
+      ? null : !scopes.split(",").some((scope) => scope.trim() === "repo")
+  } } : {}), repos: visible.map((item) => ({
     name: item.name, fullName: item.full_name, description: item.description || "",
     htmlUrl: item.html_url, pushedAt: item.pushed_at, private: !!item.private
   })) };

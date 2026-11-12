@@ -22,6 +22,7 @@ import { readBusinessPolicy } from "./maoyan/business-policy-store.js";
 import { businessTime, formatMonitorWindowLabel } from "./maoyan/business-time.js";
 import { recoverPendingNotifications } from "./maoyan/notification-outbox.js";
 import { handleStatusApi } from "./maoyan/status-api.js";
+import { effectiveMonitorEnabled } from "./maoyan/accounts.js";
 import { checkManualOperationThroughCoordinator } from "./maoyan/lock-runner.js";
 import { fetchManualCinemaThroughCoordinator } from "./maoyan/monitor-coordinator.js";
 import { handleEnrollmentApi } from "./maoyan/enrollment-api.js";
@@ -365,7 +366,7 @@ export default {
           lastError: st.lastError || null,
           cinemaName: st.cinemaName,
           newTotal: st.newTotal,
-          enabled: cfg.enabled === true
+          enabled: effectiveMonitorEnabled(cfg, principal.accountStatus)
         };
         const changes = await db.listChanges(env.DB, token);
         return json({
