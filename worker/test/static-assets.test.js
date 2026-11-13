@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse as parseToml } from "smol-toml";
@@ -31,7 +31,10 @@ test("static asset build emits only the explicit application whitelist", async (
   const root = await mkdtemp(join(tmpdir(), "maoyan-assets-"));
   const target = join(root, "public");
   await buildAssets({ target });
-  assert.deepEqual(await walk(target), STATIC_ASSET_FILES.map((item) => item.target).sort());
+  const files = await walk(target);
+  const required = STATIC_ASSET_FILES.map((item) => item.target);
+  assert.ok(required.every((file) => files.includes(file)));
+  assert.ok(files.every((file) => [...required, "store/android/update.json"].includes(file)));
   const allText = (await Promise.all((await walk(target)).map((file) => readFile(join(target, file), "utf8")))).join("\n");
   assert.equal(allText.includes("maoyan-lock-session"), false);
   assert.equal((await walk(target)).some((file) => /\.test\.|node_modules|wrangler|\.dev\.vars/.test(file)), false);
@@ -73,6 +76,20 @@ test("static asset build includes the isolated Store browser application", async
   // 应用商店改为免登录的 APK 下载页，不应再携带账号门禁资源
   assert.equal(html.includes("auth.js"), false);
   assert.equal((await walk(target)).includes("store/auth.css"), false);
+});
+
+test("optional Store update index is copied only when present in the explicit source", async () => {
+  const root = await mkdtemp(join(tmpdir(), "store-update-assets-"));
+  const target = join(root, "public");
+  const storePages = join(root, "store", "pages", "store");
+  await mkdir(join(storePages, "android"), { recursive: true });
+  await buildAssets({ target, storePages });
+  assert.equal((await walk(target)).includes("store/android/update.json"), false);
+  await writeFile(join(storePages, "android", "update.json"), '{"schema":1}\n');
+  await writeFile(join(storePages, "android", "unlisted.txt"), 'not public');
+  await buildAssets({ target, storePages });
+  assert.equal(await readFile(join(target, "store/android/update.json"), "utf8"), '{"schema":1}\n');
+  assert.equal((await walk(target)).includes("store/android/unlisted.txt"), false);
 });
 
 test("parsed Worker configurations keep custom routes at the top level", async () => {

@@ -73,3 +73,12 @@ test("Store assets use an isolated CSP and the bare path redirects", async () =>
   );
   assert.match(maoyan.headers.get("Content-Security-Policy"), /challenges\.cloudflare\.com/);
 });
+
+test("Store update index resolves through the canonical subdomain without authentication", async () => {
+  const response = await serveStoreAsset(
+    new Request("https://store.ltools.asia/android/update.json"),
+    { ASSETS: assets("application/json") }
+  );
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "/store/android/update.json");
+});

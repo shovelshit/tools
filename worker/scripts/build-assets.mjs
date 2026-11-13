@@ -47,8 +47,19 @@ function assertControlledTarget(target) {
   return normalized;
 }
 
-export async function buildAssets({ target = join(WORKER_ROOT, "public") } = {}) {
+export async function buildAssets({ target = join(WORKER_ROOT, "public"), storePages = STORE_PAGES } = {}) {
   const output = assertControlledTarget(target);
+  const updateIndex = {
+    source: join(storePages, "android", "update.json"),
+    target: "store/android/update.json"
+  };
+  const files = [...STATIC_ASSET_FILES];
+  try {
+    await access(updateIndex.source);
+    files.push(updateIndex);
+  } catch {
+    // The update index is published only after a verified release exists.
+  }
   for (const item of STATIC_ASSET_FILES) {
     try {
       await access(item.source);
@@ -59,7 +70,7 @@ export async function buildAssets({ target = join(WORKER_ROOT, "public") } = {})
   await mkdir(dirname(output), { recursive: true });
   const staging = await mkdtemp(join(dirname(output), ".public-build-"));
   try {
-    for (const item of STATIC_ASSET_FILES) {
+    for (const item of files) {
       const destination = join(staging, item.target);
       await mkdir(dirname(destination), { recursive: true });
       await cp(item.source, destination);
@@ -70,7 +81,7 @@ export async function buildAssets({ target = join(WORKER_ROOT, "public") } = {})
     await rm(staging, { recursive: true, force: true });
     throw error;
   }
-  return { target: output, files: STATIC_ASSET_FILES.length };
+  return { target: output, files: files.length };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
